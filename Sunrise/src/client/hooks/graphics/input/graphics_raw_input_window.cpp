@@ -1,3 +1,4 @@
+#include "client/console/console_overlay.h"
 /**
  * Subclass of the game's hidden raw-mouse sink window. The game registers raw mouse to its own
  * `Tiger Input Window`, not to the swap-chain output window, so every mouse move and button
@@ -63,7 +64,7 @@ LRESULT CALLBACK raw_window_procedure(HWND window,
 
     // A captured message still goes to the default procedure, or the system keeps the raw-input
     // buffer alive. That is also the fallback when there is no procedure to forward to.
-    const bool captured = message == WM_INPUT && core::ui::runtime::snapshot().visible;
+    const bool captured = message == WM_INPUT && sunrise::client::console::captures_input();
     const bool forward = !captured && original != nullptr;
     const LRESULT result = forward ? CallWindowProcW(original, window, message, word, value)
                                    : DefWindowProcW(window, message, word, value);

@@ -17,6 +17,7 @@
 #include "../../../ui/activity/authored_spatial_overlay.h"
 #include "../../teleport/runtime.h"
 #include "../input/input.h"
+#include "client/console/console_overlay.h"
 #include "graphics_renderer_report.h"
 #include "state.h"
 
@@ -137,7 +138,7 @@ void render_frame_locked() noexcept {
         }
     }
     const core::ui::runtime::VisibilitySnapshot visibility = core::ui::runtime::snapshot();
-    transition_input_visibility_locked(visibility.visible);
+    transition_input_visibility_locked(console::captures_input());
     ImGui_ImplDX11_NewFrame();
     ImGui_ImplWin32_NewFrame();
     ImGui::NewFrame();
@@ -148,6 +149,7 @@ void render_frame_locked() noexcept {
     const bool surfaceDrawn = core::ui::layout::render(visibility.visible);
     const bool busyDrawn = core::ui::busy::draw();
     const bool noticeDrawn = core::ui::notice::draw();
+    const bool consoleDrawn = console::draw();
     sunrise::client::ui::activity::authored_placement_marker::RenderSet markerSource{};
     sunrise::client::hooks::teleport::CameraPose markerCamera{};
     const bool markerSourceReady =
@@ -165,7 +167,7 @@ void render_frame_locked() noexcept {
                              && sunrise::client::ui::activity::authored_placement_marker::draw(
                                  markerSource, markerCamera, !spatialMarkerDrawn);
     if (!hudDrawn && !surfaceDrawn && !busyDrawn && !noticeDrawn && !spatialMarkerDrawn
-        && !markerDrawn) {
+        && !markerDrawn && !consoleDrawn) {
         // A frame nobody claimed still drains backend state, and sends no draw data.
         ImGui::EndFrame();
         return;
@@ -182,9 +184,8 @@ bool handle_window_message(HWND window, UINT message, WPARAM word, LPARAM value)
         return false;
     }
 
-    const core::ui::runtime::VisibilitySnapshot visibility = core::ui::runtime::snapshot();
-    transition_input_visibility_locked(visibility.visible);
-    if (!visibility.visible) {
+    transition_input_visibility_locked(console::captures_input());
+    if (!console::captures_input()) {
         // Hidden input stays with the game and never enters Dear ImGui's event queue.
         ReleaseSRWLockExclusive(&g_rendererLock);
         return false;

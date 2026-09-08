@@ -1,14 +1,15 @@
 #pragma once
 
 namespace sunrise::client::console {
-
-/** Registers Client > Console with the existing upstream UI; call after State and Core UI start. */
+/** Initializes the independent developer console and its command registry. */
 [[nodiscard]] bool initialize() noexcept;
-
-/** Opens the registered console page, or closes it if already visible. */
+/** Home toggles this window independently of the main Sunrise surface. */
 void toggle() noexcept;
-
-/** Unregisters the page. Call after rendering is quiesced and before State shuts down. */
+[[nodiscard]] bool open() noexcept;
+/** Shared input policy for the existing renderer, cursor, raw input and movement hooks. */
+[[nodiscard]] bool captures_input() noexcept;
+/** Draws the dirty/quest console window inside the existing ImGui frame. */
+[[nodiscard]] bool draw() noexcept;
+/** Call after rendering/input hooks quiesce. */
 void shutdown() noexcept;
-
 } // namespace sunrise::client::console

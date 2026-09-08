@@ -1,3 +1,4 @@
+#include "client/console/console_overlay.h"
 /**
  * Sword skate. A sword's air attack throws the player forward, and a glide started during the
  * throw keeps that speed. The client refuses the glide while the throw is active.
@@ -5,8 +6,6 @@
  * Clearing it on the tick jump is pressed lets the client start its own glide.
  * Nothing here moves the player.
  */
-
-#include "sword_skate.h"
 
 #include <Windows.h>
 
@@ -21,6 +20,7 @@
 #include "../../input/window_focus.h"
 #include "../../movement/movement_settings_store.h"
 #include "../teleport/runtime.h"
+#include "sword_skate.h"
 
 namespace sunrise::client::hooks::sword_skate {
 namespace {
@@ -119,7 +119,7 @@ std::uint64_t g_bindingReadTick{};
 void apply(void* component) noexcept {
     const client::movement::Settings settings = client::movement::get();
     // The interface or another application owns the keyboard. Their presses must not reach this.
-    const bool usable = settings.swordSkateEnabled && !core::ui::runtime::snapshot().visible
+    const bool usable = settings.swordSkateEnabled && !sunrise::client::console::captures_input()
                         && input::game_focused();
     if (!usable) {
         // Cleared, or the first press after the feature comes back reads as a hold and is skipped.

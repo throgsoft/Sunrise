@@ -5,10 +5,10 @@
 #include <atomic>
 #include <cstring>
 #include <imgui.h>
+#include <imgui_internal.h>
 #include <string_view>
 
-#include "../../core/ui/layout/layout.h"
-#include "../../core/ui/modules/registry/ui_module_registry.h"
+#include "../../core/ui/fonts/runtime/ui_runtime_font_lifecycle.h"
 #include "../../core/ui/runtime/ui_visibility_runtime.h"
 #include "client_console_commands.h"
 #include "console_line.h"
@@ -17,9 +17,22 @@
 namespace sunrise::client::console {
 namespace {
 
-constexpr std::size_t kScrollbackCapacity = 256;
+constexpr std::size_t kScrollbackCapacity = 512;
 constexpr std::size_t kOutputLineCapacity = 512;
 constexpr std::size_t kHistoryCapacity = 64;
+constexpr float kHeightShare = 0.45F;
+constexpr float kWidthShare = 0.66F;
+/** The console prints denser text than the main UI. */
+constexpr float kFontScale = 0.80F;
+/** The echoed line and the completion hint both print at this weight. */
+constexpr ImVec4 kEchoColor{0.60F, 0.63F, 0.70F, 1.0F};
+constexpr ImVec4 kHintColor{0.55F, 0.58F, 0.66F, 1.0F};
+/** The single fill the whole pane paints with. Readable over a bright skybox, still see-through. */
+constexpr ImVec4 kPaneColor{0.05F, 0.06F, 0.08F, 0.82F};
+constexpr ImVec4 kTransparent{0.0F, 0.0F, 0.0F, 0.0F};
+/** The drag handle. Opaque, so it reads as a handle and not as more of the body. */
+constexpr ImVec4 kTitleColor{0.13F, 0.15F, 0.19F, 1.0F};
+
 using Input = std::array<char, kLineCapacity>;
 std::array<std::array<char, kOutputLineCapacity>, kScrollbackCapacity> g_lines{};
 // Every retained line, newline and terminator fits; never undersize the flattened buffer.
@@ -33,7 +46,8 @@ Input g_input{};
 Input g_draft{};
 std::atomic_bool g_focusPending{true};
 bool g_initialized{};
-core::ui::modules::registry::PageRegistration g_page;
+std::atomic_bool g_open{};
+bool g_scrollPending{};
 
 class Scrollback final : public Output {
 public:
@@ -48,6 +62,7 @@ public:
             std::memcpy(target.data(), text.data(), (std::min)(text.size(), target.size() - 1));
         }
         g_dirty = true;
+        g_scrollPending = true;
     }
 };
 
@@ -167,35 +182,33 @@ int input_event(ImGuiInputTextCallbackData* data) {
     return 0;
 }
 
-void draw() noexcept {
-    ImGui::TextUnformatted("Developer console");
-    ImGui::TextDisabled("Tab completes; arrows recall. Select output and Ctrl+C to copy.");
-    rebuild_scrollback();
-    const float outputHeight =
-        (std::max)(ImGui::GetTextLineHeight() * 3.0F,
-                   ImGui::GetContentRegionAvail().y - ImGui::GetFrameHeightWithSpacing() * 2.0F);
-    ImGui::InputTextMultiline("##console-output",
-                              g_flat.data(),
-                              g_flat.size(),
-                              {-1.0F, outputHeight},
-                              ImGuiInputTextFlags_ReadOnly | ImGuiInputTextFlags_NoUndoRedo);
-    if (g_focusPending.exchange(false)) {
-        ImGui::SetKeyboardFocusHere();
+void draw_completion_hint(const ImVec2& inputPosition) noexcept {
+    const std::string_view line(g_input.data());
+    if (line.empty()) {
+        return;
     }
-    ImGui::SetNextItemWidth(-1.0F);
-    constexpr auto flags = ImGuiInputTextFlags_EnterReturnsTrue
-                           | ImGuiInputTextFlags_CallbackCompletion
-                           | ImGuiInputTextFlags_CallbackHistory;
-    if (ImGui::InputText("##console-input", g_input.data(), g_input.size(), flags, &input_event)) {
-        if (std::string_view(g_input.data()).find_first_not_of(" \t") != std::string_view::npos) {
-            Scrollback output;
-            output.format("> %s", g_input.data());
-            remember();
-            (void)invoke(g_input.data(), output);
-        }
-        g_input = {};
-        g_focusPending = true;
+    std::array<std::string_view, kCandidateCapacity> candidates{};
+    std::size_t count = 0;
+    std::string_view prefix{};
+    if (!complete(line, candidates, count, prefix)) {
+        return;
     }
+    const std::string_view shared =
+        shared_prefix(std::span<const std::string_view>(candidates.data(), count));
+    if (shared.size() <= prefix.size()) {
+        return;
+    }
+    const std::string_view remainder = shared.substr(prefix.size());
+    ImDrawList* const drawList = ImGui::GetWindowDrawList();
+    if (drawList == nullptr) {
+        return;
+    }
+    const ImGuiStyle& style = ImGui::GetStyle();
+    const float typedWidth = ImGui::CalcTextSize(line.data(), line.data() + line.size()).x;
+    const ImVec2 at{inputPosition.x + style.FramePadding.x + typedWidth,
+                    inputPosition.y + style.FramePadding.y};
+    drawList->AddText(
+        at, ImGui::GetColorU32(kHintColor), remainder.data(), remainder.data() + remainder.size());
 }
 
 } // namespace
@@ -209,8 +222,7 @@ bool initialize() noexcept {
         || !add({"copy",
                  "Copies retained output through the upstream ImGui clipboard backend.",
                  &copy_command})
-        || !install_commands()
-        || !g_page.acquire(core::ui::modules::Owner::client, "client.console", "Console", &draw)) {
+        || !install_commands()) {
         clear();
         return false;
     }
@@ -219,21 +231,127 @@ bool initialize() noexcept {
 }
 
 void toggle() noexcept {
-    const auto visibility = core::ui::runtime::snapshot();
-    if (!visibility.initialized || !visibility.enabled) return;
-    const auto layout = core::ui::layout::snapshot();
-    const bool selected =
-        std::string_view(layout.selectedStableId.data(), layout.selectedStableIdLength)
-        == "client.console";
-    if (!core::ui::layout::select_registered_module("client.console")) return;
-    if (!visibility.visible || selected) {
-        (void)core::ui::runtime::toggle_for_key(visibility.toggleVirtualKey);
-    }
+    g_open.store(!g_open.load());
     g_focusPending.store(true);
 }
 
+bool open() noexcept {
+    return g_open.load();
+}
+
+bool captures_input() noexcept {
+    return open() || core::ui::runtime::snapshot().visible;
+}
+
+bool draw() noexcept {
+    if (!g_open.load()) {
+        return false;
+    }
+    rebuild_scrollback();
+    const ImGuiViewport* const viewport = ImGui::GetMainViewport();
+    if (viewport == nullptr) {
+        return false;
+    }
+    // Centred, and placed once. After that the window keeps wherever it was dragged to.
+    const ImVec2 size{viewport->WorkSize.x * kWidthShare, viewport->WorkSize.y * kHeightShare};
+    ImGui::SetNextWindowPos({viewport->WorkPos.x + ((viewport->WorkSize.x - size.x) * 0.5F),
+                             viewport->WorkPos.y + ((viewport->WorkSize.y - size.y) * 0.5F)},
+                            ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize(size, ImGuiCond_FirstUseEver);
+    if (g_focusPending) {
+        ImGui::SetNextWindowFocus();
+    }
+    // Square: a terminal has corners.
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.0F);
+    ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, 0.0F);
+    ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 0.0F);
+    ImGui::PushStyleVar(ImGuiStyleVar_PopupRounding, 0.0F);
+    ImGui::PushStyleVar(ImGuiStyleVar_ScrollbarRounding, 0.0F);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0F);
+    ImGui::PushStyleVar(ImGuiStyleVar_ChildBorderSize, 0.0F);
+    ImGui::PushStyleVar(ImGuiStyleVar_FrameBorderSize, 0.0F);
+    // One pane: the scrollback, the prompt and the title all sit on the window's own fill, so
+    // nothing inside paints a second surface over it.
+    ImGui::PushStyleColor(ImGuiCol_WindowBg, kPaneColor);
+    ImGui::PushStyleColor(ImGuiCol_ChildBg, kTransparent);
+    ImGui::PushStyleColor(ImGuiCol_FrameBg, kTransparent);
+    ImGui::PushStyleColor(ImGuiCol_FrameBgHovered, kTransparent);
+    ImGui::PushStyleColor(ImGuiCol_FrameBgActive, kTransparent);
+    // The title strip is what the window is dragged by, so it is opaque: a translucent one reads
+    // as more body rather than as a handle.
+    ImGui::PushStyleColor(ImGuiCol_TitleBg, kTitleColor);
+    ImGui::PushStyleColor(ImGuiCol_TitleBgActive, kTitleColor);
+    ImGui::PushStyleColor(ImGuiCol_TitleBgCollapsed, kTitleColor);
+    constexpr ImGuiWindowFlags kFlags =
+        ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoSavedSettings;
+    const bool visible = ImGui::Begin("Sunrise console", nullptr, kFlags);
+    ImFont* const monospace = core::ui::fonts::runtime::monospace();
+    if (monospace != nullptr) {
+        ImGui::PushFont(monospace, ImGui::GetStyle().FontSizeBase * kFontScale);
+    }
+    if (!visible) {
+        if (monospace != nullptr) {
+            ImGui::PopFont();
+        }
+        ImGui::End();
+        ImGui::PopStyleColor(8);
+        ImGui::PopStyleVar(8);
+        return true;
+    }
+
+    const float promptHeight = ImGui::GetFrameHeightWithSpacing();
+    // A field, not a column of labels: Dear ImGui can only highlight and copy text inside one, and
+    // reading a command's output usually ends in wanting to paste it somewhere. Read-only rather
+    // than disabled, because a disabled field cannot be selected either.
+    ImGui::InputTextMultiline("##scrollback",
+                              g_flat.data(),
+                              g_flat.size(),
+                              {-1.0F, -promptHeight},
+                              ImGuiInputTextFlags_ReadOnly | ImGuiInputTextFlags_NoUndoRedo);
+    if (g_scrollPending) {
+        // The field scrolls inside its own child window, which is where the tail has to be set.
+        if (ImGuiWindow* const view = ImGui::FindWindowByID(ImGui::GetID("##scrollback"))) {
+            view->Scroll.y = view->ScrollMax.y;
+        }
+        g_scrollPending = false;
+    }
+
+    ImGui::Separator();
+    ImGui::TextUnformatted(">");
+    ImGui::SameLine();
+    ImGui::SetNextItemWidth(-1.0F);
+    constexpr ImGuiInputTextFlags kInputFlags = ImGuiInputTextFlags_EnterReturnsTrue
+                                                | ImGuiInputTextFlags_CallbackCompletion
+                                                | ImGuiInputTextFlags_CallbackHistory;
+    if (g_focusPending.exchange(false)) {
+        ImGui::SetKeyboardFocusHere();
+    }
+    const ImVec2 inputPosition = ImGui::GetCursorScreenPos();
+    const bool entered =
+        ImGui::InputText("##line", g_input.data(), g_input.size(), kInputFlags, &input_event);
+    draw_completion_hint(inputPosition);
+    if (entered) {
+        if (std::string_view(g_input.data()).find_first_not_of(" \t") != std::string_view::npos) {
+            Scrollback output;
+            output.format("> %s", g_input.data());
+            remember();
+            (void)invoke(g_input.data(), output);
+        }
+        g_input = {};
+        g_focusPending = true;
+    }
+    if (monospace != nullptr) {
+        ImGui::PopFont();
+    }
+    ImGui::End();
+    ImGui::PopStyleColor(8);
+    ImGui::PopStyleVar(8);
+    return true;
+}
+
 void shutdown() noexcept {
-    g_page.release();
+    g_open.store(false);
+    g_scrollPending = false;
     clear();
     g_lines = {};
     g_flat = {};

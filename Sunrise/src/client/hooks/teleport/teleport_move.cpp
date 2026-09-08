@@ -1,3 +1,4 @@
+#include "client/console/console_overlay.h"
 /**
  * The teleport itself. The camera hook publishes a forward vector and reads the bound key once a
  * frame. The physics hook applies the move before the sync it runs ahead of. Physics owns the
@@ -371,7 +372,7 @@ void poll_request() noexcept {
         return;
     }
     // An open interface owns the keyboard, so the key that binds the teleport must not fire it.
-    if (core::ui::runtime::snapshot().visible) {
+    if (sunrise::client::console::captures_input()) {
         g_keyDown.store(false, std::memory_order_relaxed);
         return;
     }

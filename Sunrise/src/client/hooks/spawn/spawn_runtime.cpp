@@ -18,6 +18,7 @@
 #include "../../patterns/image_scan.h"
 #include "../../patterns/signature_text.h"
 #include "../teleport/runtime.h"
+#include "client/console/console_overlay.h"
 
 namespace sunrise::client::hooks::spawn {
 namespace {
@@ -455,7 +456,7 @@ void poll_shortcuts() noexcept {
         (void)GetWindowThreadProcessId(foreground, &foregroundProcess);
     }
     const bool blocked =
-        foregroundProcess != GetCurrentProcessId() || core::ui::runtime::snapshot().visible;
+        foregroundProcess != GetCurrentProcessId() || sunrise::client::console::captures_input();
 
     for (std::size_t index = 0; index < keybinds.virtualKeys.size(); ++index) {
         const std::uint32_t key = keybinds.virtualKeys[index];

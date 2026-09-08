@@ -4,6 +4,8 @@
 
 #include <cstddef>
 
+struct ImFont;
+
 namespace sunrise::core::ui::fonts::runtime {
 
 /** 16 pixels is the authored text height at the unscaled 96-DPI layout. */
@@ -55,5 +57,11 @@ struct Snapshot {
 
 /** @return One snapshot of the font source, size, and scale, read under the lock. */
 [[nodiscard]] Snapshot snapshot() noexcept;
+
+/**
+ * The fixed-width face the console draws with.
+ * @return The face, or null when the system font could not be read and callers should not push one.
+ */
+[[nodiscard]] ImFont* monospace() noexcept;
 
 } // namespace sunrise::core::ui::fonts::runtime

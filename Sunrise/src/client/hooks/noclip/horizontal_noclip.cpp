@@ -1,3 +1,4 @@
+#include "client/console/console_overlay.h"
 /**
  * Noclip at the Havok simulation boundary. The hook reads the body's position and velocity before
  * simulation, lets Havok run, then writes the position on from where the body stood.
@@ -198,7 +199,7 @@ capped_speed(const std::array<float, kVectorLanes>& velocity, float limit) noexc
         client::input::game_focused()
         && (GetAsyncKeyState(static_cast<int>(settings.noclipToggleKey)) & 0x8000) != 0;
     // An open interface owns the keyboard, so the bound key only tracks the press, it never flips.
-    if (core::ui::runtime::snapshot().visible) {
+    if (sunrise::client::console::captures_input()) {
         g_toggleDown.store(down, std::memory_order_relaxed);
         return settings.noclipEnabled;
     }

@@ -8,7 +8,6 @@
 #include "../animation/transition/ui_transition_animation.h"
 #include "../fonts/runtime/ui_runtime_font_lifecycle.h"
 #include "../memory/allocator.h"
-#include "../modules/registry/ui_module_registry.h"
 #include "../scaling/dpi/ui_dpi_scaling.h"
 #include "../theme/sunrise_ui_theme.h"
 #include "credits/sunrise_credits_badge.h"
@@ -88,17 +87,6 @@ StateSnapshot snapshot() noexcept {
     const StateSnapshot result = g_state;
     ReleaseSRWLockShared(&g_layoutLock);
     return result;
-}
-
-bool select_registered_module(std::string_view stableId) noexcept {
-    const auto registered = modules::registry::snapshot();
-    for (const auto& entry : registered.entries()) {
-        if (entry.stable_id() == stableId) {
-            internal::select_module(stableId);
-            return true;
-        }
-    }
-    return false;
 }
 
 namespace internal {

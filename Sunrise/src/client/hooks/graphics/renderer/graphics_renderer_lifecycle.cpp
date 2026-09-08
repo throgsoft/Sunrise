@@ -10,6 +10,7 @@
 #include "../../inactivity/inactivity_override.h"
 #include "../../polled_input/runtime.h"
 #include "../input/input.h"
+#include "client/console/console_overlay.h"
 #include "graphics_renderer_report.h"
 #include "state.h"
 #include "world_lines.h"
@@ -330,7 +331,7 @@ void present(IDXGISwapChain* swapChain) noexcept {
         inactivity::poll();
     }
     // The cursor policy calls Win32, so it runs only after the renderer lock is gone.
-    const bool visible = core::ui::runtime::snapshot().visible;
+    const bool visible = sunrise::client::console::captures_input();
     cursor::apply_visibility(visible);
     polled_input::apply_visibility(visible);
     // The game makes its raw-mouse window during startup, so the first tries find nothing.

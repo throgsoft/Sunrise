@@ -3,9 +3,12 @@
 #include <Windows.h>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
+#include <cwchar>
 #include <imgui.h>
 
+#include "../../../logging/log.h"
 #include "../installed/ui_installed_font_reader.h"
 
 namespace sunrise::core::ui::fonts::runtime {
@@ -38,6 +41,11 @@ struct State {
 
 State g_state{};
 SRWLOCK g_fontLock{SRWLOCK_INIT};
+/** The one fixed-width face the console draws with, or null when it could not be added. */
+ImFont* g_monospace{};
+
+/** Consolas is about 450 KiB; the bound leaves room without inviting an unbounded read. */
+constexpr std::size_t kMonospaceCapacityBytes = 1024U * 1024U;
 
 /** @return True when the authored font height is inside the size policy. */
 [[nodiscard]] bool valid_base_size(float value) noexcept {
@@ -47,6 +55,48 @@ SRWLOCK g_fontLock{SRWLOCK_INIT};
 /** @return True when the UI multiplier can be safely clamped. */
 [[nodiscard]] bool valid_scale(float value) noexcept {
     return std::isfinite(value) && value > 0.0F;
+}
+
+/** Adds the system fixed-width face to the atlas from an absolute Windows font path. */
+[[nodiscard]] ImFont* add_monospace_font(ImFontAtlas& atlas, float basePixelSize) noexcept {
+    // Dear ImGui's file helper resolved relative to Destiny's working directory. Retaining the
+    // bytes here makes their lifetime match the atlas while using the absolute Windows directory.
+    static std::array<std::byte, kMonospaceCapacityBytes> storage{};
+    static int storedBytes = 0;
+    if (storedBytes == 0) {
+        std::array<wchar_t, MAX_PATH> directory{};
+        const UINT length = GetWindowsDirectoryW(directory.data(), MAX_PATH);
+        if (length == 0 || length >= MAX_PATH) {
+            return nullptr;
+        }
+        std::array<wchar_t, MAX_PATH> path{};
+        if (std::swprintf(path.data(), path.size(), L"%s\\Fonts\\consola.ttf", directory.data())
+            <= 0) {
+            return nullptr;
+        }
+        const HANDLE file = CreateFileW(path.data(),
+                                        GENERIC_READ,
+                                        FILE_SHARE_READ,
+                                        nullptr,
+                                        OPEN_EXISTING,
+                                        FILE_ATTRIBUTE_NORMAL,
+                                        nullptr);
+        if (file == INVALID_HANDLE_VALUE) {
+            return nullptr;
+        }
+        DWORD read = 0;
+        const BOOL ok =
+            ReadFile(file, storage.data(), static_cast<DWORD>(storage.size()), &read, nullptr);
+        (void)CloseHandle(file);
+        if (ok == FALSE || read == 0 || read == storage.size()) {
+            return nullptr;
+        }
+        storedBytes = static_cast<int>(read);
+    }
+    ImFontConfig config{};
+    config.FontDataOwnedByAtlas = false;
+    config.RasterizerDensity = kRasterizerDensity;
+    return atlas.AddFontFromMemoryTTF(storage.data(), storedBytes, basePixelSize, &config);
 }
 
 /**
@@ -111,11 +161,19 @@ bool initialize(HMODULE module, float basePixelSize) noexcept {
     if (font == nullptr) {
         atlas->Clear();
         installed::clear();
+        g_monospace = nullptr;
         ImGui::GetStyle().FontSizeBase = priorBasePixelSize;
         ImGui::GetStyle().FontScaleMain = priorMainScale;
         ReleaseSRWLockExclusive(&g_fontLock);
         return false;
     }
+
+    // The console prints aligned columns, so its face stays fixed-width independently of the UI.
+    g_monospace = add_monospace_font(*atlas, basePixelSize);
+    core::log::write(core::log::Channel::client,
+                     g_monospace != nullptr ? core::log::Level::info : core::log::Level::warn,
+                     g_monospace != nullptr ? "ev=fonts stage=monospace result=ok"
+                                            : "ev=fonts stage=monospace result=fail");
 
     io.FontDefault = font;
     ImGui::GetStyle().FontSizeBase = basePixelSize;
@@ -153,6 +211,7 @@ bool shutdown() noexcept {
     AcquireSRWLockExclusive(&g_fontLock);
     if (!g_state.initialized) {
         installed::clear();
+        g_monospace = nullptr;
         ReleaseSRWLockExclusive(&g_fontLock);
         return true;
     }
@@ -164,12 +223,21 @@ bool shutdown() noexcept {
 
     ImGui::GetIO().FontDefault = nullptr;
     g_state.atlas->Clear();
+    g_monospace = nullptr;
     ImGui::GetStyle().FontSizeBase = g_state.priorBasePixelSize;
     ImGui::GetStyle().FontScaleMain = g_state.priorMainScale;
     installed::clear();
     g_state = {};
     ReleaseSRWLockExclusive(&g_fontLock);
     return true;
+}
+
+/** @return The fixed-width face owned by the active atlas. */
+ImFont* monospace() noexcept {
+    AcquireSRWLockShared(&g_fontLock);
+    ImFont* const face = g_monospace;
+    ReleaseSRWLockShared(&g_fontLock);
+    return face;
 }
 
 /** @return One snapshot of the font source, size, and scale, read under the lock. */

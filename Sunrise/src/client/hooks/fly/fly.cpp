@@ -1,11 +1,10 @@
+#include "client/console/console_overlay.h"
 /**
  * Velocity fly. The movement keys set the player's velocity every tick.
  * Velocity is set, not added. Adding compounds each tick and leaves gravity in the vertical lane.
  * Setting it means releasing every key stops the player, which is what holds a hover.
  * The write goes in before the simulation step, and again before the sync that publishes it.
  */
-
-#include "fly.h"
 
 #include <Windows.h>
 
@@ -24,6 +23,7 @@
 #include "../../movement/movement_settings_store.h"
 #include "../noclip/runtime.h"
 #include "../teleport/runtime.h"
+#include "fly.h"
 
 namespace sunrise::client::hooks::fly {
 namespace {
@@ -219,7 +219,7 @@ void cap_speed(teleport::Vector& velocity, float limit) noexcept {
 [[nodiscard]] teleport::Vector desired_velocity(float speed) noexcept {
     // The interface or another application owns the keyboard. Their presses must not steer.
     std::array<bool, kDirectionCount> pressed{};
-    if (!core::ui::runtime::snapshot().visible && input::game_focused()) {
+    if (!sunrise::client::console::captures_input() && input::game_focused()) {
         pressed = pressed_directions();
     }
     teleport::Vector forward{};
@@ -246,7 +246,7 @@ void poll_toggle() noexcept {
         input::game_focused()
         && (GetAsyncKeyState(static_cast<int>(settings.flyToggleKey)) & kKeyHeldBit) != 0;
     // The interface owns the keyboard, so the key tracks the press but never flips the switch.
-    if (core::ui::runtime::snapshot().visible) {
+    if (sunrise::client::console::captures_input()) {
         g_toggleDown.store(down, std::memory_order_relaxed);
         return;
     }

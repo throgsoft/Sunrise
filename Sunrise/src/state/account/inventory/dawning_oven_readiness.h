@@ -17,15 +17,6 @@ inline constexpr std::size_t kChooserReadinessAccountValue = 5627;
 [[nodiscard]] inline bool project_chooser_readiness(const AccountState& account,
                                                     std::span<std::int32_t> values) noexcept {
     if (!account::valid(account)) return false;
-    build_data::items::Definition oven{};
-    build_data::items::details::Definition detail{};
-    if (!build_data::find_item_definition_hash(kOvenHash, oven)) return true;
-    if (oven.definitionHash != kOvenHash
-        || !build_data::find_configured_item_detail(oven.definitionIndex, detail)
-        || detail.definitionHash != kOvenHash || detail.definitionIndex != oven.definitionIndex
-        || detail.bucketId != oven.bucketId || detail.ordinarySocketCount != 5
-        || detail.ordinarySocketState != build_data::items::details::OrdinarySocketState::present)
-        return false;
     bool heldOven = false, heldTutorial = false;
     for (std::size_t c = 0; c < account.characterCount; ++c) {
         const auto& character = account.characters[c];
@@ -46,6 +37,15 @@ inline constexpr std::size_t kChooserReadinessAccountValue = 5627;
         }
     }
     if (!heldOven || heldTutorial) return true;
+    // An unowned optional oven cannot prevent the initial account snapshot from being sent.
+    build_data::items::Definition oven{};
+    build_data::items::details::Definition detail{};
+    if (!build_data::find_item_definition_hash(kOvenHash, oven)
+        || !build_data::find_configured_item_detail(oven.definitionIndex, detail)
+        || detail.definitionHash != kOvenHash || detail.definitionIndex != oven.definitionIndex
+        || detail.bucketId != oven.bucketId || detail.ordinarySocketCount != 5
+        || detail.ordinarySocketState != build_data::items::details::OrdinarySocketState::present)
+        return false;
     if (values.size() <= kChooserReadinessAccountValue) return false;
     if (values[kChooserReadinessAccountValue] == 0) values[kChooserReadinessAccountValue] = -1;
     return true;

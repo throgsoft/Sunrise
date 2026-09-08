@@ -126,7 +126,22 @@ read(std::span<const std::byte> blob, std::size_t offset, Value& value) noexcept
     constexpr std::uint8_t pursuitBucket = 40;
     if (row.bucketId != pursuitBucket || row.equipmentSlot.has_value() || row.maxStackSize > 1)
         return true;
-    constexpr std::size_t objectiveDescriptor = 392;
+    // The fixed field points at a variable block; its position depends on preceding blocks.
+    constexpr std::size_t objectivePointer = 48;
+    constexpr std::uint32_t objectiveBlockClass = 0x808077EBU;
+    std::int64_t relative = 0;
+    if (!read(definition, objectivePointer, relative)) return false;
+    if (relative == 0) return true;
+    if (relative < -static_cast<std::int64_t>(objectivePointer)
+        || relative > static_cast<std::int64_t>(definition.size())
+                          - static_cast<std::int64_t>(objectivePointer))
+        return false;
+    const auto objectiveDescriptor =
+        static_cast<std::size_t>(static_cast<std::int64_t>(objectivePointer) + relative);
+    std::uint32_t blockClass = 0;
+    if (objectiveDescriptor < 4 || !read(definition, objectiveDescriptor - 4, blockClass)
+        || blockClass != objectiveBlockClass)
+        return false;
     constexpr std::size_t lifetimeDescriptor = 192;
     constexpr std::uint32_t lifetimeClass = 0x80807D31U;
     Array objectives{};

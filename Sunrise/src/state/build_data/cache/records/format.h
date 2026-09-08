@@ -35,7 +35,7 @@ inline constexpr std::array<char, 8> kCacheMagic{'S', 'U', 'N', 'R', 'I', 'S', '
  * Bump it when a stored shape changes or when the extraction filling it changes what it writes,
  * because a cached row survives a code change and a corrected walk keeps publishing old rows.
  */
-inline constexpr std::uint32_t kCacheFormatVersion = 66;
+inline constexpr std::uint32_t kCacheFormatVersion = 67;
 /** Signed -1 on disk means there is no equipment slot. */
 inline constexpr std::int8_t kAbsentEquipmentSlot = -1;
 /** The standard 64-bit FNV-1a offset basis starts the payload checksum. */

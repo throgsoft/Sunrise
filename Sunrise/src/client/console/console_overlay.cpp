@@ -2,11 +2,14 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cstring>
 #include <imgui.h>
 #include <string_view>
 
+#include "../../core/ui/layout/layout.h"
 #include "../../core/ui/modules/registry/ui_module_registry.h"
+#include "../../core/ui/runtime/ui_visibility_runtime.h"
 #include "client_console_commands.h"
 #include "console_line.h"
 #include "console_registry.h"
@@ -28,7 +31,7 @@ std::size_t g_historyCount{};
 std::size_t g_historyCursor{};
 Input g_input{};
 Input g_draft{};
-bool g_focusPending{true};
+std::atomic_bool g_focusPending{true};
 bool g_initialized{};
 core::ui::modules::registry::PageRegistration g_page;
 
@@ -176,9 +179,8 @@ void draw() noexcept {
                               g_flat.size(),
                               {-1.0F, outputHeight},
                               ImGuiInputTextFlags_ReadOnly | ImGuiInputTextFlags_NoUndoRedo);
-    if (g_focusPending) {
+    if (g_focusPending.exchange(false)) {
         ImGui::SetKeyboardFocusHere();
-        g_focusPending = false;
     }
     ImGui::SetNextItemWidth(-1.0F);
     constexpr auto flags = ImGuiInputTextFlags_EnterReturnsTrue
@@ -214,6 +216,20 @@ bool initialize() noexcept {
     }
     g_initialized = true;
     return true;
+}
+
+void toggle() noexcept {
+    const auto visibility = core::ui::runtime::snapshot();
+    if (!visibility.initialized || !visibility.enabled) return;
+    const auto layout = core::ui::layout::snapshot();
+    const bool selected =
+        std::string_view(layout.selectedStableId.data(), layout.selectedStableIdLength)
+        == "client.console";
+    if (!core::ui::layout::select_registered_module("client.console")) return;
+    if (!visibility.visible || selected) {
+        (void)core::ui::runtime::toggle_for_key(visibility.toggleVirtualKey);
+    }
+    g_focusPending.store(true);
 }
 
 void shutdown() noexcept {

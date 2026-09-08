@@ -7,6 +7,7 @@
 #include "../../../../core/ui/layout/credits/sunrise_credits_badge.h"
 #include "../../../../core/ui/modules/logs/logs.h"
 #include "../../../../core/ui/runtime/ui_visibility_runtime.h"
+#include "../../../console/console_overlay.h"
 #include "../renderer/renderer.h"
 #include "core/threading/srw_lock.h"
 #include "input.h"
@@ -99,10 +100,15 @@ LRESULT CALLBACK window_procedure(HWND window, UINT message, WPARAM word, LPARAM
     const bool toggleKey =
         is_key_message(message)
         && static_cast<UINT>(word) == core::ui::runtime::snapshot().toggleVirtualKey;
+    const bool consoleKey = is_key_message(message) && static_cast<UINT>(word) == VK_HOME;
     if (message == WM_KEYUP || message == WM_SYSKEYUP) {
-        (void)core::ui::runtime::toggle_for_key(static_cast<UINT>(word));
+        if (consoleKey) {
+            console::toggle();
+        } else {
+            (void)core::ui::runtime::toggle_for_key(static_cast<UINT>(word));
+        }
     }
-    if (renderer::handle_window_message(window, message, word, value) || toggleKey) {
+    if (renderer::handle_window_message(window, message, word, value) || toggleKey || consoleKey) {
         // A visible UI takes every input message; the game's procedure never sees it.
         renderer::dispatch_pending_input_release(window);
         if (message == WM_INPUT) {

@@ -5,6 +5,9 @@ namespace sunrise::client::console {
 /** Registers Client > Console with the existing upstream UI; call after State and Core UI start. */
 [[nodiscard]] bool initialize() noexcept;
 
+/** Opens the registered console page, or closes it if already visible. */
+void toggle() noexcept;
+
 /** Unregisters the page. Call after rendering is quiesced and before State shuts down. */
 void shutdown() noexcept;
 

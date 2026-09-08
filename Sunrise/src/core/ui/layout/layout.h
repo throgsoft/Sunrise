@@ -38,4 +38,7 @@ struct StateSnapshot {
 /** @return One copy of the init and module selection state, read under the lock. */
 [[nodiscard]] StateSnapshot snapshot() noexcept;
 
+/** Selects a registered module from a UI shortcut, without accessing renderer state. */
+[[nodiscard]] bool select_registered_module(std::string_view stableId) noexcept;
+
 } // namespace sunrise::core::ui::layout

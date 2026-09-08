@@ -121,6 +121,7 @@ struct Column {
 Column g_main{};
 std::vector<EntityName> g_names{};
 bool g_scanned{};
+bool g_installRetried{};
 
 template <std::size_t Capacity>
 [[nodiscard]] bool parse_string(std::string_view document,
@@ -442,12 +443,13 @@ void draw_settings() noexcept {
 } // namespace
 
 void draw() noexcept {
+    // Startup can precede unpacking of an optional target. Retry once when the page is opened.
+    if (!native::ready() && !g_installRetried) {
+        g_installRetried = true;
+        (void)native::install();
+    }
     if (!native::ready()) {
-        ImGui::TextWrapped(
-            "Developer-only native entity spawner. Enter a destination before enabling.");
-        if (ImGui::Button("Enable native spawner") && native::install()) {
-            refresh();
-        }
+        ImGui::TextDisabled("Native spawner unavailable; see the spawn install log.");
         return;
     }
     if (!g_scanned) {

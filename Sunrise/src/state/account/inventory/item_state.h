@@ -1,8 +1,15 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 
 namespace sunrise::state::account::inventory {
+
+/** The replicated item tail carries a deadline and seven objective values. */
+inline constexpr std::size_t kItemObjectiveCapacity = 8;
+inline constexpr std::size_t kItemExpiryLane = 0;
+inline constexpr std::size_t kItemObjectiveLaneBase = 1;
+inline constexpr std::size_t kItemObjectiveLaneCount = 7;
 
 /** Native accumulated state bit that prevents item destruction. */
 inline constexpr std::uint32_t kLockedItemFlag = 0x1U;

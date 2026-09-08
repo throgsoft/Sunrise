@@ -14,6 +14,7 @@
 #include "../../core/logging/log.h"
 #include "../../middleware/datagen/family4/loadout/loadout_resolver.h"
 #include "../build_data/runtime.h"
+#include "dawning_oven_runtime.h"
 #include "runtime.h"
 #include "state.h"
 #include "state_account_transaction_helpers.h"
@@ -161,6 +162,16 @@ void report_socket_plug(std::string_view stage,
     }
     if (build_data::is_exotic_catalyst_lane(targetDefinition.definitionIndex, socketLane)) {
         return fail("catalyst_lane_requires_atomic_change");
+    }
+    if (targetDefinition.definitionHash == account::inventory::dawning::kOvenHash
+        && socketLane >= 2) {
+        // A recipe is an exchange, and its action socket resets after the cookie is granted.
+        return dawning::stage(snapshot,
+                              characterIndex,
+                              targetInstanceSoid,
+                              socketLane,
+                              plugDefinitionIndex,
+                              mutation);
     }
 
     // Ownership matters only for a plug the account draws down, such as a shader stack. An

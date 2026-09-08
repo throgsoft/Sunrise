@@ -202,7 +202,8 @@ namespace sunrise::server::bap::encrypted::queuez {
                                              std::uint64_t accountSoid,
                                              std::uint64_t characterSoid,
                                              std::span<const std::uint64_t> appendedResidents,
-                                             RecordRewardGrant& grant) noexcept;
+                                             RecordRewardGrant& grant,
+                                             std::uint64_t releasedInstanceSoid = 0) noexcept;
 
 /**
  * Stages one Family-4 increment that removes an item resident and updates its character.
@@ -220,6 +221,7 @@ namespace sunrise::server::bap::encrypted::queuez {
                                         std::uint64_t characterSoid,
                                         std::uint64_t dismantledInstanceSoid,
                                         bool updatesAccount,
+                                        bool releasesInstance,
                                         ItemDismantle& dismantle) noexcept;
 
 /** Clears one named family. Another family, root or an inactive record changes nothing. */

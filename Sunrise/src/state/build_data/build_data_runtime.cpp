@@ -42,12 +42,18 @@ constexpr std::wstring_view kCacheFileSuffix = L"\\cache\\build_data.bin";
 
 } // namespace
 
+bool find_progression_definition_hash(std::uint32_t hash,
+                                      progressions::Definition& output) noexcept {
+    return progressions::find_hash(hash, output);
+}
+
 /** Loads one full cache, or leaves every domain ready for first-boot extraction. */
 bool initialize(void* module, std::uint64_t configuredEquipmentHash) noexcept {
     runtime::persistence::Context& persistenceState = runtime::persistence::context();
     AcquireSRWLockExclusive(&persistenceState.lock);
     runtime::persistence::clear_locked(persistenceState);
     runtime::clear_catalogs();
+    clear_objective_definitions();
     gameplay::entity_position_profiles::reset();
     gameplay::entity_object_types::reset();
     if (module == nullptr) {
@@ -153,6 +159,7 @@ bool initialize(void* module, std::uint64_t configuredEquipmentHash) noexcept {
                                                    domains.positionFingerprint)) {
         // No domain remains published when any catalog rejects the cache transaction.
         runtime::clear_catalogs();
+        clear_objective_definitions();
         gameplay::entity_position_profiles::reset();
         gameplay::entity_object_types::reset();
         runtime::persistence::clear_locked(persistenceState);
@@ -178,6 +185,7 @@ void shutdown() noexcept {
     runtime::persistence::Context& persistenceState = runtime::persistence::context();
     AcquireSRWLockExclusive(&persistenceState.lock);
     runtime::clear_catalogs();
+    clear_objective_definitions();
     gameplay::entity_position_profiles::reset();
     gameplay::entity_object_types::reset();
     runtime::persistence::clear_locked(persistenceState);

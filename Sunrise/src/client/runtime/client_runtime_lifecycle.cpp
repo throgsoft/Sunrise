@@ -1,6 +1,7 @@
 #include "../../core/logging/log.h"
 #include "../../core/settings/settings.h"
 #include "../../server/bap/runtime.h"
+#include "../console/console_overlay.h"
 #include "../content/activity/activity_sdk_generation_worker.h"
 #include "../content/activity/scriptable_catalog_worker.h"
 #include "../content/investment/worker.h"
@@ -47,7 +48,7 @@ bool initialize(void* module) noexcept {
     movement::initialize(module);
     player::initialize(module);
     ui::activity::authored_placement_marker::initialize(module);
-    return ui::runtime::initialize();
+    return ui::runtime::initialize() && console::initialize();
 }
 
 /** Detaches Client hooks before clearing their resolved target entries. */
@@ -180,6 +181,7 @@ bool shutdown() noexcept {
     runtime::g_mainStage = runtime::StageState::pending;
     runtime::g_graphicsStage = runtime::StageState::pending;
     runtime::g_platformStage = runtime::StageState::pending;
+    console::shutdown();
     ui::runtime::shutdown();
     // The reverse of the order the stores initialize in.
     ui::activity::authored_placement_marker::shutdown();

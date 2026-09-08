@@ -53,6 +53,8 @@ struct DefinitionBounds {
 
 /** Fully resolved semantic and native data required by one item-instance record. */
 struct ResolvedInstance {
+    std::array<std::int32_t, layout::kTailValueCount> objectiveValues{};
+    std::uint16_t objectiveDefinitionIndex{layout::kEmptyDefinitionIndex};
     std::uint64_t instanceSoid{};
     DefinitionBounds bounds{};
     std::uint16_t baseDefinitionIndex{layout::kEmptyDefinitionIndex};

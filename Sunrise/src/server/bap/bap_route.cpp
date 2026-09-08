@@ -365,6 +365,11 @@ void arm_account_resync_everywhere() noexcept {
     }
 }
 
+void request_account_resync() noexcept {
+    const std::lock_guard lock(session_lock());
+    arm_account_resync_everywhere();
+}
+
 /** Extends this peer's flyout hold, clearing a lapsed overlay first. */
 void arm_acquisition_presentation_hold(Session& session) noexcept {
     const std::uint64_t now = GetTickCount64();

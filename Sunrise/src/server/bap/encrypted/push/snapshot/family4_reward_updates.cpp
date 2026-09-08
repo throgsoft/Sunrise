@@ -14,6 +14,7 @@
 #include "../../../../../state/build_data/runtime.h"
 #include "../../../../../state/runtime/runtime.h"
 #include "../../queuez/queuez_state_validation.h"
+#include "dawning_oven_projection.h"
 #include "internal.h"
 #include "snapshot_storage.h"
 
@@ -217,7 +218,12 @@ bool prepare_record_reward_grant(
     Prepared& prepared) noexcept {
     namespace account_layout = family4_datagen::account::layout;
     namespace character_layout = family4_datagen::character::layout;
-    if (!mutation.prepared || mutation.rewardCount == 0
+    const auto released =
+        mutation.pursuitRedemption && mutation.pursuitRedemption->expectedQuantity == 1
+            ? mutation.pursuitRedemption->sourceInstanceSoid
+            : 0;
+    const std::size_t removed = released != 0;
+    if (!mutation.prepared || (mutation.rewardCount == 0 && !mutation.pursuitRedemption)
         || mutation.rewardCount > mutation.rewards.size() || !queuez::valid(before)
         || !queuez::valid(update.after) || !before.family4Active || before.family4ResidentCount == 0
         || before.family4Version == (std::numeric_limits<std::int32_t>::max)()
@@ -227,7 +233,8 @@ bool prepare_record_reward_grant(
         || update.after.family4Version != before.family4Version + 1
         || update.appendedResidentCount > mutation.rewardCount
         || update.after.family4ResidentCount
-               != before.family4ResidentCount + update.appendedResidentCount
+               != before.family4ResidentCount - removed + update.appendedResidentCount
+        || update.releasedInstanceSoid != released
         || update.accountDefinitionId != before.family4Residents.front().definitionId
         || update.characterDefinitionId == 0 || update.itemInstanceDefinitionId == 0) {
         return report_failure("record_reward_session");
@@ -293,12 +300,18 @@ bool prepare_record_reward_grant(
         return report_failure("record_reward_resident_count");
     }
     for (std::size_t index = 0; index < residents.itemCount; ++index) {
-        const auto& expected = update.after.family4Residents[before.family4ResidentCount + index];
+        const auto& expected =
+            update.after.family4Residents[before.family4ResidentCount - removed + index];
         if (expected.objectSoid != residents.items[index].instance.instanceSoid
             || expected.definitionId != update.itemInstanceDefinitionId) {
             return report_failure("record_reward_resident_order");
         }
     }
+    // Identity additions above remain in their QueueZ order. Existing bounty tails follow
+    // them in the same update without incrementing appendedResidentCount.
+    if (!dawning::append_changed_objectives(
+            mutation.beforeCharacter, mutation.afterCharacter, selected.loadout, residents))
+        return report_failure("record_reward_objective_items");
 
     const Reservation reservation = reserve_prior(scratch, prepared);
     if (reservation.rawWriteOffset > scratch.plaintext.size()
@@ -326,6 +339,10 @@ bool prepare_record_reward_grant(
         clear_after(scratch, reservation);
         return report_failure("record_reward_residents");
     }
+    if (released) {
+        staged.objects[residentCursor++] = middleware::queuez::Object{
+            update.itemInstanceDefinitionId, released, middleware::queuez::Encoding::oodle, {}};
+    }
 
     const auto characterBytes = rawStorage.first(character_layout::kObjectSize);
     const state::CharacterState& character = account.characters[mutation.characterIndex];
@@ -346,7 +363,8 @@ bool prepare_record_reward_grant(
     std::size_t characterChanges = 0;
     for (std::size_t rewardIndex = 0; rewardIndex < mutation.rewardCount; ++rewardIndex) {
         const state::PreparedRecordReward& reward = mutation.rewards[rewardIndex];
-        if (reward.kind == state::RecordRewardKind::profileStack) {
+        if (reward.kind == state::RecordRewardKind::profileStack
+            || reward.kind == state::RecordRewardKind::accountMaterial) {
             continue;
         }
         state::build_data::items::Definition definition{};
@@ -407,6 +425,10 @@ bool prepare_record_reward_grant(
         return report_failure("record_reward_account_encode");
     }
     auto& accountObject = *reinterpret_cast<account_layout::Object*>(accountBytes.data());
+    if (mutation.afterDawning && !dawning::project_banks(*mutation.afterDawning, accountObject)) {
+        clear_after(scratch, reservation);
+        return report_failure("record_reward_material_banks");
+    }
     if (accountObject.profileInventoryChanges.writeSlot != 0
         || accountObject.profileInventoryChanges.nextSequence != 0
         || !std::all_of(accountObject.profileInventoryChanges.records.cbegin(),

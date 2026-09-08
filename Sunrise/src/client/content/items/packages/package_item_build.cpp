@@ -15,6 +15,7 @@
 #include "../../vendors/vendor_build.h"
 #include "build.h"
 #include "internal.h"
+#include "package_objective_build.h"
 #include "package_socket_plug_build.h"
 
 namespace sunrise::client::content::items::packages {
@@ -22,7 +23,8 @@ namespace {
 
 /** @return True when every item and investment-root domain is published. */
 [[nodiscard]] bool root_domains_ready() noexcept {
-    return state::build_data::item_definitions_ready()
+    return state::build_data::objective_definitions_ready()
+           && state::build_data::item_definitions_ready()
            && state::build_data::collectible_definitions_ready()
            && state::build_data::material_requirement_sets_ready()
            && state::build_data::configured_item_details_ready()
@@ -113,6 +115,10 @@ bool build() noexcept {
             }
             // The same root names the bucket and socket-list tables.
             storage.root = storage.child;
+            if (!build_objectives(source, storage.scratch, storage.root)) {
+                reason = "objectives";
+                continue;
+            }
             // Records, nodes, season pass rewards and catalysts all resolve slots through the
             // two unlock mapping tables, so they are read once here.
             if (!state::build_data::record_definitions_ready()

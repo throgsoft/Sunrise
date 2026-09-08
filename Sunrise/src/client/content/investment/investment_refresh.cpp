@@ -6,6 +6,8 @@
 #include "../../../middleware/content/packages/reader/reader.h"
 #include "../../../state/build_data/runtime.h"
 #include "../../../state/runtime/runtime.h"
+#include "../combat_labels/combat_label_load.h"
+#include "../enemy_classes/enemy_class_load.h"
 #include "../items/packages/build.h"
 #include "core/threading/srw_lock.h"
 #include "internal.h"
@@ -42,6 +44,8 @@ bool refresh() noexcept {
         // The same lock as the extraction path. A cache write holds its own lock across file
         // calls, so a held thread stopped inside one would deadlock the freeze below.
         const std::lock_guard lock(g_refreshLock);
+        (void)enemy_classes::ensure();
+        (void)combat_labels::ensure();
         const bool persisted = state::ensure_profile_item_identities()
                                && state::ensure_character_subclasses() && emote_collection_settled()
                                && state::build_data::persist();
@@ -60,6 +64,10 @@ bool refresh() noexcept {
     // The package pass owns the item table and must not wait on runtime content lookups.
     (void)items::packages::build();
     const bool domainsReady = ready();
+    if (domainsReady) {
+        (void)enemy_classes::ensure();
+        (void)combat_labels::ensure();
+    }
     const bool complete = domainsReady && state::ensure_profile_item_identities()
                           && state::ensure_character_subclasses() && emote_collection_settled()
                           && state::build_data::persist();

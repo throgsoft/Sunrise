@@ -278,6 +278,8 @@ finalize_equipment_transition(const AccountState& account,
     return left.instanceSoid == right.instanceSoid && left.definitionHash == right.definitionHash
            && left.level == right.level && left.quantity == right.quantity
            && left.flags == right.flags && left.seen == right.seen
+           && left.objectiveValues == right.objectiveValues
+           && left.objectiveDefinitionIndex == right.objectiveDefinitionIndex
            && left.sockets.policy == right.sockets.policy
            && left.sockets.plugCount == right.sockets.plugCount
            && left.sockets.plugs == right.sockets.plugs
@@ -343,6 +345,8 @@ void report_item_state(std::string_view stage,
         || left.contentBypass != right.contentBypass
         || left.equippedTitleRecordIndex != right.equippedTitleRecordIndex
         || left.nextInventorySerial != right.nextInventorySerial
+        || left.gambitPrimeHelmetTiers != right.gambitPrimeHelmetTiers
+        || left.gambitPrimeSynthesizerTier != right.gambitPrimeSynthesizerTier
         || left.inventory.count != right.inventory.count
         || left.stacks.count != right.stacks.count) {
         return false;

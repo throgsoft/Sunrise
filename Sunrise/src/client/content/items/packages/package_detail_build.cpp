@@ -27,6 +27,16 @@ namespace domain = state::build_data::items::details;
 [[nodiscard]] domain::Definition to_detail(const tables::items::Row& row) noexcept {
     domain::Definition detail{};
     detail.definitionIndex = row.definitionIndex;
+    // An unreadable pursuit remains in the dense identity table, but cannot publish grant details.
+    detail.objectiveCount = row.objectiveMetadataValid ? row.objectiveCount : 0xFFU;
+    std::copy_n(
+        row.objectiveIndices, detail.objectiveIndices.size(), detail.objectiveIndices.begin());
+    detail.lifetimeSeconds = row.lifetimeSeconds;
+    detail.rewardCount = row.rewardCount;
+    for (std::size_t i = 0; i < detail.rewards.size(); ++i) {
+        detail.rewards[i] = {
+            row.rewards[i].itemIndex, row.rewards[i].companionIndex, row.rewards[i].quantity};
+    }
     detail.definitionHash = row.definitionHash;
     detail.bucketId = row.bucketId;
     detail.maxStackSize = row.maxStackSize;

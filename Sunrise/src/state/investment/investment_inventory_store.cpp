@@ -9,7 +9,11 @@ constexpr int kInventoryLocation = 1;
 
 /** Reads each item into its bounded owner and location. */
 bool read_items(AccountState& output) noexcept {
-    Statement rows("SELECT * FROM items ORDER BY character_slot,location,position");
+    Statement rows("SELECT i.*,COALESCE(o.definition_index,65535),"
+                   "COALESCE(o.v0,0),COALESCE(o.v1,0),COALESCE(o.v2,0),COALESCE(o.v3,0),"
+                   "COALESCE(o.v4,0),COALESCE(o.v5,0),COALESCE(o.v6,0),COALESCE(o.v7,0) "
+                   "FROM items i LEFT JOIN item_objectives o USING(instance_soid) "
+                   "ORDER BY character_slot,location,position");
     int result = rows.step();
     while (result == SQLITE_ROW) {
         std::size_t owner = 0;
@@ -32,7 +36,16 @@ bool read_items(AccountState& output) noexcept {
                           item.superAbilityEntry,
                           item.meleeAbilityEntry,
                           item.classAbilityEntry,
-                          item.seen)
+                          item.seen,
+                          item.objectiveDefinitionIndex,
+                          item.objectiveValues[0],
+                          item.objectiveValues[1],
+                          item.objectiveValues[2],
+                          item.objectiveValues[3],
+                          item.objectiveValues[4],
+                          item.objectiveValues[5],
+                          item.objectiveValues[6],
+                          item.objectiveValues[7])
             || owner >= output.characterCount) {
             return false;
         }
@@ -159,6 +172,18 @@ bool write_item(Statement& items,
             return false;
         }
     }
+    Statement objectives("INSERT INTO item_objectives VALUES (?,?,?,?,?,?,?,?,?,?)");
+    if (!objectives.write(item.instanceSoid,
+                          item.objectiveDefinitionIndex,
+                          item.objectiveValues[0],
+                          item.objectiveValues[1],
+                          item.objectiveValues[2],
+                          item.objectiveValues[3],
+                          item.objectiveValues[4],
+                          item.objectiveValues[5],
+                          item.objectiveValues[6],
+                          item.objectiveValues[7]))
+        return false;
     return true;
 }
 

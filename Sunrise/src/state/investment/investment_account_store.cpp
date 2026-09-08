@@ -5,7 +5,10 @@ namespace {
 
 /** Reads characters in stable slot order and overlays only process-local session fields. */
 bool read_characters(AccountState& output) noexcept {
-    Statement rows("SELECT * FROM characters ORDER BY slot");
+    Statement rows("SELECT c.*,COALESCE(g.reaper,0),COALESCE(g.invader,0),"
+                   "COALESCE(g.collector,0),COALESCE(g.sentry,0),COALESCE(g.synthesizer,0) "
+                   "FROM characters c LEFT JOIN character_gambit_prime g ON "
+                   "g.character_slot=c.slot ORDER BY c.slot");
     int result = rows.step();
     while (result == SQLITE_ROW) {
         std::size_t slot = 0;
@@ -22,7 +25,12 @@ bool read_characters(AccountState& output) noexcept {
                           character.contentBypass,
                           character.equippedTitleRecordIndex,
                           character.acquiredSubclassAbilityMask,
-                          character.nextInventorySerial)
+                          character.nextInventorySerial,
+                          character.gambitPrimeHelmetTiers[0],
+                          character.gambitPrimeHelmetTiers[1],
+                          character.gambitPrimeHelmetTiers[2],
+                          character.gambitPrimeHelmetTiers[3],
+                          character.gambitPrimeSynthesizerTier)
             || slot != output.characterCount || slot >= output.characters.size()) {
             return false;
         }
@@ -78,6 +86,17 @@ bool write_characters(const AccountState& value) noexcept {
                         character.nextInventorySerial)) {
             return false;
         }
+    }
+    Statement prime("INSERT INTO character_gambit_prime VALUES (?,?,?,?,?,?)");
+    for (std::size_t slot = 0; slot < value.characterCount; ++slot) {
+        const auto& character = value.characters[slot];
+        if (!prime.write(slot,
+                         character.gambitPrimeHelmetTiers[0],
+                         character.gambitPrimeHelmetTiers[1],
+                         character.gambitPrimeHelmetTiers[2],
+                         character.gambitPrimeHelmetTiers[3],
+                         character.gambitPrimeSynthesizerTier))
+            return false;
     }
     Statement rewards("INSERT INTO dismantle_rewards VALUES (?,?,?,?,?,?)");
     for (std::size_t index = 0; index < value.dismantleRewardCount; ++index) {

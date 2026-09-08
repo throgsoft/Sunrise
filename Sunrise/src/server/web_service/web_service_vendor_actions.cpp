@@ -21,6 +21,7 @@
 #include "../../state/build_data/vendors/vendor_catalog.h"
 #include "../../state/runtime/runtime.h"
 #include "internal_actions.h"
+#include "vendor/dawning_vendor_actions.h"
 #include "web_service_actions.h"
 
 namespace sunrise::server::web_service {
@@ -645,6 +646,9 @@ void settle_vendor_row(const middleware::web_service::Message& message,
                        std::int32_t categoryIndex,
                        std::uint16_t itemDefinitionIndex,
                        Outcome& outcome) noexcept {
+    if (vendor::intercept_dawning_delivery(
+            opcode, vendorIndex, rowIndex, itemDefinitionIndex, outcome))
+        return;
     std::uint16_t rolledBounty = kUnavailableDefinitionIndex;
     if (roll_vendor_bounty(vendorIndex, categoryIndex, rolledBounty)) {
         report_purchase(opcode,

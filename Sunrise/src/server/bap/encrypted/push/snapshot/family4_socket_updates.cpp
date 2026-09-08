@@ -10,6 +10,7 @@
 #include "../../../../../middleware/datagen/family4/instance/instance_encoder.h"
 #include "../../../../../middleware/datagen/family4/instance/layout.h"
 #include "../../../../../state/runtime/runtime.h"
+#include "dawning_oven_projection.h"
 #include "internal.h"
 #include "snapshot_storage.h"
 
@@ -73,6 +74,9 @@ bool prepare_socket_plug(Scratch& scratch,
     if (changed.itemCount != 1) {
         return report_failure("socket_plug_item_missing");
     }
+    if (!dawning::append_changed_objectives(
+            mutation.beforeCharacter, mutation.afterCharacter, selected.loadout, changed))
+        return report_failure("socket_plug_objective_items");
 
     const auto rawStorage = std::span(scratch.plaintext).subspan(reservation.rawWriteOffset);
     const std::size_t requiredRawSize = socketPlug.updatesAccount
@@ -95,20 +99,24 @@ bool prepare_socket_plug(Scratch& scratch,
                       staged,
                       itemCursor,
                       compressedExtent)
-        || itemCursor != 1) {
+        || itemCursor != changed.itemCount) {
         clear_after(scratch, reservation);
         return report_failure("socket_plug_item_object");
     }
 
-    std::size_t objectCount = 1;
+    std::size_t objectCount = itemCursor;
     if (socketPlug.updatesAccount) {
         const auto accountBytes = rawStorage.first(family4_datagen::account::layout::kObjectSize);
         if (!family4_datagen::account::encode(account, accountBytes)
+            || !dawning::project_socket_result(
+                mutation,
+                *reinterpret_cast<family4_datagen::account::layout::Object*>(accountBytes.data()))
+            || objectCount >= staged.objects.size()
             || !append_object(scratch,
                               accountBytes,
                               socketPlug.accountDefinitionId,
                               socketPlug.accountSoid,
-                              staged.objects[1],
+                              staged.objects[objectCount],
                               compressedExtent)) {
             clear_after(scratch, reservation);
             return report_failure("socket_plug_account_object");
@@ -116,7 +124,7 @@ bool prepare_socket_plug(Scratch& scratch,
         staged.rawClearSize =
             (std::max)(staged.rawClearSize,
                        reservation.rawWriteOffset + family4_datagen::account::layout::kObjectSize);
-        objectCount = 2;
+        ++objectCount;
     }
 
     staged.compressedClearSize = (std::max)(reservation.compressedClearSize, compressedExtent);

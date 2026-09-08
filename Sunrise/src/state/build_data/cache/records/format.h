@@ -35,7 +35,7 @@ inline constexpr std::array<char, 8> kCacheMagic{'S', 'U', 'N', 'R', 'I', 'S', '
  * Bump it when a stored shape changes or when the extraction filling it changes what it writes,
  * because a cached row survives a code change and a corrected walk keeps publishing old rows.
  */
-inline constexpr std::uint32_t kCacheFormatVersion = 63;
+inline constexpr std::uint32_t kCacheFormatVersion = 65;
 /** Signed -1 on disk means there is no equipment slot. */
 inline constexpr std::int8_t kAbsentEquipmentSlot = -1;
 /** The standard 64-bit FNV-1a offset basis starts the payload checksum. */
@@ -193,8 +193,20 @@ struct MaterialRequirementSetRecord {
         requirements{};
 };
 
+/** Packed disk reward row; runtime Reward has natural alignment and is not embedded here. */
+struct ItemRewardRecord {
+    std::uint16_t itemIndex{};
+    std::uint16_t companionIndex{};
+    std::int32_t quantity{};
+};
+
 /** Disk form of the supported item fields instance generation uses. */
 struct ItemDetailRecord {
+    std::uint8_t rewardCount{};
+    std::array<ItemRewardRecord, items::details::kRewardCapacity> rewards{};
+    std::uint8_t objectiveCount{};
+    std::array<std::uint16_t, items::details::kObjectiveCapacity> objectiveIndices{};
+    std::int32_t lifetimeSeconds{};
     std::uint16_t definitionIndex{};
     std::uint8_t bucketId{};
     std::int8_t equipmentSlot{kAbsentEquipmentSlot};
@@ -292,6 +304,7 @@ struct AbilityBucketRecord {
 
 /** Disk form of one progression definition, the object array it routes to, and its step range. */
 struct ProgressionRecord {
+    std::uint32_t definitionHash{};
     std::uint16_t definitionIndex{};
     std::uint16_t stepOffset{};
     std::uint8_t stepCount{};
@@ -615,7 +628,8 @@ static_assert(sizeof(RosterGroupRecord)
               == 2 * sizeof(std::uint32_t) + sizeof(std::uint16_t)
                      + 2 * scenarios::kRosterSlotCapacity * sizeof(std::uint8_t)
                      + scenarios::kRosterSlotCapacity * sizeof(std::uint16_t));
-static_assert(sizeof(ProgressionRecord) == 2 * sizeof(std::uint16_t) + 2 * sizeof(std::uint8_t));
+static_assert(sizeof(ProgressionRecord)
+              == sizeof(std::uint32_t) + 2 * sizeof(std::uint16_t) + 2 * sizeof(std::uint8_t));
 static_assert(sizeof(ProgressionStepRecord) == sizeof(std::int32_t));
 static_assert(sizeof(SeasonPassRewardRecord)
               == 2 * sizeof(std::uint32_t) + 2 * sizeof(std::uint16_t) + 4 * sizeof(std::uint8_t));
@@ -654,9 +668,13 @@ static_assert(sizeof(MaterialRequirementSetRecord)
               == sizeof(std::uint32_t) + sizeof(std::uint16_t) + 2 * sizeof(std::uint8_t)
                      + material_requirements::kRequirementCapacity
                            * sizeof(MaterialRequirementRecord));
+static_assert(sizeof(ItemRewardRecord) == 2 * sizeof(std::uint16_t) + sizeof(std::int32_t));
 static_assert(sizeof(ItemDetailRecord)
-              == 7 * sizeof(std::uint16_t) + 8 * sizeof(std::uint8_t) + sizeof(std::int32_t)
-                     + sizeof(std::uint32_t)
+              == 2 * sizeof(std::uint8_t)
+                     + items::details::kRewardCapacity * sizeof(ItemRewardRecord)
+                     + items::details::kObjectiveCapacity * sizeof(std::uint16_t)
+                     + sizeof(std::int32_t) + 7 * sizeof(std::uint16_t) + 8 * sizeof(std::uint8_t)
+                     + sizeof(std::int32_t) + sizeof(std::uint32_t)
                      + 2 * items::details::kInitialPlugCapacity * sizeof(std::uint16_t)
                      + items::details::kStatCapacity * (sizeof(std::uint8_t) + sizeof(std::int32_t))
                      + items::details::kSandboxPerkCapacity * sizeof(std::uint16_t)

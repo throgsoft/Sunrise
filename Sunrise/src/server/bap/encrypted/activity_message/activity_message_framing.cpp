@@ -10,6 +10,7 @@
 #include "../../../../middleware/bap/activity_message/player_trigger_incident.h"
 #include "../../../../middleware/bap/activity_message/sense_update.h"
 #include "../../../../state/activity_sdk/runtime.h"
+#include "../../gameplay_investment.h"
 #include "activity_message_route_internal.h"
 
 namespace sunrise::server::bap::encrypted::activity_message {
@@ -120,7 +121,7 @@ struct FramingRoute {
     return receipts::frame_authority_release(request, false);
 }
 
-/** Every adapter this route frames and records without changing State. */
+/** Envelope framing functions; validated kill incidents also enter investment below. */
 constexpr std::array<FramingRoute, 19> kFramingRoutes{{
     {IngressAdapter::routeMisuseReceipt, receipts::frame_route_misuse},
     {IngressAdapter::reservationRequest, receipts::frame_reservation_request},
@@ -146,8 +147,9 @@ constexpr std::array<FramingRoute, 19> kFramingRoutes{{
 } // namespace
 
 /**
- * Frames one message and records its receipt.
- * @param binding Exact ActivityClient generation owned by this link.
+ * Frames one message, records its receipt and admits supported gameplay investment.
+ * @param
+ * binding Exact ActivityClient generation owned by this link.
  * @param rosterDecode Last complete msg-5 identity map delivered on this same link.
  * @param adapter Ingress adapter the communication route named for this message type.
  * @param request Validated envelope.
@@ -242,6 +244,7 @@ bool frame_only(const ActivityClientBinding& binding,
         if (!server::activity::host::submit_incident(input)) {
             report_message(request.messageType, request.sessionId, "host_ingress_refused");
         }
+        invest_gameplay_incident_locked(binding, parsedIncident);
     }
     return true;
 }

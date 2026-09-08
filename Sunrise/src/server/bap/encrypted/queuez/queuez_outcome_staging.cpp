@@ -111,7 +111,10 @@ bool stage_service_outcome(Scratch& scratch,
     const auto* artifactPurchase = transaction_if<ArtifactPurchaseTransaction>(outcome);
     const auto* socket = transaction_if<SocketPlugTransaction>(outcome);
     const auto* itemDismantle = transaction_if<ItemDismantleTransaction>(outcome);
-    const auto presentationRows = preserveAcquisitionPresentation
+    const auto* reward = transaction_if<RecordRewardGrantTransaction>(outcome);
+    const bool consumesPursuit =
+        reward && reward->pending && reward->pending->pursuitRedemption.has_value();
+    const auto presentationRows = preserveAcquisitionPresentation && !consumesPursuit
                                       ? acquisitionPresentationRows
                                       : std::span<const AcquisitionPresentationRow>{};
     // Set before the branch chain rather than inside the equipment arm. That arm returns early
@@ -429,6 +432,10 @@ bool stage_service_outcome(Scratch& scratch,
             || dismantle.characterSoid != pending.characterSoid
             || dismantle.dismantledInstanceSoid != pending.dismantledInstanceSoid
             || dismantle.updatesAccount != pending.profileChanged
+            || dismantle.releasesInstance != pending.releasesDismantledInstance
+            || dismantle.after.family4ResidentCount
+                       + static_cast<unsigned>(dismantle.releasesInstance)
+                   != before.family4ResidentCount
             || dismantle.accountSoid != before.family4RootSoid || before.family4ResidentCount == 0
             || dismantle.accountDefinitionId != before.family4Residents.front().definitionId
             || dismantle.after.family4RootSoid != before.family4RootSoid

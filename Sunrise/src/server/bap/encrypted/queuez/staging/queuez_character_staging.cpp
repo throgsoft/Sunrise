@@ -535,7 +535,8 @@ bool stage_record_reward_grant(const SessionState& before,
                                std::uint64_t accountSoid,
                                std::uint64_t characterSoid,
                                std::span<const std::uint64_t> appendedResidents,
-                               RecordRewardGrant& grant) noexcept {
+                               RecordRewardGrant& grant,
+                               std::uint64_t releasedInstanceSoid) noexcept {
     grant = {};
     std::uint32_t accountDefinitionId = 0;
     std::uint32_t characterDefinitionId = 0;
@@ -543,6 +544,7 @@ bool stage_record_reward_grant(const SessionState& before,
     if (!valid(before) || !before.family4Active || accountSoid == 0 || characterSoid == 0
         || accountSoid != before.family4RootSoid || before.family4ResidentCount == 0
         || appendedResidents.size() > before.family4Residents.size() - before.family4ResidentCount
+                                          + static_cast<unsigned>(releasedInstanceSoid != 0)
         || before.family4Version == (std::numeric_limits<std::int32_t>::max)()
         || !middleware::datagen::object_id(
             kAccountFamilyType, middleware::datagen::kAccountSlot, accountDefinitionId)
@@ -579,6 +581,22 @@ bool stage_record_reward_grant(const SessionState& before,
 
     grant.after = before;
     ++grant.after.family4Version;
+    if (releasedInstanceSoid) {
+        std::size_t matches{};
+        std::size_t kept{};
+        for (std::size_t index = 0; index < before.family4ResidentCount; ++index) {
+            const auto& resident = before.family4Residents[index];
+            if (resident.objectSoid == releasedInstanceSoid) {
+                if (resident.definitionId != itemDefinitionId) return false;
+                ++matches;
+            } else
+                grant.after.family4Residents[kept++] = resident;
+        }
+        if (matches != 1) return false;
+        grant.after.family4Residents[kept] = {};
+        grant.after.family4ResidentCount =
+            static_cast<decltype(grant.after.family4ResidentCount)>(kept);
+    }
     for (const std::uint64_t soid : appendedResidents) {
         grant.after.family4Residents[grant.after.family4ResidentCount++] = {soid, itemDefinitionId};
     }
@@ -588,6 +606,7 @@ bool stage_record_reward_grant(const SessionState& before,
     grant.accountSoid = accountSoid;
     grant.characterSoid = characterSoid;
     grant.appendedResidentCount = appendedResidents.size();
+    grant.releasedInstanceSoid = releasedInstanceSoid;
     return valid(grant.after);
 }
 
@@ -691,6 +710,7 @@ bool stage_item_dismantle(const SessionState& before,
                           std::uint64_t characterSoid,
                           std::uint64_t dismantledInstanceSoid,
                           bool updatesAccount,
+                          bool releasesInstance,
                           ItemDismantle& dismantle) noexcept {
     dismantle = {};
     std::uint32_t accountDefinitionId = 0;
@@ -737,12 +757,14 @@ bool stage_item_dismantle(const SessionState& before,
 
     dismantle.after = before;
     ++dismantle.after.family4Version;
-    for (std::size_t index = dismantledResidentIndex + 1U; index < before.family4ResidentCount;
-         ++index) {
-        dismantle.after.family4Residents[index - 1U] = before.family4Residents[index];
+    if (releasesInstance) {
+        for (std::size_t index = dismantledResidentIndex + 1U; index < before.family4ResidentCount;
+             ++index) {
+            dismantle.after.family4Residents[index - 1U] = before.family4Residents[index];
+        }
+        --dismantle.after.family4ResidentCount;
+        dismantle.after.family4Residents[dismantle.after.family4ResidentCount] = {};
     }
-    --dismantle.after.family4ResidentCount;
-    dismantle.after.family4Residents[dismantle.after.family4ResidentCount] = {};
     dismantle.accountDefinitionId = accountDefinitionId;
     dismantle.characterDefinitionId = characterDefinitionId;
     dismantle.itemInstanceDefinitionId = itemInstanceDefinitionId;
@@ -750,6 +772,7 @@ bool stage_item_dismantle(const SessionState& before,
     dismantle.characterSoid = characterSoid;
     dismantle.dismantledInstanceSoid = dismantledInstanceSoid;
     dismantle.updatesAccount = updatesAccount;
+    dismantle.releasesInstance = releasesInstance;
     const bool staged = valid(dismantle.after);
     if (!staged) {
         std::array<char, core::log::kLineCapacity> line{};

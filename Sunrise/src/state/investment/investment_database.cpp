@@ -120,11 +120,11 @@ bool open(std::string_view path,
                 && transaction.commit();
     } else if (ready) {
         // Version 2 adds account preferences and per-item seen state.
-        constexpr int kSchemaVersion = 2;
+        constexpr int kSchemaVersion = 5;
         constexpr int kApplicationId = 1397902921;
         int application = 0;
         Statement query("PRAGMA application_id");
-        ready = (version == 1 || version == kSchemaVersion) && query.step() == SQLITE_ROW
+        ready = (version >= 1 && version <= kSchemaVersion) && query.step() == SQLITE_ROW
                 && query.column(0, application) && application == kApplicationId;
     }
     if (ready && version == 1) {
@@ -137,6 +137,54 @@ bool open(std::string_view path,
                 "IN(0,1));")
             && execute(preferenceSchema.c_str()) && execute(preferenceDefaults.c_str())
             && execute("PRAGMA user_version=2") && transaction.commit();
+    }
+    if (ready && (version == 1 || version == 2)) {
+        Transaction transaction;
+        ready = transaction.ready()
+                && execute(
+                    "CREATE TABLE item_objectives ("
+                    "instance_soid INTEGER PRIMARY KEY REFERENCES items(instance_soid) ON DELETE "
+                    "CASCADE,"
+                    "definition_index INTEGER NOT NULL CHECK(definition_index BETWEEN 0 AND 65535),"
+                    "v0 INTEGER NOT NULL CHECK(v0 BETWEEN 0 AND 2147483647),"
+                    "v1 INTEGER NOT NULL CHECK(v1 BETWEEN -2147483648 AND 2147483647),"
+                    "v2 INTEGER NOT NULL CHECK(v2 BETWEEN -2147483648 AND 2147483647),"
+                    "v3 INTEGER NOT NULL CHECK(v3 BETWEEN -2147483648 AND 2147483647),"
+                    "v4 INTEGER NOT NULL CHECK(v4 BETWEEN -2147483648 AND 2147483647),"
+                    "v5 INTEGER NOT NULL CHECK(v5 BETWEEN -2147483648 AND 2147483647),"
+                    "v6 INTEGER NOT NULL CHECK(v6 BETWEEN -2147483648 AND 2147483647),"
+                    "v7 INTEGER NOT NULL CHECK(v7 BETWEEN -2147483648 AND 2147483647)) STRICT;"
+                    "PRAGMA user_version=3;")
+                && transaction.commit();
+    }
+    if (ready && version >= 1 && version <= 3) {
+        Transaction transaction;
+        ready =
+            transaction.ready()
+            && execute(
+                "CREATE TABLE character_gambit_prime ("
+                "character_slot INTEGER PRIMARY KEY REFERENCES characters(slot) ON DELETE CASCADE,"
+                "reaper INTEGER NOT NULL CHECK(reaper BETWEEN 0 AND 3),"
+                "invader INTEGER NOT NULL CHECK(invader BETWEEN 0 AND 3),"
+                "collector INTEGER NOT NULL CHECK(collector BETWEEN 0 AND 3),"
+                "sentry INTEGER NOT NULL CHECK(sentry BETWEEN 0 AND 3),"
+                "synthesizer INTEGER NOT NULL CHECK(synthesizer BETWEEN 0 AND 3)"
+                ") STRICT;"
+                "PRAGMA user_version=4;")
+            && transaction.commit();
+    }
+    if (ready && version >= 1 && version <= 4) {
+        Transaction transaction;
+        ready =
+            transaction.ready()
+            && execute("CREATE TABLE gameplay_runs(id INTEGER PRIMARY KEY AUTOINCREMENT) STRICT;"
+                       "CREATE TABLE gameplay_receipts("
+                       "epoch INTEGER NOT NULL REFERENCES gameplay_runs(id),"
+                       "session INTEGER NOT NULL,revision INTEGER NOT NULL,player INTEGER NOT NULL,"
+                       "sequence INTEGER NOT NULL CHECK(sequence BETWEEN 1 AND 4294967295),"
+                       "PRIMARY KEY(epoch,session,revision,player,sequence)) STRICT, WITHOUT ROWID;"
+                       "PRAGMA user_version=5;")
+            && transaction.commit();
     }
     if (!ready) {
         shutdown();

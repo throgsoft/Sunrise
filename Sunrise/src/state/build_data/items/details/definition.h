@@ -7,6 +7,15 @@
 
 namespace sunrise::state::build_data::items::details {
 
+/** Seven objectives fit after the item tail's expiry lane. */
+inline constexpr std::size_t kObjectiveCapacity = 7;
+inline constexpr std::size_t kRewardCapacity = 8;
+struct Reward {
+    std::uint16_t itemIndex{};
+    std::uint16_t companionIndex{};
+    std::int32_t quantity{};
+};
+
 /** Detail rows. The installed build carries 15,424 items, so this is the bound above it. */
 inline constexpr std::size_t kDefinitionCapacity = 16384;
 /** Family item instances have 12 fixed ordinary socket lanes. */
@@ -88,6 +97,11 @@ unavailable_art_indices() noexcept {
 
 /** Installed-build fields required to generate one supported item instance. */
 struct Definition {
+    std::uint8_t objectiveCount{};
+    std::array<std::uint16_t, kObjectiveCapacity> objectiveIndices{};
+    std::int32_t lifetimeSeconds{};
+    std::uint8_t rewardCount{};
+    std::array<Reward, kRewardCapacity> rewards{};
     std::uint16_t definitionIndex{};
     /** The definition's own hash, which the character record collects for its overflow bank. */
     std::uint32_t definitionHash{};

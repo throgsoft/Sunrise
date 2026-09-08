@@ -522,6 +522,7 @@ bool process(const ServiceRoute& route,
                                                  itemDismantle->characterSoid,
                                                  itemDismantle->dismantledInstanceSoid,
                                                  itemDismantle->profileChanged,
+                                                 itemDismantle->releasesDismantledInstance,
                                                  transaction->update)) {
                 core::log::write(core::log::Channel::server,
                                  core::log::Level::warn,
@@ -559,11 +560,16 @@ bool process(const ServiceRoute& route,
             }
             const bool staged =
                 transaction != nullptr
-                && queuez::stage_record_reward_grant(queuezState,
-                                                     recordRewardGrant->accountSoid,
-                                                     recordRewardGrant->characterSoid,
-                                                     std::span(residents).first(residentCount),
-                                                     transaction->update);
+                && queuez::stage_record_reward_grant(
+                    queuezState,
+                    recordRewardGrant->accountSoid,
+                    recordRewardGrant->characterSoid,
+                    std::span(residents).first(residentCount),
+                    transaction->update,
+                    recordRewardGrant->pursuitRedemption
+                            && recordRewardGrant->pursuitRedemption->expectedQuantity == 1
+                        ? recordRewardGrant->pursuitRedemption->sourceInstanceSoid
+                        : 0);
             if (!staged) {
                 core::log::write(core::log::Channel::server,
                                  core::log::Level::warn,

@@ -182,6 +182,8 @@ bool resolve_item(const authored_inventory::Item& authored,
     }
 
     candidate.item.instance.instanceSoid = authored.instanceSoid;
+    candidate.item.instance.objectiveValues = authored.objectiveValues;
+    candidate.item.instance.objectiveDefinitionIndex = authored.objectiveDefinitionIndex;
     candidate.item.instance.bounds.itemDefinitionCount =
         static_cast<std::uint32_t>(itemDefinitionCount);
     candidate.item.instance.bounds.socketEntryListCount =

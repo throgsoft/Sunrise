@@ -18,6 +18,17 @@
 
 namespace sunrise::server::bap {
 
+/** Schedules a full persisted account image on every active Family-4 peer. */
+void request_account_resync() noexcept;
+
+struct GameplayInvestmentStatus {
+    std::uint64_t decoded{}, accepted{}, refused{}, duplicates{}, lanes{}, triumphs{};
+    std::size_t enemyClasses{}, combatLabels{};
+    const char* lastReason{"waiting_incident"};
+};
+/** Read-only diagnostics for normal wire-driven investment; no capture switch controls credit. */
+[[nodiscard]] GameplayInvestmentStatus gameplay_investment_status() noexcept;
+
 /** Notes that a committed publication replaced investment state before the next freshness query. */
 using InvestmentPublicationConsumer = void (*)() noexcept;
 

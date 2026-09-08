@@ -120,6 +120,10 @@ struct Item {
     /** Native accumulated item-state bits such as the finisher favorite marker. */
     std::uint32_t flags{};
     Sockets sockets;
+    /** Lane zero is the Unix expiry deadline; declared objective ordinal n uses lane n+1. */
+    std::array<std::int32_t, kItemObjectiveCapacity> objectiveValues{};
+    /** Installed item definition whose objective list owns the tail; all bits set means absent. */
+    std::uint16_t objectiveDefinitionIndex{0xFFFFU};
     /**
      * Selected ability-node socket entries. Only meaningful on a subclass. Kept on the item, not
      * the character, so each owned subclass remembers its own picks. Defaults match

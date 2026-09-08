@@ -607,6 +607,7 @@ bool prepare_item_dismantle(Scratch& scratch,
         || mutation.characterSoid != dismantle.characterSoid
         || mutation.dismantledInstanceSoid != dismantle.dismantledInstanceSoid
         || mutation.profileChanged != dismantle.updatesAccount
+        || mutation.releasesDismantledInstance != dismantle.releasesInstance
         || mutation.rewardCount > state::kDismantleRewardCapacity
         || mutation.profileChanged != (mutation.rewardCount != 0)
         || dismantle.accountDefinitionId == 0 || dismantle.characterDefinitionId == 0
@@ -627,12 +628,17 @@ bool prepare_item_dismantle(Scratch& scratch,
         || selected.itemInstanceObjectId != dismantle.itemInstanceDefinitionId) {
         return report_failure("dismantle_selection");
     }
+    const family4_datagen::instance::ResolvedInstance* retainedInstance = nullptr;
     for (std::size_t index = 0; index < selected.loadout.itemCount; ++index) {
         if (selected.loadout.items[index].instance.instanceSoid
             == mutation.dismantledInstanceSoid) {
-            return report_failure("dismantle_item_present");
+            if (dismantle.releasesInstance || retainedInstance)
+                return report_failure("dismantle_item_present");
+            retainedInstance = &selected.loadout.items[index].instance;
         }
     }
+    if (!dismantle.releasesInstance && !retainedInstance)
+        return report_failure("dismantle_retained_item_missing");
 
     const auto rawStorage = std::span(scratch.plaintext).subspan(reservation.rawWriteOffset);
     if (family4_datagen::character::layout::kObjectSize > rawStorage.size()) {
@@ -667,6 +673,22 @@ bool prepare_item_dismantle(Scratch& scratch,
         middleware::queuez::Encoding::oodle,
         {},
     };
+    if (retainedInstance) {
+        const auto instanceBytes = rawStorage.first(family4_datagen::instance::layout::kObjectSize);
+        if (!family4_datagen::instance::encode(*retainedInstance, instanceBytes)
+            || !append_object(scratch,
+                              instanceBytes,
+                              dismantle.itemInstanceDefinitionId,
+                              dismantle.dismantledInstanceSoid,
+                              staged.objects[1],
+                              compressedExtent)) {
+            clear_after(scratch, reservation);
+            return report_failure("dismantle_retained_instance");
+        }
+        staged.rawClearSize =
+            (std::max)(staged.rawClearSize,
+                       reservation.rawWriteOffset + family4_datagen::instance::layout::kObjectSize);
+    }
 
     std::size_t objectCount = 2;
     if (dismantle.updatesAccount) {

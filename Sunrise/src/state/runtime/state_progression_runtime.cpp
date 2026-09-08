@@ -250,10 +250,9 @@ bool publish_experience_lanes(std::int32_t experience) noexcept {
            && unlocks::set_account_progression(kArtifactUnlockProgressionIndex, experience)
            && unlocks::set_account_progression(pass::kProgressionDefinitionIndex,
                                                (std::min)(experience, kMaximumPassExperience))
-           && unlocks::set_account_progression(pass::kHudProgressionDefinitionIndex,
-                                               experience < kMaximumPassExperience
-                                                   ? experience % kExperiencePerRank
-                                                   : experience - kMaximumPassExperience);
+           && unlocks::set_account_progression(
+               pass::kHudProgressionDefinitionIndex,
+               experience < kMaximumPassExperience ? 0 : experience - kMaximumPassExperience);
 }
 
 } // namespace

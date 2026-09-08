@@ -382,6 +382,9 @@ bool consume(Session& session,
         }
     }
     const bool artifactPurchase = transaction_if<ArtifactPurchaseTransaction>(outcome) != nullptr;
+    const auto* rewardTransaction = transaction_if<RecordRewardGrantTransaction>(outcome);
+    const bool pursuitRedemption = rewardTransaction && rewardTransaction->pending
+                                   && rewardTransaction->pending->pursuitRedemption.has_value();
     const bool mutatesAccount =
         outcome.hasSelectCharacter || outcome.hasRecordClaim || outcome.hasArtifactReset
         || transaction_if<EquipmentSwapTransaction>(outcome) != nullptr
@@ -402,7 +405,7 @@ bool consume(Session& session,
         || transaction_if<SeasonPassRewardTransaction>(outcome) != nullptr;
     const bool invalidatesAcquisitionPresentation =
         outcome.hasChangeCharacter || outcome.hasSelectCharacter || outcome.hasArtifactReset
-        || transaction_if<ItemDismantleTransaction>(outcome) != nullptr;
+        || transaction_if<ItemDismantleTransaction>(outcome) != nullptr || pursuitRedemption;
     const bool hasPrecommittedAccountAction =
         outcome.hasRecordClaim || outcome.hasSelectCharacter || outcome.hasArtifactReset;
     // Commit consumes pending payloads, so retain the connection fields first.
@@ -521,7 +524,9 @@ bool consume(Session& session,
             }
             const bool resyncsCommittedAccount =
                 hasPrecommittedAccountAction && !queuezPublication.hasState;
-            if (resyncsCommittedAccount) {
+            // Pursuit XP/rank banks commit after the prepared inventory frame. Republish those
+            // committed banks through the ordinary deferred refresh; never grant them again.
+            if (resyncsCommittedAccount || pursuitRedemption) {
                 bap::arm_account_resync_everywhere();
             }
             if (artifactPurchase || outcome.hasArtifactReset) {

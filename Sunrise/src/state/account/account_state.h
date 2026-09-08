@@ -79,6 +79,34 @@ enum class CharacterClass : std::uint8_t {
     warlock = 2,
 };
 
+/** The four mutually exclusive armor roles used by Gambit Prime and Reckoning. */
+enum class GambitPrimeRole : std::uint8_t {
+    none = 0,
+    reaper,
+    invader,
+    collector,
+    sentry,
+};
+
+/** Number of concrete Prime roles carried by one character's authoritative reward state. */
+inline constexpr std::size_t kGambitPrimeRoleCount = 4;
+
+/** Highest role-head tier a character has earned from Prime's stateful weekly rewards. */
+enum class GambitPrimeHelmetTier : std::uint8_t {
+    none = 0,
+    illicit,
+    outlawed,
+    notorious,
+};
+
+/** Prime's account selector advanced by the semantic Synthesizer Upgrade reward row. */
+enum class GambitPrimeSynthesizerTier : std::uint8_t {
+    none = 0,
+    weak,
+    middling,
+    powerful,
+};
+
 /** Default movement entry. Each subclass offers 3, as entries 4, 5 and 6 of its group. */
 inline constexpr std::uint8_t kDefaultMovementAbilityEntry = 4;
 
@@ -165,6 +193,8 @@ struct CharacterState {
     account::inventory::CharacterStacks stacks;
     /** Next row generation; equip transactions consume two values for the two moved items. */
     std::uint32_t nextInventorySerial{};
+    std::array<GambitPrimeHelmetTier, kGambitPrimeRoleCount> gambitPrimeHelmetTiers{};
+    GambitPrimeSynthesizerTier gambitPrimeSynthesizerTier{GambitPrimeSynthesizerTier::none};
 };
 
 /** Call-local account snapshot shared by backend object families. */

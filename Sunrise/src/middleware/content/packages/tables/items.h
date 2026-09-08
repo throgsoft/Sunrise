@@ -7,6 +7,14 @@
 
 namespace sunrise::middleware::content::packages::tables::items {
 
+inline constexpr std::size_t kObjectiveCapacity = 7;
+inline constexpr std::size_t kRewardCapacity = 8;
+struct Reward {
+    std::uint16_t itemIndex{};
+    std::uint16_t companionIndex{};
+    std::int32_t quantity{};
+};
+
 /** Ordinary socket lanes an item definition can declare. */
 inline constexpr std::size_t kSocketCapacity = 12;
 /** All bits set marks a socket lane with no initial plug. */
@@ -38,6 +46,13 @@ struct RenderOverride {
 
 /** One item row read from its own definition blob. */
 struct Row {
+    /** Identity rows remain usable even when optional pursuit metadata cannot be represented. */
+    bool objectiveMetadataValid{true};
+    std::uint8_t objectiveCount{};
+    std::uint16_t objectiveIndices[kObjectiveCapacity]{};
+    std::int32_t lifetimeSeconds{};
+    std::uint8_t rewardCount{};
+    Reward rewards[kRewardCapacity]{};
     std::uint32_t definitionHash{};
     std::uint16_t definitionIndex{};
     std::uint8_t bucketId{};

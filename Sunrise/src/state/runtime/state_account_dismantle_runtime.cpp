@@ -13,11 +13,13 @@ namespace sunrise::state {
 
 using namespace runtime::detail;
 
-/** Prepares one selected-character unequipped item removal without changing account State. */
-bool prepare_item_dismantle(std::uint64_t instanceSoid, PendingItemDismantle& mutation) noexcept {
+/** Prepares one selected-character one-unit discard without changing account State. */
+bool prepare_item_dismantle(std::uint64_t instanceSoid,
+                            std::int32_t expectedStackQuantity,
+                            PendingItemDismantle& mutation) noexcept {
     mutation = {};
     const AccountState account = account_snapshot();
-    if (instanceSoid == 0 || !account::valid(account)) {
+    if (instanceSoid == 0 || expectedStackQuantity <= 0 || !account::valid(account)) {
         report_dismantle("prepare", "fail", "input", 0, 0, instanceSoid, 0, 0, 0, 0, 0);
         return false;
     }
@@ -30,7 +32,8 @@ bool prepare_item_dismantle(std::uint64_t instanceSoid, PendingItemDismantle& mu
         }
     }
     if (characterIndex >= account.characterCount
-        || !stage_item_dismantle(account, characterIndex, instanceSoid, mutation)) {
+        || !stage_item_dismantle(
+            account, characterIndex, instanceSoid, expectedStackQuantity, mutation)) {
         report_dismantle(
             "prepare", "fail", "ownership_or_resolve", 0, 0, instanceSoid, 0, 0, 0, 0, 0);
         return false;

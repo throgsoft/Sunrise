@@ -81,6 +81,10 @@ void revoke(std::uint16_t recordIndex) noexcept;
  */
 [[nodiscard]] ObjectiveAdvance advance_objective(std::uint16_t flagIndex) noexcept;
 
+/** Advances an explicitly selected cumulative interval counter without claiming its rewards. */
+[[nodiscard]] ObjectiveAdvance advance_interval_objective(std::uint16_t recordIndex,
+                                                          std::uint32_t definitionHash) noexcept;
+
 /** @return Triumph score published in the account value bank. */
 [[nodiscard]] std::uint32_t score() noexcept;
 

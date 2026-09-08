@@ -76,7 +76,22 @@ static_assert(kDefinitionCapacity < kEmptyLookupRow);
 
 /** @return True when every structure field of the record is valid. */
 [[nodiscard]] bool definition_valid(const Definition& definition) noexcept {
-    return definition.bucketId != items::kUnresolvedBucketId && definition.maxStackSize > 0
+    return definition.objectiveCount <= definition.objectiveIndices.size()
+           && definition.rewardCount <= definition.rewards.size()
+           && std::all_of(definition.rewards.begin() + definition.rewardCount,
+                          definition.rewards.end(),
+                          [](const Reward& row) {
+                              return row.itemIndex == 0 && row.companionIndex == 0
+                                     && row.quantity == 0;
+                          })
+           && std::all_of(definition.rewards.begin(),
+                          definition.rewards.begin() + definition.rewardCount,
+                          [](const Reward& row) { return row.quantity >= 0; })
+           && definition.lifetimeSeconds >= 0
+           && std::all_of(definition.objectiveIndices.begin() + definition.objectiveCount,
+                          definition.objectiveIndices.end(),
+                          [](auto index) { return index == 0; })
+           && definition.bucketId != items::kUnresolvedBucketId && definition.maxStackSize > 0
            && instance_state_valid(definition.instancedDefinitionState)
            && equipment_slot_valid(definition) && ordinary_sockets_valid(definition);
 }

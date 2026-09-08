@@ -622,7 +622,9 @@ bool claim_interval(std::uint16_t recordIndex, std::uint32_t definitionHash) noe
             return;
         }
         catalog::Interval step{};
-        if (!catalog::interval(record, static_cast<std::size_t>(redeemed), step)) {
+        if (!catalog::interval(record, static_cast<std::size_t>(redeemed), step)
+            || record.objectiveValueIndex >= table.objectiveValues.size()
+            || table.objectiveValues[record.objectiveValueIndex] < step.completionValue) {
             return;
         }
         ++redeemed;
@@ -678,6 +680,38 @@ ObjectiveAdvance advance_objective(std::uint16_t flagIndex) noexcept {
         request.advance = advance_locked(table, request.flagIndex);
     });
     return saved ? operation.advance : ObjectiveAdvance::unavailable;
+}
+
+ObjectiveAdvance advance_interval_objective(std::uint16_t recordIndex,
+                                            std::uint32_t definitionHash) noexcept {
+    struct Request {
+        std::uint16_t index;
+        std::uint32_t hash;
+        ObjectiveAdvance result;
+    } request{recordIndex, definitionHash, ObjectiveAdvance::unavailable};
+    const bool saved = mutate(&request, [](void* context, Table& table) noexcept {
+        auto& value = *static_cast<Request*>(context);
+        catalog::Definition record{};
+        catalog::Interval last{};
+        if (!catalog::find(value.index, record) || record.definitionHash != value.hash
+            || record.intervalCount == 0
+            || record.completionFlagIndex != catalog::kUnavailableFlagIndex
+            || record.objectiveValueIndex >= table.objectiveValues.size()
+            || record.objectiveValueIndex == record.redeemedCountValueIndex
+            || !catalog::interval(record, record.intervalCount - 1U, last)
+            || last.completionValue <= 0)
+            return;
+        auto& progress = table.objectiveValues[record.objectiveValueIndex];
+        if (progress < 0) return;
+        if (progress >= last.completionValue) {
+            value.result = ObjectiveAdvance::alreadyHeld;
+            return;
+        }
+        ++progress;
+        value.result = progress == last.completionValue ? ObjectiveAdvance::completed
+                                                        : ObjectiveAdvance::advanced;
+    });
+    return saved ? request.result : ObjectiveAdvance::unavailable;
 }
 
 /** @return Triumph score published in the account value bank. */

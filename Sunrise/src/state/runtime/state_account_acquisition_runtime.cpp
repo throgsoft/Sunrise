@@ -6,7 +6,10 @@
 #include <cstdint>
 #include <limits>
 
+#include "../../core/runtime/wall_clock.h"
 #include "../../middleware/datagen/family4/loadout/loadout_resolver.h"
+#include "../account/inventory/dawning_oven_state.h"
+#include "../account/pursuit_hold.h"
 #include "../build_data/runtime.h"
 #include "../investment/store_internal.h"
 #include "runtime.h"
@@ -41,6 +44,21 @@ namespace runtime::detail {
                                              bool profileChanged,
                                              const GrantSource& source,
                                              PendingItemAcquisition& mutation) noexcept {
+    if (authored_inventory::dawning::ingredient(definitionHash)
+        != authored_inventory::dawning::kIngredientCount)
+        return false;
+    build_data::items::Definition grantedDefinition{};
+    item_details::Definition acquiredDetail{};
+    if (!build_data::find_item_definition_hash(definitionHash, grantedDefinition)
+        || !build_data::find_configured_item_detail(grantedDefinition.definitionIndex,
+                                                    acquiredDetail)
+        || acquiredDetail.definitionIndex != grantedDefinition.definitionIndex
+        || acquiredDetail.definitionHash != definitionHash
+        || acquiredDetail.bucketId != grantedDefinition.bucketId
+        || acquiredDetail.objectiveCount > authored_inventory::kItemObjectiveLaneCount
+        || acquiredDetail.lifetimeSeconds < 0
+        || account::holds_pursuit(account, grantedDefinition.definitionIndex))
+        return false;
     const std::size_t characterIndex = selected_character_index(account);
     if (characterIndex >= account.characterCount) {
         return false;
@@ -67,6 +85,14 @@ namespace runtime::detail {
     acquired.quantity = 1;
     acquired.mutationSerial = static_cast<std::int32_t>(after.nextInventorySerial++);
     acquired.sockets.policy = authored_inventory::SocketPolicy::nativeDefaults;
+    if (acquiredDetail.objectiveCount != 0) {
+        acquired.objectiveDefinitionIndex = grantedDefinition.definitionIndex;
+        if (acquiredDetail.lifetimeSeconds > 0
+            && !core::runtime::investment_deadline(
+                acquiredDetail.lifetimeSeconds,
+                acquired.objectiveValues[authored_inventory::kItemExpiryLane]))
+            return false;
+    }
     after.inventory.values[inventoryIndex] = acquired;
     ++after.inventory.count;
 
@@ -519,7 +545,9 @@ finalize_profile_item_acquisition(const AccountState& account,
                                   std::int32_t quantity,
                                   const GrantSource& source,
                                   PendingProfileItemAcquisition& mutation) noexcept {
-    if (quantity <= 0 || quantity > detail.maxStackSize) {
+    if (authored_inventory::dawning::ingredient(definitionHash)
+            != authored_inventory::dawning::kIngredientCount
+        || quantity <= 0 || quantity > detail.maxStackSize) {
         return false;
     }
     std::size_t profileIndex = chargedAccount.profileItemCount;

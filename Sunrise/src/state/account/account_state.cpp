@@ -118,6 +118,12 @@ constexpr std::uint8_t kDismantleClassMaskBits =
             || !inventory::valid(character.inventory) || !inventory::valid(character.stacks)) {
             return false;
         }
+        if (character.gambitPrimeSynthesizerTier > GambitPrimeSynthesizerTier::powerful
+            || std::any_of(
+                character.gambitPrimeHelmetTiers.begin(),
+                character.gambitPrimeHelmetTiers.end(),
+                [](GambitPrimeHelmetTier tier) { return tier > GambitPrimeHelmetTier::notorious; }))
+            return false;
         selected = selected || character.selected;
         for (const std::optional<inventory::Item>& item : character.equipment.slots) {
             if (item.has_value()

@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <span>
 #include <string_view>
 #include <type_traits>
 
@@ -94,6 +95,11 @@ same_profile_inventory(const AccountState& account,
         right,
     std::size_t rightCount) noexcept;
 [[nodiscard]] bool valid_profile_inventory(const AccountState& account) noexcept;
+/** Pure cumulative reward after-image used by paid redemptions after their source is removed. */
+[[nodiscard]] bool stage_record_reward_grant(const AccountState& account,
+                                             std::span<const DirectRecordReward> rewards,
+                                             std::uint16_t claimedRecordIndex,
+                                             PendingRecordRewardGrant& mutation) noexcept;
 [[nodiscard]] bool
 apply_collection_materials(const AccountState& before,
                            const build_data::collectibles::Definition& collectible,
@@ -204,6 +210,7 @@ find_resolved_position(const middleware::datagen::family4::loadout::ResolvedLoad
 [[nodiscard]] bool stage_item_dismantle(const AccountState& account,
                                         std::size_t characterIndex,
                                         std::uint64_t instanceSoid,
+                                        std::int32_t expectedStackQuantity,
                                         PendingItemDismantle& mutation) noexcept;
 [[nodiscard]] bool same_dismantle_transition(const PendingItemDismantle& left,
                                              const PendingItemDismantle& right) noexcept;

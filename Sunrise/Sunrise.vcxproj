@@ -2155,5 +2155,78 @@
     <None Include="resources\database\account_settings_schema.sql" />
     <None Include="resources\database\account_settings_defaults.sql" />
   </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="src\client\console\client_console_commands.cpp" />
+    <ClInclude Include="src\client\console\client_console_commands.h" />
+    <ClCompile Include="src\client\console\console_line.cpp" />
+    <ClInclude Include="src\client\console\console_line.h" />
+    <ClCompile Include="src\client\console\console_overlay.cpp" />
+    <ClInclude Include="src\client\console\console_overlay.h" />
+    <ClCompile Include="src\client\console\console_registry.cpp" />
+    <ClInclude Include="src\client\console\console_registry.h" />
+    <ClInclude Include="src\client\console\definition.h" />
+    <ClCompile Include="src\client\content\combat_labels\combat_label_load.cpp" />
+    <ClInclude Include="src\client\content\combat_labels\combat_label_load.h" />
+    <ClCompile Include="src\client\content\enemy_classes\enemy_class_load.cpp" />
+    <ClInclude Include="src\client\content\enemy_classes\enemy_class_load.h" />
+    <ClCompile Include="src\client\content\items\packages\package_objective_build.cpp" />
+    <ClInclude Include="src\client\content\items\packages\package_objective_build.h" />
+    <ClCompile Include="src\core\runtime\wall_clock.cpp" />
+    <ClInclude Include="src\core\runtime\wall_clock.h" />
+    <ClCompile Include="src\middleware\bap\activity_message\activity_kill_incident_codec.cpp" />
+    <ClInclude Include="src\middleware\bap\activity_message\kill_incident.h" />
+    <ClCompile Include="src\server\bap\bap_gameplay_investment.cpp" />
+    <ClInclude Include="src\server\bap\gameplay_bubble_context.h" />
+    <ClInclude Include="src\server\bap\gameplay_investment.h" />
+    <ClCompile Include="src\server\web_service\vendor\dawning_vendor_actions.cpp" />
+    <ClInclude Include="src\server\web_service\vendor\dawning_vendor_actions.h" />
+    <ClInclude Include="src\state\account\inventory\dawning_oven_state.h" />
+    <ClInclude Include="src\state\bounties\gameplay_kill_investment.h" />
+    <ClInclude Include="src\state\bounties\gameplay_progress.h" />
+    <ClInclude Include="src\state\bounties\kill_rule_catalog.h" />
+    <ClInclude Include="src\state\bounties\named_area_rules.h" />
+    <ClInclude Include="src\state\bounties\weapon_slot.h" />
+    <ClCompile Include="src\state\build_data\combat_labels\catalog.cpp" />
+    <ClInclude Include="src\state\build_data\combat_labels\catalog.h" />
+    <ClInclude Include="src\state\build_data\combat_labels\definition.h" />
+    <ClInclude Include="src\state\build_data\enemy_classes\definition.h" />
+    <ClCompile Include="src\state\build_data\enemy_classes\enemy_class_catalog.cpp" />
+    <ClInclude Include="src\state\build_data\enemy_classes\enemy_class_catalog.h" />
+    <ClInclude Include="src\state\build_data\objectives\definition.h" />
+    <ClCompile Include="src\state\build_data\objectives\objective_build_data_runtime.cpp" />
+    <ClCompile Include="src\state\build_data\pursuits\pursuit_progress.cpp" />
+    <ClInclude Include="src\state\build_data\pursuits\pursuit_progress.h" />
+    <ClInclude Include="src\state\runtime\bounty_redemption_runtime.h" />
+    <ClCompile Include="src\state\runtime\bounty_reward_grant_runtime.cpp" />
+    <ClInclude Include="src\state\runtime\bounty_reward_policy.h" />
+    <ClInclude Include="src\state\runtime\bounty_reward_policy_data.h" />
+    <ClInclude Include="src\state\runtime\bounty_stack_reward_plan.h" />
+    <ClInclude Include="src\state\runtime\dawning_oven_delivery.h" />
+    <ClCompile Include="src\state\runtime\dawning_oven_persistence.cpp" />
+
+    <ClCompile Include="src\state\runtime\dawning_oven_runtime.cpp" />
+    <ClInclude Include="src\state\runtime\dawning_oven_runtime.h" />
+    <ClCompile Include="src\state\runtime\dawning_reward_runtime.cpp" />
+    <ClInclude Include="src\state\runtime\dawning_reward_runtime.h" />
+    <ClCompile Include="src\state\runtime\gameplay_investment_runtime.cpp" />
+    <ClInclude Include="src\state\runtime\gameplay_investment_runtime.h" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="src\client\console\pursuit_grant_lists.h" />
+    <ClCompile Include="src\state\runtime\developer_investment_runtime.cpp" />
+    <ClInclude Include="src\state\runtime\developer_investment_runtime.h" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="src\state\runtime\bounty_redemption_runtime.cpp" />
+    <ClCompile Include="src\state\runtime\dawning_bounty_runtime.cpp" />
+    <ClInclude Include="src\state\runtime\dawning_bounty_runtime.h" />
+    <ClCompile Include="src\state\runtime\dawning_oven_delivery.cpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="src\server\bap\encrypted\push\snapshot\dawning_oven_projection.h" />
+    <ClInclude Include="src\state\account\inventory\dawning_oven_readiness.h" />
+    <ClCompile Include="src\state\runtime\dawning_default_oven_runtime.cpp" />
+    <ClInclude Include="src\state\runtime\dawning_default_oven_runtime.h" />
+  </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
 </Project>

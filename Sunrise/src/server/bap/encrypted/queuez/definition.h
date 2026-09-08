@@ -186,6 +186,7 @@ struct RecordRewardGrant {
     std::uint64_t accountSoid{};
     std::uint64_t characterSoid{};
     std::size_t appendedResidentCount{};
+    std::uint64_t releasedInstanceSoid{};
 };
 
 /** Validated item-dismantle after-image for one character upsert and one instance release. */
@@ -199,6 +200,7 @@ struct ItemDismantle {
     std::uint64_t dismantledInstanceSoid{};
     /** True when the same revision also publishes credited profile materials. */
     bool updatesAccount{};
+    bool releasesInstance{};
 };
 
 /** Queuez fields published after every staged frame is copied to caller output. */

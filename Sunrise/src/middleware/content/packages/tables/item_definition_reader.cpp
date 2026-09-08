@@ -78,6 +78,79 @@ read(std::span<const std::byte> blob, std::size_t offset, Value& value) noexcept
     return true;
 }
 
+/** Reads the serialized reward header and every declared row; partial payouts are refused. */
+[[nodiscard]] bool read_reward_metadata(std::span<const std::byte> definition, Row& row) noexcept {
+    row.rewardCount = 0;
+    std::fill_n(row.rewards, kRewardCapacity, Reward{});
+    constexpr std::size_t pointerOffset = 152;
+    constexpr std::uint32_t rewardClass = 0x80807875U;
+    std::int64_t relative = 0;
+    if (!read(definition, pointerOffset, relative)) return false;
+    if (relative == 0) return true;
+    // Validate before adding the signed relative offset; no negative or wrapped blob pointer.
+    if (relative < -static_cast<std::int64_t>(pointerOffset)
+        || relative > static_cast<std::int64_t>(definition.size())
+                          - static_cast<std::int64_t>(pointerOffset))
+        return false;
+    const auto at = static_cast<std::size_t>(static_cast<std::int64_t>(pointerOffset) + relative);
+    std::uint32_t cls = 0, count = 0, headerItem = 0;
+    std::int32_t headerQuantity = 0;
+    if (at < 4 || !read(definition, at - 4, cls) || cls != rewardClass
+        || !read(definition, at, count) || count >= kRewardCapacity
+        || !read(definition, at + 4, headerItem) || headerItem > 0xFFFFU
+        || !read(definition, at + 8, headerQuantity) || headerQuantity < 0)
+        return false;
+    row.rewards[0] = {static_cast<std::uint16_t>(headerItem), 0xFFFFU, headerQuantity};
+    for (std::size_t i = 0; i < count; ++i) {
+        const auto entry = at + 12 + i * 12;
+        std::uint32_t item = 0, companion = 0;
+        std::int32_t quantity = 0;
+        if (!read(definition, entry, companion) || companion > 0xFFFFU
+            || !read(definition, entry + 4, item) || item > 0xFFFFU
+            || !read(definition, entry + 8, quantity) || quantity < 0)
+            return false;
+        row.rewards[i + 1] = {
+            static_cast<std::uint16_t>(item), static_cast<std::uint16_t>(companion), quantity};
+    }
+    row.rewardCount = static_cast<std::uint8_t>(count + 1);
+    return true;
+}
+
+/** Reads serialized pursuit metadata through checked package-array descriptors. */
+[[nodiscard]] bool read_pursuit_metadata(std::span<const std::byte> definition, Row& row) noexcept {
+    row.objectiveCount = 0;
+    std::fill_n(row.objectiveIndices, kObjectiveCapacity, 0);
+    row.lifetimeSeconds = 0;
+    if (row.equipmentSlot.has_value() || row.maxStackSize > 1) return true;
+    constexpr std::size_t objectiveDescriptor = 392;
+    constexpr std::size_t lifetimeDescriptor = 192;
+    constexpr std::uint32_t lifetimeClass = 0x80807D31U;
+    Array objectives{};
+    if (!find_optional_array_at(definition, objectiveDescriptor, objectives)) {
+        // Bucket 40 is the pursuit bucket. Refuse malformed rows rather than grant empty tails.
+        return row.bucketId != 40;
+    }
+    if (objectives.count == 0) return true;
+    if (objectives.elementClass != kObjectiveReferenceArrayClass
+        || objectives.count > kObjectiveCapacity)
+        return false;
+    for (std::size_t i = 0; i < objectives.count; ++i) {
+        if (!read(definition,
+                  objectives.dataOffset + i * sizeof(std::uint16_t),
+                  row.objectiveIndices[i]))
+            return false;
+    }
+    row.objectiveCount = static_cast<std::uint8_t>(objectives.count);
+    Array lifetime{};
+    if (!find_optional_array_at(definition, lifetimeDescriptor, lifetime)) return false;
+    if (lifetime.count != 0
+        && (lifetime.count != 1 || lifetime.elementClass != lifetimeClass
+            || !read(definition, lifetime.dataOffset + 4, row.lifetimeSeconds)
+            || row.lifetimeSeconds < 0))
+        return false;
+    return true;
+}
+
 /**
  * Reads the socket entry list index a definition declares.
  * @param definition Whole item definition bytes.
@@ -354,8 +427,12 @@ bool read_definition(std::span<const std::byte> definition, Row& row) noexcept {
                row.enabledMaterialRequirementSetIndex);
     read_stats(definition, row);
     read_appearance(definition, row);
-    read_socket_entry_list(definition, row);
     read_equipment_slot(definition, row.equipmentSlot, row.rawEquipmentSlot);
+    row.objectiveMetadataValid = read_pursuit_metadata(definition, row);
+    if (row.objectiveMetadataValid && row.objectiveCount != 0) {
+        row.objectiveMetadataValid = read_reward_metadata(definition, row);
+    }
+    read_socket_entry_list(definition, row);
     read_sockets(definition, row);
     return true;
 }

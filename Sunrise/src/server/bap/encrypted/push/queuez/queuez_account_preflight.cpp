@@ -3,6 +3,7 @@
 #include <cstdio>
 
 #include "../../../../../core/logging/log.h"
+#include "../../../../../state/runtime/dawning_default_oven_runtime.h"
 #include "../../../../../state/runtime/runtime.h"
 #include "../../internal.h"
 
@@ -11,6 +12,9 @@ namespace {
 
 /** Set once the verdict can no longer change, so later frames skip the state lock. */
 std::atomic<bool> g_settled{false};
+/** Diagnostic suppression only; the durable per-character marker decides whether to grant. */
+std::atomic<state::DawningOvenBootstrapStatus> g_ovenStatus{
+    state::DawningOvenBootstrapStatus::notReady};
 
 /**
  * Reports one preflight that left the account uncanonical.
@@ -33,6 +37,20 @@ void report(core::log::Level level, const char* reason) noexcept {
 
 /** Canonicalizes the account before any family image is allowed to read it. */
 void ensure_account_canonical() noexcept {
+    // Selection can change after emotes settle. State owns a separate durable marker per
+    // character, so a discarded default quest stays discarded across requests and restarts.
+    const auto oven = state::ensure_default_dawning_oven();
+    const auto previous = g_ovenStatus.exchange(oven.status, std::memory_order_relaxed);
+    if (oven.status == state::DawningOvenBootstrapStatus::refused && previous != oven.status) {
+        report(core::log::Level::warn, "default_oven_refused");
+    }
+    if (oven.changed) {
+        core::log::write(core::log::Channel::server,
+                         core::log::Level::info,
+                         "ev=queuez stage=default_oven result=granted");
+    }
+    // The State call has released SQLite, and the upcoming snapshot reads the committed oven.
+    // Do not reacquire the session lock through the public resync wrapper from this preflight.
     if (g_settled.load(std::memory_order_acquire)) {
         return;
     }

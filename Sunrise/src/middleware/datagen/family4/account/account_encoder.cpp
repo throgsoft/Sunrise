@@ -6,6 +6,7 @@
 #include <limits>
 #include <span>
 
+#include "../../../../state/account/inventory/dawning_oven_readiness.h"
 #include "../../../../state/build_data/runtime.h"
 #include "../../../../state/unlocks/unlocks_runtime.h"
 #include "../progression/progression_bank_keys.h"
@@ -96,6 +97,9 @@ bool encode(const state::AccountState& state, std::span<std::byte> output) noexc
     object.acquiredFlags = unlocks.accountFlags;
     object.profileUnlockFlags = unlocks.profileFlags;
     object.objectiveValues = unlocks.objectiveValues;
+    if (!state::account::inventory::dawning::project_chooser_readiness(state,
+                                                                       object.objectiveValues))
+        return false;
 
     for (std::size_t index = 0; index < state.characterCount; ++index) {
         state::unlocks::Table character;
@@ -118,10 +122,22 @@ bool encode(const state::AccountState& state, std::span<std::byte> output) noexc
     }
     // Profile rows are sentinelled above, so placement only has to claim its own slots.
     std::array<std::uint16_t, kBucketIdentityCapacity> takenSlots{};
-    for (std::size_t index = 0; index < state.profileItemCount; ++index) {
-        if (!place_profile_item(
-                state.profileItems[index], takenSlots, object.profileItems, object.newItemFlags)) {
-            return false;
+    // Group repeated stack definitions at their first occurrence. Keep State indices and
+    // each definition's stack order intact; publication alone chooses their native rows.
+    std::array<bool, state::account::inventory::kProfileItemCapacity> emitted{};
+    for (std::size_t first = 0; first < state.profileItemCount; ++first) {
+        if (emitted[first]) continue;
+        for (std::size_t index = first; index < state.profileItemCount; ++index) {
+            if (emitted[index]
+                || state.profileItems[index].definitionHash
+                       != state.profileItems[first].definitionHash)
+                continue;
+            if (!place_profile_item(state.profileItems[index],
+                                    takenSlots,
+                                    object.profileItems,
+                                    object.newItemFlags))
+                return false;
+            emitted[index] = true;
         }
     }
     object.profileItemCount = static_cast<std::uint32_t>(state.profileItemCount);

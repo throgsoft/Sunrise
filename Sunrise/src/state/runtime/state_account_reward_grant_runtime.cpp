@@ -14,6 +14,9 @@
 #include "../investment/store_internal.h"
 #include "../progression/season_pass_reward_catalog.h"
 #include "../unlocks/unlocks_records.h"
+#include "bounty_redemption_runtime.h"
+#include "dawning_oven_delivery.h"
+#include "dawning_reward_runtime.h"
 #include "runtime.h"
 #include "state_account_transaction_helpers.h"
 #include "storage/internal.h"
@@ -94,22 +97,24 @@ bool commit_season_pass_reward(PendingSeasonPassReward& mutation) noexcept {
         return false;
     }
 
-    investment::store::g_mutex.lock();
-    AccountState after{};
-    bool ready = false;
-    if (const auto* item = std::get_if<PendingItemAcquisition>(&mutation.grant)) {
-        ready = materialize_item_acquisition(investment::store::account(), *item, after);
-    } else if (const auto* profile = std::get_if<PendingProfileItemAcquisition>(&mutation.grant)) {
-        ready = materialize_profile_acquisition(investment::store::account(), *profile, after);
-    } else if (const auto* bundle = std::get_if<PendingDirectItemBundle>(&mutation.grant)) {
-        ready = materialize_direct_item_bundle(investment::store::account(), *bundle, after);
-    } else if (const auto* resources = std::get_if<PendingRecordRewardGrant>(&mutation.grant)) {
-        ready = materialize_record_reward(investment::store::account(), *resources, after);
-    }
-    if (ready) {
-        ready = investment::store::write_account(after);
-    }
-    investment::store::g_mutex.unlock();
+    const bool ready = [&]() noexcept {
+        investment::store::Transaction transaction;
+        if (!transaction.ready()) return false;
+        AccountState after{};
+        bool staged = false;
+        if (const auto* item = std::get_if<PendingItemAcquisition>(&mutation.grant)) {
+            staged = materialize_item_acquisition(investment::store::account(), *item, after);
+        } else if (const auto* profile =
+                       std::get_if<PendingProfileItemAcquisition>(&mutation.grant)) {
+            staged = materialize_profile_acquisition(investment::store::account(), *profile, after);
+        } else if (const auto* bundle = std::get_if<PendingDirectItemBundle>(&mutation.grant)) {
+            staged = materialize_direct_item_bundle(investment::store::account(), *bundle, after);
+        } else if (const auto* resources = std::get_if<PendingRecordRewardGrant>(&mutation.grant)) {
+            staged = materialize_record_reward(investment::store::account(), *resources, after)
+                     && dawning::write_rewards(*resources);
+        }
+        return staged && investment::store::write_account(after) && transaction.commit();
+    }();
     if (!ready) {
         // The claim was written when the reward was prepared, so a refused install undoes it.
         revoke_season_pass_reward(mutation.rewardIndex);
@@ -128,7 +133,10 @@ namespace {
 [[nodiscard]] bool materialize_record_reward(const AccountState& current,
                                              const PendingRecordRewardGrant& mutation,
                                              AccountState& after) noexcept {
-    if (!mutation.prepared || mutation.rewardCount == 0
+    if (mutation.pursuitRedemption)
+        return bounty::materialize_redemption_grant(current, mutation, after);
+    if (mutation.dawningDelivery) return dawning::materialize_delivery(current, mutation, after);
+    if (!dawning::validate_rewards(mutation) || !mutation.prepared || mutation.rewardCount == 0
         || mutation.rewardCount > mutation.rewards.size() || mutation.accountSoid == 0
         || mutation.characterSoid == 0 || mutation.characterIndex >= current.characterCount
         || current.primarySoid != mutation.accountSoid
@@ -152,6 +160,7 @@ namespace {
 
     for (std::size_t index = 0; index < mutation.rewardCount; ++index) {
         const PreparedRecordReward& reward = mutation.rewards[index];
+        if (reward.kind == RecordRewardKind::accountMaterial) continue;
         build_data::items::Definition item{};
         item_details::Definition detail{};
         inventory_buckets::Descriptor bucket{};
@@ -166,7 +175,7 @@ namespace {
         }
         if (reward.kind == RecordRewardKind::characterInstance) {
             if (reward.quantity != 1 || reward.afterQuantity != 1 || reward.instanceSoid == 0
-                || reward.appendedProfileResident || !detail.equipmentSlot.has_value()
+                || reward.appendedProfileResident
                 || detail.instancedDefinitionState
                        != item_details::InstancedDefinitionState::instanced
                 || bucket.arraySelector != inventory_buckets::ArraySelector::character
@@ -228,14 +237,14 @@ namespace {
 } // namespace
 
 /** Prepares every reward over one cumulative account view. */
-bool prepare_record_reward_grant(std::span<const DirectRecordReward> rewards,
-                                 std::uint16_t claimedRecordIndex,
-                                 PendingRecordRewardGrant& mutation) noexcept {
+bool runtime::detail::stage_record_reward_grant(const AccountState& account,
+                                                std::span<const DirectRecordReward> rewards,
+                                                std::uint16_t claimedRecordIndex,
+                                                PendingRecordRewardGrant& mutation) noexcept {
     mutation = {};
     if (rewards.empty() || rewards.size() > mutation.rewards.size()) {
         return false;
     }
-    const AccountState account = account_snapshot();
     const std::size_t characterIndex = selected_character_index(account);
     if (!account::valid(account) || !valid_profile_inventory(account)
         || characterIndex >= account.characterCount) {
@@ -245,6 +254,13 @@ bool prepare_record_reward_grant(std::span<const DirectRecordReward> rewards,
     AccountState working = account;
     for (std::size_t index = 0; index < rewards.size(); ++index) {
         const DirectRecordReward& requested = rewards[index];
+        PreparedRecordReward material{};
+        const auto materialResult = dawning::stage_reward(requested, mutation, material);
+        if (materialResult == dawning::MaterialReward::refused) return false;
+        if (materialResult == dawning::MaterialReward::staged) {
+            mutation.rewards[index] = material;
+            continue;
+        }
         build_data::items::Definition item{};
         item_details::Definition detail{};
         inventory_buckets::Descriptor bucket{};
@@ -296,7 +312,7 @@ bool prepare_record_reward_grant(std::span<const DirectRecordReward> rewards,
         } else if (bucket.arraySelector == inventory_buckets::ArraySelector::character
                    && detail.instancedDefinitionState
                           == item_details::InstancedDefinitionState::instanced) {
-            if (requested.quantity != 1 || !detail.equipmentSlot.has_value()) {
+            if (requested.quantity != 1) {
                 return false;
             }
             PendingItemAcquisition staged{};
@@ -373,6 +389,12 @@ bool prepare_record_reward_grant(std::span<const DirectRecordReward> rewards,
     return true;
 }
 
+bool prepare_record_reward_grant(std::span<const DirectRecordReward> rewards,
+                                 std::uint16_t claimedRecordIndex,
+                                 PendingRecordRewardGrant& mutation) noexcept {
+    return stage_record_reward_grant(account_snapshot(), rewards, claimedRecordIndex, mutation);
+}
+
 bool preview_record_reward_grant(const PendingRecordRewardGrant& mutation,
                                  AccountState& after) noexcept {
     after = {};
@@ -382,13 +404,15 @@ bool preview_record_reward_grant(const PendingRecordRewardGrant& mutation,
 /** Commits the shared reward after-image and claim together. */
 bool commit_record_reward(PendingRecordRewardGrant& mutation) noexcept {
     const PendingConsumption consume{mutation};
-    investment::store::g_mutex.lock();
-    AccountState after{};
-    bool ready = materialize_record_reward(investment::store::account(), mutation, after);
-    if (ready) {
-        ready = investment::store::write_account(after);
-    }
-    investment::store::g_mutex.unlock();
+    if (mutation.pursuitRedemption) return bounty::commit_redemption_grant(mutation);
+    const bool ready = [&]() noexcept {
+        investment::store::Transaction transaction;
+        AccountState after{};
+        return transaction.ready()
+               && materialize_record_reward(investment::store::account(), mutation, after)
+               && dawning::write_rewards(mutation) && investment::store::write_account(after)
+               && transaction.commit();
+    }();
     if (!ready && mutation.claimedRecordIndex != kUnclaimedRecordIndex) {
         // The claim was written when the reward was prepared, so a refused install undoes it.
         unlocks::records::revoke(mutation.claimedRecordIndex);

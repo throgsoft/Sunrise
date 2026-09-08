@@ -1,5 +1,5 @@
 PRAGMA application_id = 1397902921;
-PRAGMA user_version = 2;
+PRAGMA user_version = 5;
 
 CREATE TABLE account (
     id INTEGER PRIMARY KEY CHECK (id = 1),
@@ -50,6 +50,20 @@ CREATE TABLE sockets (
     lane INTEGER NOT NULL CHECK (lane BETWEEN 0 AND 11),
     plug_hash INTEGER NOT NULL CHECK (plug_hash BETWEEN 1 AND 4294967295),
     PRIMARY KEY (instance_soid, lane)
+) STRICT;
+
+-- The item tail shares the inventory transaction and follows the instance through moves.
+CREATE TABLE item_objectives (
+    instance_soid INTEGER PRIMARY KEY REFERENCES items(instance_soid) ON DELETE CASCADE,
+    definition_index INTEGER NOT NULL CHECK(definition_index BETWEEN 0 AND 65535),
+    v0 INTEGER NOT NULL CHECK(v0 BETWEEN 0 AND 2147483647),
+    v1 INTEGER NOT NULL CHECK(v1 BETWEEN -2147483648 AND 2147483647),
+    v2 INTEGER NOT NULL CHECK(v2 BETWEEN -2147483648 AND 2147483647),
+    v3 INTEGER NOT NULL CHECK(v3 BETWEEN -2147483648 AND 2147483647),
+    v4 INTEGER NOT NULL CHECK(v4 BETWEEN -2147483648 AND 2147483647),
+    v5 INTEGER NOT NULL CHECK(v5 BETWEEN -2147483648 AND 2147483647),
+    v6 INTEGER NOT NULL CHECK(v6 BETWEEN -2147483648 AND 2147483647),
+    v7 INTEGER NOT NULL CHECK(v7 BETWEEN -2147483648 AND 2147483647)
 ) STRICT;
 
 CREATE TABLE profile_items (
@@ -117,3 +131,23 @@ CREATE TABLE pending_rewards (
     definition_hash INTEGER NOT NULL CHECK (definition_hash BETWEEN 1 AND 4294967295),
     quantity INTEGER NOT NULL CHECK (quantity > 0)
 ) STRICT;
+
+CREATE TABLE character_gambit_prime (
+    character_slot INTEGER PRIMARY KEY REFERENCES characters(slot) ON DELETE CASCADE,
+    reaper INTEGER NOT NULL CHECK(reaper BETWEEN 0 AND 3),
+    invader INTEGER NOT NULL CHECK(invader BETWEEN 0 AND 3),
+    collector INTEGER NOT NULL CHECK(collector BETWEEN 0 AND 3),
+    sentry INTEGER NOT NULL CHECK(sentry BETWEEN 0 AND 3),
+    synthesizer INTEGER NOT NULL CHECK(synthesizer BETWEEN 0 AND 3)
+) STRICT;
+
+-- Reports are scoped to the server process and authenticated activity lifetime.
+CREATE TABLE gameplay_runs (id INTEGER PRIMARY KEY AUTOINCREMENT) STRICT;
+CREATE TABLE gameplay_receipts (
+    epoch INTEGER NOT NULL REFERENCES gameplay_runs(id),
+    session INTEGER NOT NULL,
+    revision INTEGER NOT NULL,
+    player INTEGER NOT NULL,
+    sequence INTEGER NOT NULL CHECK(sequence BETWEEN 1 AND 4294967295),
+    PRIMARY KEY(epoch, session, revision, player, sequence)
+) STRICT, WITHOUT ROWID;

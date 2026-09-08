@@ -3,9 +3,11 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <span>
 #include <variant>
 
+#include "../account/inventory/dawning_oven_state.h"
 #include "../build_data/records/definition.h"
 #include "state.h"
 
@@ -213,6 +215,7 @@ enum class RecordRewardKind : std::uint8_t {
     characterInstance,
     characterStack,
     profileStack,
+    accountMaterial,
 };
 
 /** Native row identity of one item inside a prepared record-reward batch. */
@@ -231,8 +234,27 @@ struct PreparedRecordReward {
 /** A reward grant that claims no record carries this instead of a record row. */
 inline constexpr std::uint16_t kUnclaimedRecordIndex = 0xFFFFU;
 
-/** Record claim and all of its item rows committed as one transaction. */
+/** Checked pursuit source and progression before-images associated with a reward batch. */
+struct PursuitRedemptionContext {
+    struct RankCredit {
+        std::uint16_t index{};
+        std::int32_t before{}, after{};
+        bool operator==(const RankCredit&) const = default;
+    };
+    std::array<RankCredit, 2> ranks{};
+    std::size_t rankCount{};
+    std::uint64_t sourceInstanceSoid{};
+    std::uint32_t sourceDefinitionHash{};
+    std::int64_t stagedAt{};
+    std::int32_t seasonalBefore{}, experience{}, expectedQuantity{};
+    bool redeemed{}, prepared{};
+};
+
+/** Record claim or pursuit consumption and all reward rows committed as one transaction. */
 struct PendingRecordRewardGrant {
+    std::optional<PursuitRedemptionContext> pursuitRedemption{};
+    std::optional<account::inventory::dawning::DeliveryContext> dawningDelivery{};
+    std::optional<account::inventory::dawning::State> beforeDawning{}, afterDawning{};
     CharacterState beforeCharacter{};
     CharacterState afterCharacter{};
     std::array<account::inventory::ProfileItem, account::inventory::kProfileItemCapacity>
@@ -300,12 +322,17 @@ struct PendingItemDismantle {
     std::size_t rewardCount{};
     std::uint16_t inventoryRow{};
     std::uint8_t equipmentSlot{};
+    /** Client-observed quantity, checked again when the canonical transition is materialized. */
+    std::int32_t requestedStackQuantity{};
+    std::int32_t discardedQuantity{};
+    bool releasesDismantledInstance{};
     bool profileChanged{};
     bool prepared{};
 };
 
 /** Prepared ordinary-socket selection for one selected-character item instance. */
 struct PendingSocketPlug {
+    std::optional<account::inventory::dawning::State> beforeDawning{}, afterDawning{};
     /** Exact prepare-time character view used as the commit staleness guard. */
     CharacterState beforeCharacter{};
     /** Canonical after-image. Only the target item's authored socket block differs. */
@@ -628,6 +655,7 @@ commit_profile_item_acquisition(PendingProfileItemAcquisition& mutation) noexcep
  * @return True when the selected character uniquely owns it and both loadouts resolve.
  */
 [[nodiscard]] bool prepare_item_dismantle(std::uint64_t instanceSoid,
+                                          std::int32_t expectedStackQuantity,
                                           PendingItemDismantle& mutation) noexcept;
 
 /** Builds the exact account after-image while a prepared dismantle remains current. */

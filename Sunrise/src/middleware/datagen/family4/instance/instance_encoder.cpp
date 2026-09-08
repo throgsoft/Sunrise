@@ -94,6 +94,8 @@ namespace {
            && input.curveSelector == layout::kInitialLevelCurveX
            && input.capSelector == layout::kInitialLevelCapRow
            && valid_item_definition(input.baseDefinitionIndex, input.bounds.itemDefinitionCount)
+           && (input.objectiveDefinitionIndex == layout::kEmptyDefinitionIndex
+               || input.objectiveDefinitionIndex == input.baseDefinitionIndex)
            && valid_ordinary_sockets(input.ordinarySockets, input.bounds.itemDefinitionCount)
            && valid_socket_entry_mapping(input);
 }
@@ -132,6 +134,8 @@ bool encode(const ResolvedInstance& input, std::span<std::byte> output) noexcept
 
     layout::Object object{};
     initialize_empty_fields(object);
+    object.tailDefinitionIndex = input.objectiveDefinitionIndex;
+    object.tailValues = input.objectiveValues;
     object.instanceSoid = input.instanceSoid;
     object.level.level = input.level;
     object.level.curveX = input.curveSelector;

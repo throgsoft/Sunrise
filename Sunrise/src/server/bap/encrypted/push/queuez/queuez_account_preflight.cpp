@@ -37,8 +37,8 @@ void report(core::log::Level level, const char* reason) noexcept {
 
 /** Canonicalizes the account before any family image is allowed to read it. */
 void ensure_account_canonical() noexcept {
-    // Selection can change after emotes settle. State owns a separate durable marker per
-    // character, so a discarded default quest stays discarded across requests and restarts.
+    // Seed all character slots before the initial snapshot, even before a character is picked.
+    // Durable per-character markers preserve later discards across requests and restarts.
     const auto oven = state::ensure_default_dawning_oven();
     const auto previous = g_ovenStatus.exchange(oven.status, std::memory_order_relaxed);
     if (oven.status == state::DawningOvenBootstrapStatus::refused && previous != oven.status) {

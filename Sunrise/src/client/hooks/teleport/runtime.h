@@ -126,4 +126,8 @@ void apply_pending(void* component) noexcept;
 /** Copies the last complete pose published by the camera-frame hook. */
 [[nodiscard]] bool camera_pose(CameraPose& pose) noexcept;
 
+/** Developer spawner accessors; these do not drive investment. */
+[[nodiscard]] bool current_controlled_handle(std::uint32_t& output) noexcept;
+[[nodiscard]] bool is_controlled_update_object(const void* object) noexcept;
+
 } // namespace sunrise::client::hooks::teleport

@@ -441,6 +441,31 @@ bool owns_local_player(void* component) noexcept {
            && owns_player(static_cast<std::byte*>(component));
 }
 
+bool current_controlled_handle(std::uint32_t& output) noexcept {
+    output = kInvalidHandle;
+    if (g_controlledHandle == nullptr) {
+        return false;
+    }
+    __try {
+        g_controlledHandle(&output);
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        output = kInvalidHandle;
+    }
+    return output != kInvalidHandle;
+}
+
+bool is_controlled_update_object(const void* object) noexcept {
+    std::uint32_t controlled = kInvalidHandle;
+    std::uint32_t candidate = kInvalidHandle;
+    // PR46's player-component update argument stores a u32 at +0x2C. The physics ownership
+    // helper reads a u16 in its own component layout and must not be used on this argument.
+    constexpr std::size_t kUpdateObjectHandle = 0x2C;
+    return object != nullptr && current_controlled_handle(controlled)
+           && read_at(static_cast<const std::byte*>(object) + kUpdateObjectHandle, candidate)
+           && candidate != kInvalidHandle
+           && (controlled & kHandleIndexMask) == (candidate & kHandleIndexMask);
+}
+
 /** Reads the world position of the body a physics component drives. */
 bool read_position(void* component, Vector& position) noexcept {
     if (component == nullptr) {

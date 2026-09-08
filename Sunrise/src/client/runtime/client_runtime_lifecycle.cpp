@@ -26,6 +26,7 @@
 #include "../hooks/queuez/queuez_hook_lifecycle.h"
 #include "../hooks/retail_log/retail_log_lifecycle.h"
 #include "../hooks/sense_chain_guard/sense_chain_guard.h"
+#include "../hooks/spawn/spawn_runtime.h"
 #include "../hooks/stall_probe/stall_probe.h"
 #include "../hooks/teleport/runtime.h"
 #include "../hooks/world_objects/world_object_registry.h"
@@ -45,6 +46,7 @@ bool initialize(void* module) noexcept {
     content::activity::sdk_generation::initialize(
         module, {core::settings::get().activitySdkGeneration.luaDeclarations});
     // Loaded before the pages register, so each page draws saved values on its first frame.
+    spawn::initialize(module);
     movement::initialize(module);
     player::initialize(module);
     ui::activity::authored_placement_marker::initialize(module);
@@ -58,6 +60,13 @@ bool shutdown() noexcept {
         core::log::write(core::log::Channel::client,
                          core::log::Level::error,
                          "ev=shutdown stage=graphics_hooks result=fail");
+        ReleaseSRWLockExclusive(&runtime::g_lock);
+        return false;
+    }
+    if (!hooks::spawn::uninstall()) {
+        core::log::write(core::log::Channel::client,
+                         core::log::Level::error,
+                         "ev=shutdown stage=developer_spawn result=fail");
         ReleaseSRWLockExclusive(&runtime::g_lock);
         return false;
     }
@@ -187,6 +196,7 @@ bool shutdown() noexcept {
     ui::activity::authored_placement_marker::shutdown();
     player::shutdown();
     movement::shutdown();
+    spawn::shutdown();
     core::log::write(core::log::Channel::client, core::log::Level::info, "ev=shutdown result=ok");
     ReleaseSRWLockExclusive(&runtime::g_lock);
     return true;

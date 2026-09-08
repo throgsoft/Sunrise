@@ -6,6 +6,7 @@
 #include "../../../core/ui/modules/ui_module_descriptor.h"
 #include "../movement/movement_panel.h"
 #include "../player/player_panel.h"
+#include "../spawn/spawn_panel.h"
 
 namespace sunrise::client::ui::runtime {
 namespace {
@@ -20,6 +21,7 @@ constexpr std::string_view kPlayerDisplayName = "Player";
 
 core::ui::modules::registry::PageRegistration g_movementPage;
 core::ui::modules::registry::PageRegistration g_playerPage;
+core::ui::modules::registry::PageRegistration g_spawnPage;
 
 } // namespace
 
@@ -30,11 +32,14 @@ bool initialize() noexcept {
         core::ui::modules::Owner::client, kMovementStableId, kMovementDisplayName, &movement::draw);
     const bool playerOwned = g_playerPage.acquire(
         core::ui::modules::Owner::client, kPlayerStableId, kPlayerDisplayName, &player::draw);
-    return movementOwned && playerOwned;
+    const bool spawnOwned = g_spawnPage.acquire(
+        core::ui::modules::Owner::client, "client.developer_spawn", "Spawner (Dev)", &spawn::draw);
+    return movementOwned && playerOwned && spawnOwned;
 }
 
 /** Removes the Client modules from the Core UI registry. */
 void shutdown() noexcept {
+    g_spawnPage.release();
     g_playerPage.release();
     g_movementPage.release();
 }

@@ -121,14 +121,18 @@ read(std::span<const std::byte> blob, std::size_t offset, Value& value) noexcept
     row.objectiveCount = 0;
     std::fill_n(row.objectiveIndices, kObjectiveCapacity, 0);
     row.lifetimeSeconds = 0;
-    if (row.equipmentSlot.has_value() || row.maxStackSize > 1) return true;
+    // Non-pursuit definitions reuse this descriptor for other block types (including
+    // equipment). An absent decoded equipment slot does not make such a row a pursuit.
+    constexpr std::uint8_t pursuitBucket = 40;
+    if (row.bucketId != pursuitBucket || row.equipmentSlot.has_value() || row.maxStackSize > 1)
+        return true;
     constexpr std::size_t objectiveDescriptor = 392;
     constexpr std::size_t lifetimeDescriptor = 192;
     constexpr std::uint32_t lifetimeClass = 0x80807D31U;
     Array objectives{};
     if (!find_optional_array_at(definition, objectiveDescriptor, objectives)) {
         // Bucket 40 is the pursuit bucket. Refuse malformed rows rather than grant empty tails.
-        return row.bucketId != 40;
+        return false;
     }
     if (objectives.count == 0) return true;
     if (objectives.elementClass != kObjectiveReferenceArrayClass

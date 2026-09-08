@@ -56,7 +56,11 @@ const char* editable(const inventory::Item& held,
     return nullptr;
 }
 
-Result edit(std::uint16_t index, std::int32_t value, std::uint8_t lane, bool completeAll) noexcept {
+Result edit(std::uint16_t index,
+            std::int32_t value,
+            std::uint8_t lane,
+            bool completeAll,
+            bool completeTarget = false) noexcept {
     std::unique_ptr<AccountState> account(new (std::nothrow) AccountState);
     if (!account) return {false, 0, "allocation failed"};
     store::Transaction transaction;
@@ -88,7 +92,7 @@ Result edit(std::uint16_t index, std::int32_t value, std::uint8_t lane, bool com
         for (std::size_t ordinal = 0; ordinal < detail.objectiveCount; ++ordinal) {
             const auto targetLane = ordinal + inventory::kItemObjectiveLaneBase;
             if (lane == 0 || lane == targetLane)
-                after[targetLane] = completeAll ? thresholds[ordinal] : value;
+                after[targetLane] = completeAll || completeTarget ? thresholds[ordinal] : value;
         }
         if (after == held.objectiveValues && held.objectiveDefinitionIndex == item.definitionIndex)
             continue;
@@ -204,6 +208,25 @@ Result set_quest(std::uint16_t index, std::int32_t value, std::uint8_t lane) noe
 
 Result complete_pursuits() noexcept {
     return edit(0, 0, 0, true);
+}
+
+Result grant_complete_bounty(std::uint16_t index, std::uint32_t expectedHash) noexcept {
+    data::items::Definition item{};
+    data::items::details::Definition detail{};
+    if (!resolve(index, item, detail) || item.definitionHash != expectedHash
+        || detail.bucketId != 40 || detail.objectiveCount == 0 || detail.lifetimeSeconds <= 0)
+        return {false, 0, "installed expiring bounty unavailable"};
+    store::Transaction transaction;
+    if (!transaction.ready()) return {false, 0, "investment database unavailable"};
+    const auto grant = grant_item(index, 1, expectedHash);
+    if (!grant.accepted) return grant;
+    const auto completion = edit(index, 0, 0, false, true);
+    if (!completion.accepted) return {false, 0, completion.reason};
+    if (!transaction.commit()) return {false, 0, "transaction commit failed"};
+    return {true,
+            grant.changed != 0 || completion.changed != 0 ? 1U : 0U,
+            grant.changed != 0 ? "granted and completed"
+                               : "held bounty completed; expiry preserved"};
 }
 Result drop_item(std::uint16_t index) noexcept {
     return drop(index, false);

@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <array>
 #include <cstdint>
+#include <limits>
 #include <memory>
 #include <new>
 
@@ -164,6 +165,117 @@ bool quest_set(std::span<const Value> arguments, Output& output) noexcept {
             static_cast<std::int32_t>(arguments[1].integer),
             arguments.size() < 3 ? 0 : static_cast<std::uint8_t>(arguments[2].integer)),
         output);
+}
+
+bool quest_objective(std::span<const Value> arguments, Output& output) noexcept {
+    const auto index = static_cast<std::uint16_t>(arguments[0].integer);
+    data::objectives::Definition objective{};
+    if (!data::find_objective_definition(index, objective)) {
+        output.format("quest.objective: no objective at %u", static_cast<unsigned>(index));
+        return false;
+    }
+    output.format("objective %u hash=0x%08X completes=%d",
+                  static_cast<unsigned>(index),
+                  objective.definitionHash,
+                  objective.completionValue);
+    return true;
+}
+
+bool pursuit_display(std::span<const Value>, Output& output) noexcept {
+    output.line("semantic reward rows are interpreted by policy and are never minted as items");
+    return true;
+}
+
+bool pursuit_give_default(std::span<const Value>, Output& output) noexcept {
+    // The original dirty/quest reward-policy set, resolved against the installed item catalog.
+    constexpr std::array<std::uint16_t, 14> indices{14010,
+                                                    14007,
+                                                    14158,
+                                                    14397,
+                                                    14051,
+                                                    14112,
+                                                    14096,
+                                                    14430,
+                                                    14572,
+                                                    14023,
+                                                    14271,
+                                                    14723,
+                                                    14543,
+                                                    14238};
+    std::size_t changed = 0, accepted = 0;
+    for (const auto index : indices) {
+        data::items::Definition item{};
+        data::items::details::Definition detail{};
+        if (!resolve_item(index, item, detail) || !pursuit(detail)) {
+            output.format("  item=%u: installed pursuit unavailable", static_cast<unsigned>(index));
+            continue;
+        }
+        const auto result = state::developer::grant_item(index, 1, item.definitionHash);
+        output.format("  item=%u: %s", static_cast<unsigned>(index), result.reason);
+        changed += result.changed;
+        accepted += result.accepted;
+    }
+    if (changed != 0) server::bap::request_account_resync();
+    output.format("pursuit.give: %zu/%zu granted or already held; %zu changed",
+                  accepted,
+                  indices.size(),
+                  changed);
+    return accepted == indices.size();
+}
+
+bool bounty_page(std::span<const Value> arguments, Output& output) noexcept {
+    constexpr std::size_t pageSize = 59; // dirty/quest's ordered bounty pages.
+    const auto definitions = (std::min)(data::item_definition_count(), std::size_t{65536});
+    const auto isBounty = [](std::uint16_t index,
+                             data::items::Definition& item,
+                             data::items::details::Definition& detail) noexcept {
+        return resolve_item(index, item, detail) && pursuit(detail) && detail.bucketId == 40
+               && detail.lifetimeSeconds > 0;
+    };
+    std::size_t total = 0;
+    for (std::size_t i = 0; i < definitions; ++i) {
+        data::items::Definition item{};
+        data::items::details::Definition detail{};
+        total += isBounty(static_cast<std::uint16_t>(i), item, detail);
+    }
+    const auto pages = (total + pageSize - 1) / pageSize;
+    output.format(
+        "bounty.page: %zu installed bounties; pages 1-%zu, %zu per page", total, pages, pageSize);
+    if (arguments.empty()) return total != 0;
+    const auto page = static_cast<std::size_t>(arguments[0].integer);
+    if (page == 0 || page > pages) {
+        output.line("Page is outside the installed bounty range.");
+        return false;
+    }
+    const auto account = account_view(output);
+    if (!account || !selected(*account)) {
+        output.line("bounty.page: no selected character");
+        return false;
+    }
+    const auto first = (page - 1) * pageSize;
+    std::size_t ordinal = 0, changed = 0, completed = 0, refused = 0;
+    for (std::size_t i = 0; i < definitions && ordinal < first + pageSize; ++i) {
+        data::items::Definition item{};
+        data::items::details::Definition detail{};
+        if (!isBounty(static_cast<std::uint16_t>(i), item, detail)) continue;
+        if (ordinal++ < first) continue;
+        const auto result =
+            state::developer::grant_complete_bounty(item.definitionIndex, item.definitionHash);
+        output.format("  item=%u: %s", static_cast<unsigned>(item.definitionIndex), result.reason);
+        changed += result.changed;
+        completed += result.accepted;
+        refused += !result.accepted;
+    }
+    // Publish once, after all per-bounty transactions release SQLite. No completion of other
+    // held pursuits and no duplicate acquisition of an already-held page entry.
+    if (changed != 0) server::bap::request_account_resync();
+    output.format("bounty.page: page %zu/%zu; %zu completed, %zu refused; %zu changed",
+                  page,
+                  pages,
+                  completed,
+                  refused,
+                  changed);
+    return refused == 0;
 }
 
 bool pursuit_complete(std::span<const Value>, Output& output) noexcept {
@@ -586,14 +698,14 @@ bool install_commands() noexcept {
                          64,
                          true}}},
         Entry{"pursuit.list",
-              "Lists installed installed objective-bearing pursuits, with a bounded sample.",
+              "Lists installed objective-bearing pursuits, with a bounded sample.",
               &pursuit_list,
               {Parameter{"sample",
                          "Rows to print; default 16.",
                          ValueType::integer,
                          nullptr,
                          1,
-                         128,
+                         256,
                          true}}},
         Entry{"pursuit.show",
               "Shows installed objectives, rewards, lifetime and held progress.",
@@ -613,6 +725,38 @@ bool install_commands() noexcept {
         Entry{"pursuit.complete",
               "Completes held objectives atomically; no grants or redemption.",
               &pursuit_complete},
+        Entry{"pursuit.give",
+              "Grants the original 14-bounty reward-policy set.",
+              &pursuit_give_default},
+        Entry{"pursuit.display",
+              "Reports the non-minting policy for semantic reward rows.",
+              &pursuit_display,
+              {Parameter{"legacy",
+                         "Ignored compatibility toggle.",
+                         ValueType::boolean,
+                         nullptr,
+                         0,
+                         0,
+                         true}}},
+        Entry{"quest.objective",
+              "Resolves one objective definition and completion value.",
+              &quest_objective,
+              {Parameter{"objective",
+                         "Objective definition index.",
+                         ValueType::integer,
+                         nullptr,
+                         0,
+                         65535}}},
+        Entry{"bounty.page",
+              "Lists page bounds, or grants and completes one ordered bounty page.",
+              &bounty_page,
+              {Parameter{"page",
+                         "One-based page; omit to list the range.",
+                         ValueType::integer,
+                         nullptr,
+                         1,
+                         65535,
+                         true}}},
         Entry{"pursuit.give2",
               "Grants the 57-item legacy set; preserves held progress.",
               &pursuit_give<2>},

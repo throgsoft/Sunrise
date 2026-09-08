@@ -15,6 +15,7 @@
 #include "../progression/season_pass_reward_catalog.h"
 #include "../unlocks/unlocks_records.h"
 #include "bounty_redemption_runtime.h"
+#include "character_encoding_preflight.h"
 #include "dawning_oven_delivery.h"
 #include "dawning_reward_runtime.h"
 #include "runtime.h"
@@ -154,7 +155,13 @@ namespace {
     after.profileItemCount = mutation.afterProfileItemCount;
     family4_loadout::ResolvedLoadout loadout{};
     if (!account::valid(after) || !valid_profile_inventory(after)
-        || !family4_loadout::resolve(after, mutation.characterIndex, loadout)) {
+        || !family4_loadout::resolve(after, mutation.characterIndex, loadout)
+        || !character_encoding_preflight(
+            after,
+            mutation.characterIndex,
+            loadout,
+            mutation.afterCharacter.inventory.count > mutation.beforeCharacter.inventory.count
+                || mutation.afterCharacter.stacks.count > mutation.beforeCharacter.stacks.count)) {
         return false;
     }
 
@@ -371,7 +378,15 @@ bool runtime::detail::stage_record_reward_grant(const AccountState& account,
 
     family4_loadout::ResolvedLoadout loadout{};
     if (!account::valid(working) || !valid_profile_inventory(working)
-        || !family4_loadout::resolve(working, characterIndex, loadout)) {
+        || !family4_loadout::resolve(working, characterIndex, loadout)
+        || !character_encoding_preflight(
+            working,
+            characterIndex,
+            loadout,
+            working.characters[characterIndex].inventory.count
+                    > account.characters[characterIndex].inventory.count
+                || working.characters[characterIndex].stacks.count
+                       > account.characters[characterIndex].stacks.count)) {
         return false;
     }
     mutation.beforeCharacter = account.characters[characterIndex];

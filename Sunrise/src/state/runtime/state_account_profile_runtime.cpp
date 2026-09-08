@@ -10,6 +10,7 @@
 #include <utility>
 
 #include "../build_data/runtime.h"
+#include "profile_discard.h"
 #include "runtime.h"
 #include "state_account_transaction_helpers.h"
 
@@ -362,6 +363,7 @@ apply_action_materials(const AccountState& before,
 /** @return True when a pending profile acquisition carries canonical dense before/after images. */
 [[nodiscard]] bool
 valid_profile_mutation_shape(const PendingProfileItemAcquisition& mutation) noexcept {
+    if (mutation.profileDiscard) return item_discard::canonical(mutation);
     // The single-increment rules below pin a Collections pull. An exchange moves several rows by
     // more than one, so it has its own shape.
     if (mutation.changeCount != 0) {
@@ -486,6 +488,7 @@ valid_profile_mutation_shape(const PendingProfileItemAcquisition& mutation) noex
 [[nodiscard]] bool materialize_profile_acquisition(const AccountState& current,
                                                    const PendingProfileItemAcquisition& mutation,
                                                    AccountState& after) noexcept {
+    if (mutation.profileDiscard) return item_discard::materialize(current, mutation, after);
     if (!valid_profile_mutation_shape(mutation) || current.primarySoid != mutation.accountSoid
         || !same_profile_inventory(current, mutation.beforeItems, mutation.expectedItemCount)) {
         return false;

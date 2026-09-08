@@ -14,11 +14,17 @@ namespace sunrise::middleware::datagen::family4::character {
  * @param resolvedLoadout Row-sorted inventory and equipment mappings for this character.
  * @param lightEvaluation Complete raw and aggregate equipment-light values.
  * @param output Exact runtime-mapped character-object storage.
- * @return True when State, mappings, and the mapped object span fit the native layout.
+ * @param requireCollectibleSpace
+ * Grant preflight reserves every applicable synthetic prerequisite.
+ * Normal publication defers
+ * only synthetic rows that do not fit, preserving owned items on older saves.
+ * @return True when
+ * State, mappings, and the mapped object span fit the native layout.
  */
 [[nodiscard]] bool encode(const state::CharacterState& state,
                           const loadout::ResolvedLoadout& resolvedLoadout,
                           const state::equipment::light::Evaluation& lightEvaluation,
-                          std::span<std::byte> output) noexcept;
+                          std::span<std::byte> output,
+                          bool requireCollectibleSpace = false) noexcept;
 
 } // namespace sunrise::middleware::datagen::family4::character

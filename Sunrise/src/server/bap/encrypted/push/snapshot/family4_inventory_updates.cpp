@@ -159,9 +159,11 @@ bool prepare_profile_item_acquisition(Scratch& scratch,
     std::size_t acquiredRow = accountObject.profileItems.size();
     // An exchange names every row it credited; an ordinary acquisition names the one row it added
     // to or grew. Both write the same kind of record, which is what the observer draws.
+    // A canonical discard has zero credited rows, so leave the ring empty after validating it.
     const char* const ringFailure =
-        mutation.changeCount != 0 ? write_exchange_changes(accountObject, mutation)
-                                  : write_acquisition_change(accountObject, mutation, acquiredRow);
+        (mutation.profileDiscard || mutation.changeCount != 0)
+            ? write_exchange_changes(accountObject, mutation)
+            : write_acquisition_change(accountObject, mutation, acquiredRow);
     if (ringFailure != nullptr) {
         clear_after(scratch, reservation);
         return report_failure(ringFailure);

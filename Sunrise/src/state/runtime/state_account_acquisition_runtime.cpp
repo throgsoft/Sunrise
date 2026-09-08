@@ -12,6 +12,7 @@
 #include "../account/pursuit_hold.h"
 #include "../build_data/runtime.h"
 #include "../investment/store_internal.h"
+#include "character_encoding_preflight.h"
 #include "runtime.h"
 #include "state_account_transaction_helpers.h"
 #include "storage/internal.h"
@@ -103,7 +104,8 @@ namespace runtime::detail {
     std::uint8_t equipmentSlot = 0;
     if (!account::valid(candidate) || identity_uses_soid(candidate, instanceSoid)
         || !family4_loadout::resolve(candidate, characterIndex, resolved)
-        || !find_unequipped_row(resolved, instanceSoid, inventoryRow, equipmentSlot)) {
+        || !find_unequipped_row(resolved, instanceSoid, inventoryRow, equipmentSlot)
+        || !character_encoding_preflight(candidate, characterIndex, resolved)) {
         return false;
     }
 

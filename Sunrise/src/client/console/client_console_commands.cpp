@@ -7,6 +7,7 @@
 #include <memory>
 #include <new>
 
+#include "../../core/logging/log.h"
 #include "../../core/runtime/wall_clock.h"
 #include "../../server/bap/runtime.h"
 #include "../../state/account/pursuit_hold.h"
@@ -223,7 +224,17 @@ bool pursuit_give_default(std::span<const Value>, Output& output) noexcept {
     return accepted == indices.size();
 }
 
+const char* bounty_page_mode(std::size_t index) noexcept {
+    constexpr std::array<const char*, 3> modes{"complete", "give", nullptr};
+    return index < modes.size() ? modes[index] : nullptr;
+}
+
 bool bounty_page(std::span<const Value> arguments, Output& output) noexcept {
+    const bool giveOnly = arguments.size() > 1 && arguments[1].text == "give";
+    if (arguments.size() > 1 && !giveOnly && arguments[1].text != "complete") {
+        output.line("bounty.page: mode must be complete or give");
+        return false;
+    }
     constexpr std::size_t pageSize = 59; // dirty/quest's ordered bounty pages.
     const auto definitions = (std::min)(data::item_definition_count(), std::size_t{65536});
     const auto isBounty = [](std::uint16_t index,
@@ -241,7 +252,11 @@ bool bounty_page(std::span<const Value> arguments, Output& output) noexcept {
     const auto pages = (total + pageSize - 1) / pageSize;
     output.format(
         "bounty.page: %zu installed bounties; pages 1-%zu, %zu per page", total, pages, pageSize);
-    if (arguments.empty()) return total != 0;
+    if (arguments.empty()) {
+        output.line(
+            "bounty.page <page> [complete|give]: default completes; give preserves progress.");
+        return total != 0;
+    }
     const auto page = static_cast<std::size_t>(arguments[0].integer);
     if (page == 0 || page > pages) {
         output.line("Page is outside the installed bounty range.");
@@ -253,28 +268,79 @@ bool bounty_page(std::span<const Value> arguments, Output& output) noexcept {
         return false;
     }
     const auto first = (page - 1) * pageSize;
+    const auto* character = selected(*account);
     std::size_t ordinal = 0, changed = 0, completed = 0, refused = 0;
+    std::size_t granted = 0, reused = 0, unchanged = 0;
+    core::log::writef(core::log::Channel::client,
+                      core::log::Level::info,
+                      "ev=bounty_page stage=begin page=%zu mode=%s held=%zu",
+                      page,
+                      giveOnly ? "give" : "complete",
+                      character->inventory.count);
     for (std::size_t i = 0; i < definitions && ordinal < first + pageSize; ++i) {
         data::items::Definition item{};
         data::items::details::Definition detail{};
         if (!isBounty(static_cast<std::uint16_t>(i), item, detail)) continue;
         if (ordinal++ < first) continue;
+        bool held = false, heldComplete = true;
+        for (std::size_t row = 0; row < character->inventory.count; ++row) {
+            const auto& resident = character->inventory.values[row];
+            if (resident.definitionHash != item.definitionHash) continue;
+            held = true;
+            heldComplete =
+                heldComplete
+                && data::pursuits::complete(item.definitionIndex, resident.objectiveValues);
+        }
+        if (held && (giveOnly || heldComplete)) {
+            ++reused;
+            ++unchanged;
+            completed += !giveOnly;
+            output.format("  item=%u: already held; unchanged",
+                          static_cast<unsigned>(item.definitionIndex));
+            continue;
+        }
         const auto result =
-            state::developer::grant_complete_bounty(item.definitionIndex, item.definitionHash);
+            giveOnly ? state::developer::grant_item(item.definitionIndex, 1, item.definitionHash)
+                     : state::developer::grant_complete_bounty(item.definitionIndex,
+                                                               item.definitionHash);
         output.format("  item=%u: %s", static_cast<unsigned>(item.definitionIndex), result.reason);
         changed += result.changed;
-        completed += result.accepted;
+        granted += result.accepted && !held;
+        reused += held;
+        completed += result.accepted && !giveOnly;
         refused += !result.accepted;
+        if (!result.accepted)
+            core::log::writef(core::log::Channel::client,
+                              core::log::Level::warn,
+                              "ev=bounty_page stage=refused page=%zu item=%u reason=%s",
+                              page,
+                              static_cast<unsigned>(item.definitionIndex),
+                              result.reason);
     }
     // Publish once, after all per-bounty transactions release SQLite. No completion of other
     // held pursuits and no duplicate acquisition of an already-held page entry.
     if (changed != 0) server::bap::request_account_resync();
-    output.format("bounty.page: page %zu/%zu; %zu completed, %zu refused; %zu changed",
+    output.format("bounty.page: page %zu/%zu; %zu granted, %zu reused, %zu completed, %zu "
+                  "unchanged, %zu refused",
                   page,
                   pages,
+                  granted,
+                  reused,
                   completed,
-                  refused,
-                  changed);
+                  unchanged,
+                  refused);
+    core::log::writef(core::log::Channel::client,
+                      core::log::Level::info,
+                      "ev=bounty_page stage=end page=%zu mode=%s granted=%zu reused=%zu "
+                      "completed=%zu unchanged=%zu refused=%zu changed=%zu",
+                      page,
+                      giveOnly ? "give" : "complete",
+                      granted,
+                      reused,
+                      completed,
+                      unchanged,
+                      refused,
+                      changed);
     return refused == 0;
 }
 
@@ -748,7 +814,7 @@ bool install_commands() noexcept {
                          0,
                          65535}}},
         Entry{"bounty.page",
-              "Lists page bounds, or grants and completes one ordered bounty page.",
+              "Lists page bounds, or grants one ordered bounty page; complete is the default mode.",
               &bounty_page,
               {Parameter{"page",
                          "One-based page; omit to list the range.",
@@ -756,6 +822,13 @@ bool install_commands() noexcept {
                          nullptr,
                          1,
                          65535,
+                         true},
+               Parameter{"mode",
+                         "complete or give (preserve progress).",
+                         ValueType::text,
+                         &bounty_page_mode,
+                         0,
+                         0,
                          true}}},
         Entry{"pursuit.give2",
               "Grants the 57-item legacy set; preserves held progress.",

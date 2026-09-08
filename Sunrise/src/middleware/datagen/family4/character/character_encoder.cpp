@@ -2,10 +2,12 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cstring>
 #include <limits>
 #include <optional>
 
+#include "../../../../core/logging/log.h"
 #include "../../../../state/build_data/runtime.h"
 #include "../../../../state/unlocks/unlocks_records.h"
 #include "../../../../state/unlocks/unlocks_runtime.h"
@@ -116,10 +118,12 @@ constexpr std::int32_t kOccupiedRowWatermark = 1;
  * Places collectible prerequisites in the character quest bucket. These stackable rows need no
  * item-instance resident.
  */
-[[nodiscard]] bool place_collectible_quest_items(layout::Object& object) noexcept {
+[[nodiscard]] bool place_collectible_quest_items(layout::Object& object,
+                                                 bool requireSpace) noexcept {
     std::optional<std::uint8_t> questBucketId;
     std::size_t nextRow = 0;
     std::size_t rowLimit = 0;
+    std::uint32_t deferred = 0;
     for (const CollectibleQuest& quest : kCollectibleQuests) {
         if (quest.completionFlag != 0
             && (state::unlocks::records::claimed(quest.completionFlag)
@@ -147,7 +151,7 @@ constexpr std::int32_t kOccupiedRowWatermark = 1;
             questBucketId = item.bucketId;
             nextRow = bucket.firstSlot;
             rowLimit = bucket.firstSlot + bucket.slotCount;
-        } else if (*questBucketId != item.bucketId || nextRow >= rowLimit) {
+        } else if (*questBucketId != item.bucketId) {
             return false;
         }
         while (nextRow < rowLimit
@@ -155,7 +159,11 @@ constexpr std::int32_t kOccupiedRowWatermark = 1;
             ++nextRow;
         }
         if (nextRow >= rowLimit) {
-            return false;
+            if (requireSpace) return false;
+            // Older grants checked only instanced rows. Do not make their saved inventory
+            // unreadable because a synthesized prerequisite has no remaining display slot.
+            ++deferred;
+            continue;
         }
 
         inventory::layout::Entry& row = object.inventoryItems[nextRow];
@@ -165,6 +173,16 @@ constexpr std::int32_t kOccupiedRowWatermark = 1;
                                                            << (nextRow % kBitsPerFlagByte);
         object.instanceProgressWatermarks[nextRow] = kOccupiedRowWatermark;
         ++nextRow;
+    }
+    if (!requireSpace) {
+        static std::atomic<std::uint32_t> lastDeferred{};
+        if (lastDeferred.exchange(deferred) != deferred) {
+            core::log::writef(
+                core::log::Channel::middleware,
+                core::log::Level::warn,
+                "ev=character_inventory synthetic_quests_deferred=%u owned_items=preserved",
+                deferred);
+        }
     }
     return true;
 }
@@ -240,7 +258,8 @@ summary_matches_loadout(const loadout::ResolvedLoadout& resolvedLoadout,
 bool encode(const state::CharacterState& state,
             const loadout::ResolvedLoadout& resolvedLoadout,
             const state::equipment::light::Evaluation& lightEvaluation,
-            std::span<std::byte> output) noexcept {
+            std::span<std::byte> output,
+            bool requireCollectibleSpace) noexcept {
     if (!valid(state) || !valid(resolvedLoadout)
         || !summary_matches_loadout(resolvedLoadout, lightEvaluation)
         || output.size() < layout::kObjectSize) {
@@ -324,7 +343,8 @@ bool encode(const state::CharacterState& state,
             object.equippedInstanceSoids[item.equipmentSlot] = item.instance.instanceSoid;
         }
     }
-    if (!place_character_stacks(state, object) || !place_collectible_quest_items(object)) {
+    if (!place_character_stacks(state, object)
+        || !place_collectible_quest_items(object, requireCollectibleSpace)) {
         return false;
     }
 

@@ -7,6 +7,7 @@
 #include "bounty_redemption_runtime.h"
 #include "bounty_reward_policy_data.h"
 #include "bounty_stack_reward_plan.h"
+#include "character_encoding_preflight.h"
 #include "dawning_reward_runtime.h"
 #include "state_account_transaction_helpers.h"
 
@@ -195,7 +196,15 @@ bool stage_rewards(const AccountState& account,
     }
     middleware::datagen::family4::loadout::ResolvedLoadout loadout{};
     if (!account::valid(working) || !valid_profile_inventory(working)
-        || !middleware::datagen::family4::loadout::resolve(working, characterIndex, loadout))
+        || !middleware::datagen::family4::loadout::resolve(working, characterIndex, loadout)
+        || !character_encoding_preflight(
+            working,
+            characterIndex,
+            loadout,
+            working.characters[characterIndex].inventory.count
+                    > account.characters[characterIndex].inventory.count
+                || working.characters[characterIndex].stacks.count
+                       > account.characters[characterIndex].stacks.count))
         return false;
     for (std::size_t i = 0; i < rewardCount; ++i) {
         auto& reward = mutation.rewards[i];

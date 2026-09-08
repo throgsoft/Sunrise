@@ -175,7 +175,9 @@ struct PendingProfileItemAcquisition {
     /**
      * Rows this mutation announces to the account's change ring, which is the only way the Client
      * is told of a currency gain. Empty marks an ordinary acquisition, which announces its one
-     * acquired row instead; non-empty marks an exchange.
+
+     * * acquired row instead, or a discard, which announces no gain; non-empty marks an exchange.
+
      */
     std::array<ProfileStackChange, kProfileStackChangeCapacity> changes{};
     std::size_t changeCount{};
@@ -184,6 +186,8 @@ struct PendingProfileItemAcquisition {
     bool appended{};
     /** Skips Collections revalidation for direct rewards. */
     bool directGrant{};
+    /** Canonical no-SOID profile discard; no acquisition feedback or rewards. */
+    bool profileDiscard{};
     bool prepared{};
 };
 

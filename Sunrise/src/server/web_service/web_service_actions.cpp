@@ -17,6 +17,7 @@
 #include "../../state/build_data/runtime.h"
 #include "../../state/investment/store_internal.h"
 #include "../../state/runtime/bounty_redemption_runtime.h"
+#include "../../state/runtime/profile_discard.h"
 #include "../../state/runtime/runtime.h"
 #include "internal_actions.h"
 
@@ -290,13 +291,45 @@ void report_item_dismantle(const middleware::web_service::Message& message,
     write_warning(line, count);
 }
 
-/** Prepares the exact fixed-width opcode-402 Character-inventory removal request. */
+/** Prepares the fixed-width opcode-402 profile discard or Character-inventory action. */
 void dismantle_item(const middleware::web_service::Message& message, Outcome& outcome) noexcept {
     namespace opcode402 = middleware::web_service::messages::opcode402;
     opcode402::Request request{};
     if (!opcode402::parse_request(message, request)) {
         report_item_dismantle(
             message, "payload_bits", request.instanceSoid, request.definitionIndex, 0, 0);
+        return;
+    }
+    core::log::writef(core::log::Channel::server,
+                      core::log::Level::info,
+                      "ev=ws402 stage=decode result=ok has_instance=%u instance=0x%llX "
+                      "definition=%d value=%d selector=%d",
+                      request.hasInstance ? 1U : 0U,
+                      static_cast<unsigned long long>(request.instanceSoid),
+                      static_cast<int>(request.definitionIndex),
+                      request.value,
+                      static_cast<int>(request.selector));
+    if (!request.hasInstance && request.instanceSoid == 0 && request.definitionIndex >= 0
+        && request.value > 0 && request.selector >= 0) {
+        state::build_data::items::Definition definition{};
+        auto* mutation = emplace_mutation<state::PendingProfileItemAcquisition>(outcome);
+        if (mutation == nullptr) return;
+        const bool staged =
+            state::build_data::find_item_definition_index(
+                static_cast<std::uint16_t>(request.definitionIndex), definition)
+            && definition.definitionIndex == static_cast<std::uint16_t>(request.definitionIndex)
+            && state::item_discard::stage(
+                state::account_snapshot(), definition.definitionHash, request.value, *mutation);
+        core::log::writef(core::log::Channel::server,
+                          core::log::Level::info,
+                          "ev=ws402 stage=profile_discard result=%s definition=%d value=%d "
+                          "selector=%d remaining=%d",
+                          staged ? "prepared" : "refused",
+                          static_cast<int>(request.definitionIndex),
+                          request.value,
+                          static_cast<int>(request.selector),
+                          staged ? mutation->acquiredQuantity : -1);
+        if (!staged) clear_mutation(outcome);
         return;
     }
     if (!opcode402::supported_character_action(request)) {

@@ -27,6 +27,7 @@
 #include "../hooks/inactivity/inactivity_override.h"
 #include "../hooks/infinite_ammo/infinite_ammo.h"
 #include "../hooks/membership_probe/membership_probe.h"
+#include "../hooks/network/investment/dawning_delivery_picker.h"
 #include "../hooks/network/investment/investment_derived_rebuild.h"
 #include "../hooks/network/runtime.h"
 #include "../hooks/noclip/runtime.h"
@@ -199,6 +200,7 @@ void clear_game_targets() noexcept {
     (void)hooks::spawn::install();
     // Both XP banks remain authoritative. This optional filter removes only a paired HUD toast.
     (void)hooks::season_xp_toast::install();
+    (void)hooks::network::investment::install_dawning_delivery_picker();
     // Noclip owns its Havok-step target, so a patch-specific miss cannot disable teleport.
     (void)hooks::noclip::install();
     // Attaches whether or not the feature is on, so the interface can enable it without a restart.

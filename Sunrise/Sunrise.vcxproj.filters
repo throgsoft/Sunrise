@@ -67,4 +67,12 @@
     <None Include="vendor\lua\README.md"><Filter>Vendor\Lua</Filter></None>
     <None Include="vendor\lua\UPSTREAM_README"><Filter>Vendor\Lua</Filter></None>
   </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="src\client\hooks\network\investment\investment_dawning_delivery_visibility.cpp" />
+    <ClCompile Include="src\client\hooks\network\investment\dawning_delivery_picker.cpp" />
+    <ClInclude Include="src\client\hooks\network\investment\investment_dawning_delivery_visibility.h" />
+    <ClInclude Include="src\client\hooks\network\investment\dawning_delivery_picker.h" />
+    <ClInclude Include="src\client\hooks\network\investment\derived_cache_refresh.h" />
+    <ClInclude Include="src\client\hooks\network\investment\oven_received_state.h" />
+  </ItemGroup>
 </Project>

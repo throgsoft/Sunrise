@@ -19,6 +19,7 @@
 #include "../hooks/inactivity/inactivity_override.h"
 #include "../hooks/infinite_ammo/infinite_ammo.h"
 #include "../hooks/membership_probe/membership_probe.h"
+#include "../hooks/network/investment/dawning_delivery_picker.h"
 #include "../hooks/network/runtime.h"
 #include "../hooks/noclip/runtime.h"
 #include "../hooks/package_trust/package_trust_bypass.h"
@@ -76,6 +77,13 @@ bool shutdown() noexcept {
         core::log::write(core::log::Channel::client,
                          core::log::Level::error,
                          "ev=shutdown stage=season_xp_toast result=fail");
+        ReleaseSRWLockExclusive(&runtime::g_lock);
+        return false;
+    }
+    if (!hooks::network::investment::uninstall_dawning_delivery_picker()) {
+        core::log::write(core::log::Channel::client,
+                         core::log::Level::error,
+                         "ev=shutdown stage=dawning_delivery_picker result=fail");
         ReleaseSRWLockExclusive(&runtime::g_lock);
         return false;
     }

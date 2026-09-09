@@ -417,6 +417,13 @@ bool consume(std::span<const std::byte> request,
         purchase_item(message, outcome);
     } else if (message.opcode == middleware::web_service::messages::opcode904::kOpcode) {
         acquire_quest(message, outcome);
+    } else if (message.opcode == 905) {
+        // Engram redemption is not implemented. Do not acknowledge a successful decrypt
+        // without consuming the source and publishing its reward transaction.
+        core::log::writef(core::log::Channel::server,
+                          core::log::Level::warn,
+                          "ev=ws905 stage=redeem result=unsupported payload_bytes=%zu",
+                          message.payload.size());
     } else {
         dispatched = false;
     }

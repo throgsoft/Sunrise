@@ -71,7 +71,7 @@ Result edit(std::uint16_t index,
     data::items::Definition target{};
     if (!completeAll && !data::find_item_definition_index(index, target))
         return {false, 0, "installed item identity unavailable"};
-    std::size_t matched = 0, changed = 0;
+    std::size_t matched = 0, changed = 0, skipped = 0;
     for (std::size_t i = 0; i < character->inventory.count; ++i) {
         auto& held = character->inventory.values[i];
         if (!completeAll && held.definitionHash != target.definitionHash) continue;
@@ -85,6 +85,22 @@ Result edit(std::uint16_t index,
         std::array<std::int32_t, inventory::kItemObjectiveLaneCount> thresholds{};
         if (!objectives(detail, thresholds) || lane > detail.objectiveCount)
             return {false, 0, "objective metadata or lane unavailable; no changes committed"};
+        bool itemProgress = true;
+        for (std::size_t ordinal = 0; ordinal < detail.objectiveCount; ++ordinal) {
+            if (lane != 0 && lane != ordinal + inventory::kItemObjectiveLaneBase) continue;
+            data::objectives::Definition objective{};
+            itemProgress =
+                itemProgress
+                && data::find_objective_definition(detail.objectiveIndices[ordinal], objective)
+                && objective.itemProgress;
+        }
+        if (!itemProgress) {
+            if (!completeAll)
+                return {
+                    false, 0, "objective uses a shared or unsupported source, not an item lane"};
+            ++skipped;
+            continue;
+        }
         if (const auto* reason = editable(held, item.definitionIndex, detail))
             return {false, 0, reason};
         ++matched;
@@ -105,13 +121,15 @@ Result edit(std::uint16_t index,
         held.mutationSerial = static_cast<std::int32_t>(character->nextInventorySerial++);
         ++changed;
     }
-    if (matched == 0) return {false, 0, "no matching held pursuit on selected character"};
+    if (matched == 0 && skipped == 0)
+        return {false, 0, "no matching held pursuit on selected character"};
     if (changed != 0 && !store::write_account(*account)) return {false, 0, "account write refused"};
     if (!transaction.commit()) return {false, 0, "transaction commit failed"};
     return {true,
             changed,
-            changed == 0 ? "already at requested values"
-                         : "objective values committed; no rewards claimed"};
+            skipped != 0   ? "item objectives committed; shared/unsupported pursuits skipped"
+            : changed == 0 ? "already at requested values"
+                           : "objective values committed; no rewards claimed"};
 }
 enum class DropScope { item, pursuits, bounties, engrams };
 

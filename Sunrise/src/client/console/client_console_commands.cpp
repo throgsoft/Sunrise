@@ -467,11 +467,12 @@ void show_progress(const inventory::Item& held,
     for (std::size_t i = 0; i < detail.objectiveCount; ++i) {
         data::objectives::Definition objective{};
         if (data::find_objective_definition(detail.objectiveIndices[i], objective))
-            output.format("    lane=%zu objective=%u value=%d completion=%d",
+            output.format("    lane=%zu objective=%u value=%d completion=%d source=%s",
                           i + 1,
                           static_cast<unsigned>(objective.definitionIndex),
                           held.objectiveValues[i + 1],
-                          objective.completionValue);
+                          objective.completionValue,
+                          objective.itemProgress ? "item" : "shared/unsupported (lane ignored)");
         else
             output.format("    lane=%zu objective=%u metadata unavailable",
                           i + 1,
@@ -519,10 +520,12 @@ bool pursuit_show(std::span<const Value> arguments, Output& output) noexcept {
         for (std::size_t i = 0; i < detail.objectiveCount; ++i) {
             data::objectives::Definition objective{};
             if (data::find_objective_definition(detail.objectiveIndices[i], objective))
-                output.format("  lane=%zu objective=%u completion=%d",
+                output.format("  lane=%zu objective=%u completion=%d source=%s",
                               i + 1,
                               static_cast<unsigned>(objective.definitionIndex),
-                              objective.completionValue);
+                              objective.completionValue,
+                              objective.itemProgress ? "item"
+                                                     : "shared/unsupported (lane ignored)");
             else
                 output.format("  lane=%zu objective metadata unavailable", i + 1);
         }

@@ -9,7 +9,7 @@ namespace sunrise::state::build_data::pursuits {
 struct Progress {
     /** Objectives the definition declares. Zero for every item that is not a pursuit. */
     std::uint8_t objectiveCount{};
-    /** Declared objectives whose lane has reached the value that objective completes at. */
+    /** Item-backed objectives whose lane has reached the declared completion value. */
     std::uint8_t completeCount{};
     /** True when every declared objective resolved to a definition in the objective table. */
     bool resolved{};
@@ -24,7 +24,9 @@ struct Progress {
  * own objectives and the values they complete at, both of which are content, not account state.
  *
  * An objective that does not resolve leaves `resolved` clear rather than counting as complete, so
- * a definition this build cannot read never pays out.
+ * a definition this build cannot read never pays out. Shared/unsupported sources are never
+ *
+ * completed by the item's lane; their own investment evaluator must be implemented separately.
  *
  * @param itemDefinitionIndex Native item-definition index of the held pursuit.
  * @param lanes Current value of each of the item instance's progress lanes.

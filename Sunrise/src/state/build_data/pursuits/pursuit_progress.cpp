@@ -27,7 +27,8 @@ Progress measure(std::uint16_t itemDefinitionIndex, std::span<const std::int32_t
             progress.resolved = false;
             continue;
         }
-        if (lanes[lane] >= objective.completionValue) {
+        // Shared or unused values are not completed by writing the item's ordinal lane.
+        if (objective.itemProgress && lanes[lane] >= objective.completionValue) {
             ++progress.completeCount;
         }
     }

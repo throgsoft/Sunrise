@@ -22,10 +22,25 @@ bool find_season_pass_reward(std::uint16_t rewardIndex, season_pass::Reward& rew
     return season_pass::find(rewardIndex, reward);
 }
 
-/** Finds the item set one season pass wrapper opens into. */
+/** Finds the acquired item set, resolving the shipped pass's unfinished weapon alias. */
 bool find_season_pass_package(std::uint32_t definitionHash,
                               season_pass::Package& package) noexcept {
-    return season_pass::find_package(definitionHash, package);
+    if (!season_pass::find_package(definitionHash, package)) {
+        return false;
+    }
+    // The premium class gearsets name an unfinished Witherhoard definition with no power
+    // metadata or combat plugs. The pass's standalone reward names the playable definition.
+    // Resolve the identity before acquisition so its own native sockets and power rules apply;
+    // keep the extracted catalog intact and use the same result for prepare and commit.
+    constexpr std::uint32_t kUnfinishedWitherhoardHash = 2522817335U;
+    constexpr std::uint32_t kWitherhoardHash = 2357297366U;
+    for (std::size_t index = 0; index < package.itemCount; ++index) {
+        if (package.items[index] != kUnfinishedWitherhoardHash) {
+            continue;
+        }
+        package.items[index] = kWitherhoardHash;
+    }
+    return true;
 }
 
 /** @return Season pass reward rows in State. */

@@ -113,7 +113,7 @@ Result edit(std::uint16_t index,
             changed == 0 ? "already at requested values"
                          : "objective values committed; no rewards claimed"};
 }
-enum class DropScope { item, pursuits, bounties };
+enum class DropScope { item, pursuits, bounties, engrams };
 
 Result drop(std::uint16_t index, DropScope scope) noexcept {
     data::items::Definition requested{};
@@ -141,6 +141,18 @@ Result drop(std::uint16_t index, DropScope scope) noexcept {
                         "held metadata unavailable; use item.drop for a known identity; no changes "
                         "committed"};
             remove = detail.objectiveCount != 0 && !detail.equipmentSlot.has_value();
+            if (scope == DropScope::engrams) {
+                // Installed Engrams bucket (hash 375726501), including Bright Engrams.
+                // Packages in Consumables are not engrams merely because they can be opened.
+                remove = detail.bucketId == 31 && !detail.equipmentSlot.has_value();
+                if (remove) {
+                    data::inventory::buckets::Descriptor bucket{};
+                    if (!data::find_inventory_bucket_descriptor(detail.bucketId, bucket))
+                        return {false, 0, "held engram bucket unavailable; no changes committed"};
+                    remove =
+                        bucket.arraySelector == data::inventory::buckets::ArraySelector::character;
+                }
+            }
             // Match bounty.page's installed classification, regardless of saved expiry/progress.
             if (scope == DropScope::bounties) {
                 remove = remove && detail.bucketId == 40 && detail.lifetimeSeconds > 0
@@ -164,6 +176,7 @@ Result drop(std::uint16_t index, DropScope scope) noexcept {
         return {true,
                 0,
                 scope == DropScope::bounties ? "no held bounties"
+                : scope == DropScope::engrams ? "no held engrams"
                                              : "no matching unequipped residents"};
     // Compact authored storage without inventing new identities or resetting survivor progress.
     for (std::size_t i = kept; i < beforeCount; ++i)
@@ -175,6 +188,8 @@ Result drop(std::uint16_t index, DropScope scope) noexcept {
             removed,
             scope == DropScope::bounties
                 ? "bounties removed; quests preserved; no rewards granted"
+                : scope == DropScope::engrams
+                ? "engrams removed; no decryption or rewards granted"
                 : "unequipped residents removed; no rewards, claims or refunds"};
 }
 
@@ -259,6 +274,9 @@ Result drop_pursuits() noexcept {
 }
 Result drop_bounties() noexcept {
     return drop(0, DropScope::bounties);
+}
+Result drop_engrams() noexcept {
+    return drop(0, DropScope::engrams);
 }
 
 } // namespace sunrise::state::developer

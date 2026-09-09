@@ -37,5 +37,7 @@ set_quest(std::uint16_t index, std::int32_t value, std::uint8_t lane = 0) noexce
 [[nodiscard]] Result drop_pursuits() noexcept;
 /** Removes held bounties classified by installed metadata; preserves quests, stacks and rewards. */
 [[nodiscard]] Result drop_bounties() noexcept;
+/** Removes the selected character's held Engrams bucket residents without decrypting them. */
+[[nodiscard]] Result drop_engrams() noexcept;
 // Every function releases its SQLite transaction before returning. Replication belongs to callers.
 } // namespace sunrise::state::developer

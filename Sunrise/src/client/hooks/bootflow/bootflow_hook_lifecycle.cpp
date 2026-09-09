@@ -93,16 +93,18 @@ bool install() noexcept {
         everyFix = everyFix && handle.attached;
     }
 
-    // Neither of these attaches anything, so they stay outside the transaction.
+    // These resolve callable targets without attaching detours.
     const bool worldStep = install_world_step();
     const bool sliceSet = spawn::install_targets();
-    anyFix = anyFix || worldStep || sliceSet;
+    const bool fade = install_fade_release();
+    anyFix = anyFix || worldStep || sliceSet || fade;
     g_installed.store(anyFix, std::memory_order_release);
     return everyFix && worldStep && sliceSet;
 }
 
 /** Detaches every boot-step fix, in the reverse order of install. */
 void uninstall() noexcept {
+    uninstall_fade_release();
     spawn::uninstall_targets();
     uninstall_world_step();
     uninstall_region_private();

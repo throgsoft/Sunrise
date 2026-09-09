@@ -23,6 +23,7 @@ constexpr std::string_view kStepSignatureText =
 /** Compiled pattern bytes of the signature text above. */
 constexpr auto kStepSignature = signature<signature_length(kStepSignatureText)>(kStepSignatureText);
 
+constexpr std::int32_t kActivityLoadFirst = 33;
 /** `activity:in_world`. */
 constexpr std::int32_t kInWorld = 38;
 /** No step has been published. */
@@ -53,13 +54,26 @@ std::atomic_uint64_t g_publishedSliceSetTick{0};
 
 /** Publishes the client's own boot-flow step. */
 void poll_world_step() noexcept {
-    g_publishedStep.store(read_step(), std::memory_order_relaxed);
+    const std::int32_t step = read_step();
+    g_publishedStep.store(step, std::memory_order_relaxed);
     g_publishedTick.store(GetTickCount64(), std::memory_order_release);
+    // A slow load can finish without another spawn callback. Release the transition fade
+    // from the existing camera poll once the native world step confirms arrival.
+    if (step == kInWorld) {
+        release_world_fade();
+    } else if (step < kActivityLoadFirst || step > kInWorld) {
+        rearm_fade_release();
+    }
 }
 
 /** Publishes the client's current local slice-set index. */
 void poll_current_slice_set() noexcept {
     const std::int32_t index = spawn::sample_current_slice_set();
+    const std::int32_t previous = g_publishedSliceSet.load(std::memory_order_relaxed);
+    // A bubble transition can arm a fresh fade without passing through orbit.
+    if (index >= 0 && previous >= 0 && index != previous) {
+        rearm_fade_release();
+    }
     g_publishedSliceSet.store(index, std::memory_order_relaxed);
     g_publishedSliceSetTick.store(GetTickCount64(), std::memory_order_release);
 }

@@ -283,6 +283,7 @@
     <ClCompile Include="src\client\hooks\bootflow\orbit_slice_set.cpp" />
     <ClCompile Include="src\client\hooks\bootflow\region_private.cpp" />
     <ClCompile Include="src\client\hooks\bootflow\world_step.cpp" />
+    <ClCompile Include="src\client\hooks\bootflow\fade_release.cpp" />
     <ClCompile Include="src\client\hooks\bootflow\spawn\slice_set_sample.cpp" />
     <ClCompile Include="src\server\bap\encrypted\push\activity\activity_arrival.cpp" />
     <ClCompile Include="src\middleware\bap\activity_host_manager\request\selection\activity_manager_selection_bits.cpp" />

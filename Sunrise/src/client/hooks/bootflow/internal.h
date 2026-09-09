@@ -111,6 +111,12 @@ void uninstall_region_private() noexcept;
  */
 [[nodiscard]] bool install_world_step() noexcept;
 
+/** Resolve the world-transition presentation helpers; no detour is attached. */
+[[nodiscard]] bool install_fade_release() noexcept;
+void uninstall_fade_release() noexcept;
+void release_world_fade() noexcept;
+void rearm_fade_release() noexcept;
+
 /** Clears the boot-flow step accessor it found. */
 void uninstall_world_step() noexcept;
 

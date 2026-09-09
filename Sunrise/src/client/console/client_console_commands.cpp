@@ -152,6 +152,10 @@ bool pursuit_dropall(std::span<const Value>, Output& output) noexcept {
     return report_mutation("pursuit.dropall", state::developer::drop_pursuits(), output);
 }
 
+bool bounties_dropall(std::span<const Value>, Output& output) noexcept {
+    return report_mutation("bounties.dropall", state::developer::drop_bounties(), output);
+}
+
 bool quest_set(std::span<const Value> arguments, Output& output) noexcept {
     const auto index = static_cast<std::uint16_t>(arguments[0].integer);
     if (arguments.size() == 4 && arguments[3].integer != index) {
@@ -788,6 +792,9 @@ bool install_commands() noexcept {
               "Removes held objective-bearing pursuits without rewards; preserves oven and reward "
               "banks.",
               &pursuit_dropall},
+        Entry{"bounties.dropall",
+              "Removes held bounties without rewards; preserves quests, oven and stacks.",
+              &bounties_dropall},
         Entry{"pursuit.complete",
               "Completes held objectives atomically; no grants or redemption.",
               &pursuit_complete},

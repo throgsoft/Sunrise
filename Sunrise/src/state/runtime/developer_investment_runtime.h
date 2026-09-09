@@ -35,5 +35,7 @@ set_quest(std::uint16_t index, std::int32_t value, std::uint8_t lane = 0) noexce
 /** Removes only objective-bearing held pursuits; keeps the oven, gear and all saved reward banks.
  */
 [[nodiscard]] Result drop_pursuits() noexcept;
+/** Removes held bounties classified by installed metadata; preserves quests, stacks and rewards. */
+[[nodiscard]] Result drop_bounties() noexcept;
 // Every function releases its SQLite transaction before returning. Replication belongs to callers.
 } // namespace sunrise::state::developer

@@ -113,9 +113,11 @@ Result edit(std::uint16_t index,
             changed == 0 ? "already at requested values"
                          : "objective values committed; no rewards claimed"};
 }
-Result drop(std::uint16_t index, bool allPursuits) noexcept {
+enum class DropScope { item, pursuits, bounties };
+
+Result drop(std::uint16_t index, DropScope scope) noexcept {
     data::items::Definition requested{};
-    if (!allPursuits && !data::find_item_definition_index(index, requested))
+    if (scope == DropScope::item && !data::find_item_definition_index(index, requested))
         return {false, 0, "installed item identity unavailable"};
     std::unique_ptr<AccountState> snapshot(new (std::nothrow) AccountState);
     if (!snapshot) return {false, 0, "allocation failed"};
@@ -129,7 +131,7 @@ Result drop(std::uint16_t index, bool allPursuits) noexcept {
     for (std::size_t i = 0; i < beforeCount; ++i) {
         const auto held = character->inventory.values[i];
         bool remove = held.definitionHash == requested.definitionHash;
-        if (allPursuits) {
+        if (scope != DropScope::item) {
             data::items::Definition item{};
             data::items::details::Definition detail{};
             if (!data::find_item_definition_hash(held.definitionHash, item)
@@ -139,20 +141,41 @@ Result drop(std::uint16_t index, bool allPursuits) noexcept {
                         "held metadata unavailable; use item.drop for a known identity; no changes "
                         "committed"};
             remove = detail.objectiveCount != 0 && !detail.equipmentSlot.has_value();
+            // Match bounty.page's installed classification, regardless of saved expiry/progress.
+            if (scope == DropScope::bounties) {
+                remove = remove && detail.bucketId == 40 && detail.lifetimeSeconds > 0
+                         && detail.objectiveCount <= detail.objectiveIndices.size()
+                         && detail.maxStackSize <= 1;
+                if (remove) {
+                    data::inventory::buckets::Descriptor bucket{};
+                    if (!data::find_inventory_bucket_descriptor(detail.bucketId, bucket))
+                        return {false, 0, "held bounty bucket unavailable; no changes committed"};
+                    remove =
+                        bucket.arraySelector == data::inventory::buckets::ArraySelector::character;
+                }
+            }
         }
         if (remove)
             ++removed;
         else
             character->inventory.values[kept++] = held;
     }
-    if (removed == 0) return {true, 0, "no matching unequipped residents"};
+    if (removed == 0)
+        return {true,
+                0,
+                scope == DropScope::bounties ? "no held bounties"
+                                             : "no matching unequipped residents"};
     // Compact authored storage without inventing new identities or resetting survivor progress.
     for (std::size_t i = kept; i < beforeCount; ++i)
         character->inventory.values[i] = {};
     character->inventory.count = kept;
     if (!store::write_account(*snapshot) || !transaction.commit())
         return {false, 0, "removal transaction failed; no changes committed"};
-    return {true, removed, "unequipped residents removed; no rewards, claims or refunds"};
+    return {true,
+            removed,
+            scope == DropScope::bounties
+                ? "bounties removed; quests preserved; no rewards granted"
+                : "unequipped residents removed; no rewards, claims or refunds"};
 }
 
 } // namespace
@@ -229,10 +252,13 @@ Result grant_complete_bounty(std::uint16_t index, std::uint32_t expectedHash) no
                                : "held bounty completed; expiry preserved"};
 }
 Result drop_item(std::uint16_t index) noexcept {
-    return drop(index, false);
+    return drop(index, DropScope::item);
 }
 Result drop_pursuits() noexcept {
-    return drop(0, true);
+    return drop(0, DropScope::pursuits);
+}
+Result drop_bounties() noexcept {
+    return drop(0, DropScope::bounties);
 }
 
 } // namespace sunrise::state::developer

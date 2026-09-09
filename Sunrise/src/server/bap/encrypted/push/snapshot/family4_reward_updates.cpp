@@ -252,6 +252,19 @@ bool prepare_record_reward_grant(
         return report_failure("record_reward_account");
     }
 
+    const auto* rankCredits = mutation.pursuitRedemption ? &*mutation.pursuitRedemption : nullptr;
+    bool presentsRank = false;
+    if (rankCredits) {
+        if (rankCredits->rankCount > rankCredits->ranks.size())
+            return report_failure("record_reward_rank_count");
+        for (std::size_t i = 0; i < rankCredits->rankCount; ++i) {
+            const auto& credit = rankCredits->ranks[i];
+            if (credit.before < 0 || credit.after < credit.before)
+                return report_failure("record_reward_rank_delta");
+            presentsRank |= credit.after > credit.before;
+        }
+    }
+
     family4_datagen::loadout::ResolvedInstances residents{};
     for (std::size_t rewardIndex = 0; rewardIndex < mutation.rewardCount; ++rewardIndex) {
         const state::PreparedRecordReward& reward = mutation.rewards[rewardIndex];
@@ -409,11 +422,29 @@ bool prepare_record_reward_grant(
         clear_after(scratch, reservation);
         return report_failure("record_reward_presentation");
     }
+    if (rankCredits) {
+        for (std::size_t i = 0; i < rankCredits->rankCount; ++i) {
+            const auto& credit = rankCredits->ranks[i];
+            if (credit.after == credit.before) continue;
+            if (credit.presentationSerial < 0
+                || static_cast<std::uint32_t>(credit.presentationSerial)
+                       < mutation.beforeCharacter.nextInventorySerial
+                || static_cast<std::uint32_t>(credit.presentationSerial)
+                       >= character.nextInventorySerial
+                || !append_transient_reward_presentation(characterBytes,
+                                                         credit.markerHash,
+                                                         credit.after - credit.before,
+                                                         credit.presentationSerial)) {
+                clear_after(scratch, reservation);
+                return report_failure("record_reward_rank_presentation");
+            }
+        }
+    }
     if (!append_object(scratch,
                        characterBytes,
                        update.characterDefinitionId,
                        update.characterSoid,
-                       staged.objects[residentCursor],
+                       staged.objects[residentCursor + (presentsRank ? 1U : 0U)],
                        compressedExtent)) {
         clear_after(scratch, reservation);
         return report_failure("record_reward_character_object");
@@ -425,6 +456,27 @@ bool prepare_record_reward_grant(
         return report_failure("record_reward_account_encode");
     }
     auto& accountObject = *reinterpret_cast<account_layout::Object*>(accountBytes.data());
+    // Preview precedes the authoritative commit. Project its exact rank after-image in this
+    // frame, before the temporary pickup row; the deferred resync then carries the same value.
+    if (rankCredits) {
+        for (std::size_t i = 0; i < rankCredits->rankCount; ++i) {
+            const auto& credit = rankCredits->ranks[i];
+            std::size_t matches = 0;
+            for (auto& progression : accountObject.progressions) {
+                if (progression.definitionIndex != credit.index) continue;
+                if (progression.values[0] != credit.before) {
+                    clear_after(scratch, reservation);
+                    return report_failure("record_reward_rank_before");
+                }
+                progression.values[0] = credit.after;
+                ++matches;
+            }
+            if (matches != 1) {
+                clear_after(scratch, reservation);
+                return report_failure("record_reward_rank_definition");
+            }
+        }
+    }
     if (mutation.afterDawning && !dawning::project_banks(*mutation.afterDawning, accountObject)) {
         clear_after(scratch, reservation);
         return report_failure("record_reward_material_banks");
@@ -480,7 +532,7 @@ bool prepare_record_reward_grant(
                        accountBytes,
                        update.accountDefinitionId,
                        update.accountSoid,
-                       staged.objects[residentCursor + 1U],
+                       staged.objects[residentCursor + (presentsRank ? 0U : 1U)],
                        compressedExtent)) {
         clear_after(scratch, reservation);
         return report_failure("record_reward_account_object");

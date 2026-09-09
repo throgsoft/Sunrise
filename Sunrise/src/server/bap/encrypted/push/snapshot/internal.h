@@ -61,6 +61,14 @@ inline constexpr std::uint16_t kChangeFlags = 0;
     const middleware::datagen::family4::loadout::ResolvedLoadout& loadout,
     std::span<const queuez::AcquisitionPresentationRow> presentationRows) noexcept;
 
+/** Appends a gain-only inventory row and acquisition record to this frame, never to State or
+ * the
+ * resident manifest. The caller reserves the serial and publishes the bank after-image. */
+[[nodiscard]] bool append_transient_reward_presentation(std::span<std::byte> characterBytes,
+                                                        std::uint32_t itemHash,
+                                                        std::int32_t amount,
+                                                        std::int32_t mutationSerial) noexcept;
+
 /**
  * Builds the family-three account roster snapshot.
  * @param scratch Object storage owned by the lock.

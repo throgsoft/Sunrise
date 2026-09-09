@@ -79,6 +79,8 @@ bool rank_credit(RewardMarker marker, std::int32_t quantity, PendingRedemption& 
     if (pending.rankCount == pending.ranks.size()) return false;
     auto& credit = pending.ranks[pending.rankCount++];
     credit.index = definition.definitionIndex;
+    credit.markerHash = valor ? bounty_policy::kValorRankPointsMarkerHash
+                              : bounty_policy::kInfamyRankPointsMarkerHash;
     if (!store::read_unlock(store::Bank::accountProgressions, credit.index, credit.before)
         || credit.before < 0)
         return false;
@@ -188,6 +190,16 @@ bool collect(AccountState& working,
                               quantity);
         }
         if (!append(requests, count, paidIndex, quantity)) return false;
+    }
+    // Reserve presentation serials in the same working character as the real rewards. The
+    // markers never enter inventory, and a capped bank produces neither a serial nor a pickup.
+    for (std::size_t i = 0; i < pending.rankCount; ++i) {
+        auto& credit = pending.ranks[i];
+        if (credit.after == credit.before) continue;
+        if (character.nextInventorySerial
+            >= static_cast<std::uint32_t>((std::numeric_limits<std::int32_t>::max)()))
+            return false;
+        credit.presentationSerial = static_cast<std::int32_t>(character.nextInventorySerial++);
     }
     if (paysExperience) {
         pending.experience = cadence_experience(cadence) * (doubleExperience ? 2 : 1);

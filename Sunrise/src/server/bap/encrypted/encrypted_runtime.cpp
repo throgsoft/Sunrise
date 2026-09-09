@@ -387,6 +387,10 @@ bool consume(Session& session,
     const auto* rewardTransaction = transaction_if<RecordRewardGrantTransaction>(outcome);
     const bool pursuitRedemption = rewardTransaction && rewardTransaction->pending
                                    && rewardTransaction->pending->pursuitRedemption.has_value();
+    // The State commit consumes its pending grant. Retain only rank evidence until the outer
+    // SQLite transaction succeeds; a released inner savepoint is not a committed award.
+    const auto rankCommit = pursuitRedemption ? *rewardTransaction->pending->pursuitRedemption
+                                              : state::PursuitRedemptionContext{};
     const bool mutatesAccount =
         outcome.hasSelectCharacter || outcome.hasRecordClaim || outcome.hasArtifactReset
         || transaction_if<EquipmentSwapTransaction>(outcome) != nullptr
@@ -434,6 +438,21 @@ bool consume(Session& session,
             // The inner State grant only released a savepoint. Announce its copied ingredient
             // credits after the enclosing SQLite commit; every refusal drops the scope instead.
             static_cast<void>(materialNotices.publish(GetTickCount64()));
+            for (std::size_t i = 0; i < rankCommit.rankCount; ++i) {
+                const auto& credit = rankCommit.ranks[i];
+                core::log::writef(core::log::Channel::state,
+                                  core::log::Level::info,
+                                  "ev=bounty_rank stage=commit result=ok source=0x%08X "
+                                  "instance=0x%016llX progression=%u marker=0x%08X "
+                                  "before=%d after=%d actual_credit=%d",
+                                  rankCommit.sourceDefinitionHash,
+                                  static_cast<unsigned long long>(rankCommit.sourceInstanceSoid),
+                                  static_cast<unsigned>(credit.index),
+                                  credit.markerHash,
+                                  credit.before,
+                                  credit.after,
+                                  credit.after - credit.before);
+            }
             std::copy_n(scratch.framed.begin(), framedSize, response.begin());
             written = framedSize;
             entityLease.release();

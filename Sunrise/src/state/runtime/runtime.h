@@ -243,6 +243,9 @@ struct PursuitRedemptionContext {
     struct RankCredit {
         std::uint16_t index{};
         std::int32_t before{}, after{};
+        /** Nonresident pickup identity and a serial reserved only for a positive bank delta. */
+        std::uint32_t markerHash{};
+        std::int32_t presentationSerial{};
         bool operator==(const RankCredit&) const = default;
     };
     std::array<RankCredit, 2> ranks{};

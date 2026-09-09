@@ -76,7 +76,9 @@ void release_world_fade() noexcept {
         return;
     }
     std::uint32_t channel = kWorldTransitionChannel;
-    std::array<float, 4> colour = kOpaqueBlack;
+    // The native channel writer loads this argument with MOVAPS. std::array alone
+    // guarantees only float alignment; optimized callers can otherwise pass rsp+8 mod 16.
+    alignas(16) std::array<float, 4> colour = kOpaqueBlack;
     (void)release(g_manager, &channel, colour.data(), kFadeInSeconds);
     std::array<char, kLineCapacity> line{};
     const int written = std::snprintf(line.data(),

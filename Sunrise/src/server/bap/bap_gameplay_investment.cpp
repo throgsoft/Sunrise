@@ -120,6 +120,15 @@ void invest_gameplay_incident_locked(
     event.raceHash = race;
     event.victimRankHash = labels::classify_victim_rank(victimMask);
     event.bubble = gameplay_bubble_locked(*ownerSession);
+    // Same killing-source predicate as the working branch, using its transported selectors.
+    // A non-sentinel ability selector bypasses equipment lookup; never substitute the current gun.
+    if (source.attributed && source.weapon && source.weaponClass != 0 && !source.melee
+        && !source.grenade && !source.superAbility && !source.ability
+        && source.abilityLabelHash == 0 && decoded.abilitySelector == -1
+        && decoded.equipmentSlot) {
+        const auto slot = static_cast<gameplay::WeaponSlot>(*decoded.equipmentSlot);
+        if (gameplay::valid_weapon_slot(slot)) event.weaponSlot = slot;
+    }
     if (source.attributed) {
         event.weaponClass = source.weaponClass;
         event.weaponKill = source.weapon;
@@ -145,13 +154,19 @@ void invest_gameplay_incident_locked(
         g_status.triumphs += result.triumphsAdvanced;
         g_status.lastReason = result.applied ? "credited" : "no_matching_held_lane";
     } else {
-        report("state_refused");
+        switch (result.status) {
+        case state::GameplayKillStatus::invalidContext: report("invalid_context"); break;
+        case state::GameplayKillStatus::wrongCharacter: report("wrong_character"); break;
+        case state::GameplayKillStatus::invalidAccount: report("invalid_account"); break;
+        case state::GameplayKillStatus::capacity: report("capacity"); break;
+        default: report("invalid_event"); break;
+        }
     }
     if (result.changedCount || result.triumphsAdvanced) arm_account_resync_everywhere();
     core::log::writef(core::log::Channel::server,
                       core::log::Level::info,
                       "ev=bounty_gameplay result=%u lanes=%zu target=%u race=%08X weapon=%08X "
-                      "damage=%d precision=%u source=%u",
+                      "damage=%d precision=%u source=%u activity=%u status=%s",
                       static_cast<unsigned>(result.status),
                       result.applied,
                       incident.primaryTarget,
@@ -159,6 +174,8 @@ void invest_gameplay_incident_locked(
                       source.weaponClass,
                       decoded.damage,
                       unsigned(source.precision),
-                      unsigned(source.attributed));
+                      unsigned(source.attributed),
+                      owner.destination.activityIndex,
+                      g_status.lastReason);
 }
 } // namespace sunrise::server::bap

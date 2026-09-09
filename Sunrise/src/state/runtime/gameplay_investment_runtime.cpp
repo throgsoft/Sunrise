@@ -3,6 +3,7 @@
 #include "../../core/runtime/wall_clock.h"
 #include "../activity/runtime.h"
 #include "../build_data/runtime.h"
+#include "../bounties/equipped_subclass_fact.h"
 #include "../investment/store_internal.h"
 #include "../unlocks/unlocks_records.h"
 
@@ -30,6 +31,29 @@ bool mapping_valid(bounties::KillRuleDefinition& rule) noexcept {
     rule.completion = objective.completionValue;
     return true;
 }
+// Read equipment for the subclass predicate from the same authoritative
+// account snapshot as the lane mutation. Killing damage is never used as subclass affinity.
+std::optional<bounties::gameplay::Damage> subclass_affinity(
+    const AccountState& accountState, std::uint64_t character) noexcept {
+    for (std::size_t i = 0; i < accountState.characterCount; ++i) {
+        const auto& selected = accountState.characters[i];
+        if (!selected.selected || selected.soid != character) continue;
+        const auto& item = selected.equipment.slots[
+            static_cast<std::size_t>(account::inventory::EquipmentSlot::subclass)];
+        if (!item || !item->instanceSoid || item->quantity != 1) return {};
+        const gameplay_equipment::SubclassFact fact{
+            accountState.primarySoid, selected.soid, item->instanceSoid,
+            item->definitionHash, static_cast<std::uint8_t>(selected.characterClass)};
+        return gameplay_equipment::affinity_for(fact, accountState.primarySoid, character,
+            [](std::uint32_t hash) noexcept {
+                build_data::items::Definition definition{};
+                return build_data::find_item_definition_hash(hash, definition)
+                    && definition.definitionHash == hash;
+            });
+    }
+    return {};
+}
+
 } // namespace
 GameplayKillResult invest_gameplay_kill(const bounties::gameplay::Event& event,
                                         const activity::SessionBinding& owner,
@@ -62,9 +86,12 @@ GameplayKillResult invest_gameplay_kill(const bounties::gameplay::Event& event,
         return GameplayKillResult{GameplayKillStatus::invalidAccount};
     const auto context = bounties::gameplay::Context{
         owner.sessionId, owner.createdRevision, event.context.sourceGeneration};
+    auto admittedEvent = event;
+    admittedEvent.equippedSubclassAffinity =
+        subclass_affinity(*snapshot, event.creditedCharacter.value_or(0));
     auto result = bounties::detail::apply_gameplay_kill_transaction(
         *snapshot,
-        event,
+        admittedEvent,
         context,
         static_cast<std::uint16_t>(owner.destination.activityIndex),
         bounties::kKillRules,

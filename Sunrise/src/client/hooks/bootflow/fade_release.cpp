@@ -6,6 +6,8 @@
 #include <string_view>
 
 #include "../../../core/logging/log.h"
+#include "../teleport/runtime.h"
+#include "bootflow_hook_lifecycle.h"
 #include "internal.h"
 
 namespace sunrise::client::hooks::bootflow {
@@ -55,18 +57,36 @@ using ReleaseChannel = std::int64_t(__fastcall*)(void*, std::uint32_t*, float*, 
 void* g_manager{nullptr};
 std::atomic<ReleaseChannel> g_release{nullptr};
 std::atomic_bool g_released{false};
+std::atomic_bool g_waitReported{false};
 
 } // namespace
 
 /** Re-arms the release, so the next world load fades in once and logs its own line. */
 void rearm_fade_release() noexcept {
     g_released.store(false, std::memory_order_release);
+    g_waitReported.store(false, std::memory_order_relaxed);
 }
 
-/** Releases the world-transition fade channel. The world-step poll calls this after arrival. */
+/** Releases the transition only once the destination and the local player's biped are present. */
 void release_world_fade() noexcept {
     const ReleaseChannel release = g_release.load(std::memory_order_acquire);
-    if (release == nullptr || g_manager == nullptr) {
+    if (release == nullptr || g_manager == nullptr
+        || g_released.load(std::memory_order_relaxed) || !in_world()) {
+        return;
+    }
+    const CurrentSliceSet slice = current_slice_set();
+    std::uint32_t controlled = 0xFFFFFFFFU;
+    const bool playerPresent = teleport::current_controlled_handle(controlled);
+    // Step 38 can precede the local spawn. Keep polling until the native getter supplies a
+    // biped, including when a slow load has already consumed its last spawn-gate callback.
+    if (!slice.present || !playerPresent) {
+        if (!g_waitReported.exchange(true, std::memory_order_relaxed)) {
+            core::log::write(core::log::Channel::client,
+                             core::log::Level::info,
+                             !slice.present
+                                 ? "ev=bootflow stage=fade_release result=waiting reason=slice_set"
+                                 : "ev=bootflow stage=fade_release result=waiting reason=player");
+        }
         return;
     }
     // Fire once per arming. The camera poll calls this every frame after arrival, and
@@ -83,8 +103,11 @@ void release_world_fade() noexcept {
     std::array<char, kLineCapacity> line{};
     const int written = std::snprintf(line.data(),
                                       line.size(),
-                                      "ev=bootflow stage=fade_release result=issued channel=0x%X",
-                                      kWorldTransitionChannel);
+                                      "ev=bootflow stage=fade_release result=issued channel=0x%X "
+                                      "slice_set=%d controlled=0x%X",
+                                      kWorldTransitionChannel,
+                                      slice.index,
+                                      controlled);
     if (written > 0) {
         core::log::write(core::log::Channel::client,
                          core::log::Level::info,
@@ -118,6 +141,7 @@ void uninstall_fade_release() noexcept {
     g_release.store(nullptr, std::memory_order_release);
     g_manager = nullptr;
     g_released.store(false, std::memory_order_release);
+    g_waitReported.store(false, std::memory_order_relaxed);
 }
 
 } // namespace sunrise::client::hooks::bootflow

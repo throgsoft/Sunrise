@@ -12,6 +12,7 @@
 #include "../build_data/runtime.h"
 #include "../investment/store.h"
 #include "definition.h"
+#include "tripmine_interval.h"
 #include "unlocks_runtime.h"
 
 namespace sunrise::state::unlocks::records {
@@ -147,6 +148,43 @@ void ensure_cache() noexcept {
 
 [[nodiscard]] bool flag_set(const Table& table, std::uint16_t flagIndex) noexcept {
     return flagIndex < table.accountFlags.size() && table.accountFlags[flagIndex] == kFlagSet;
+}
+
+/** Claimability follows the next milestone, never the adjacent redeemed slot as an objective. */
+[[nodiscard]] bool tripmine_claimable(const Table& table,
+                                      const catalog::Definition& record,
+                                      tripmine::Mapping& mapping) noexcept {
+    if (!tripmine::resolve(record, mapping) || flag_set(table, record.completionFlagIndex)) {
+        return false;
+    }
+    const auto redeemed = table.objectiveValues[record.redeemedCountValueIndex];
+    return redeemed >= 0 && redeemed < record.intervalCount
+           && table.objectiveValues[mapping.progressValueIndex]
+                  >= mapping.intervals[static_cast<std::size_t>(redeemed)].completionValue;
+}
+
+/** Advances only the installed cumulative lane, with no claim or score side effects. */
+[[nodiscard]] ObjectiveAdvance advance_tripmine_locked(Table& table,
+                                                       const catalog::Definition& record) noexcept {
+    tripmine::Mapping mapping{};
+    if (!tripmine::resolve(record, mapping)) {
+        return ObjectiveAdvance::unavailable;
+    }
+    auto& progress = table.objectiveValues[mapping.progressValueIndex];
+    if (flag_set(table, record.completionFlagIndex)
+        || progress >= mapping.intervals[record.intervalCount - 1U].completionValue) {
+        return ObjectiveAdvance::alreadyHeld;
+    }
+    if (progress < 0) {
+        return ObjectiveAdvance::unavailable;
+    }
+    ++progress;
+    for (std::size_t index = 0; index < record.intervalCount; ++index) {
+        if (progress == mapping.intervals[index].completionValue) {
+            return ObjectiveAdvance::completed;
+        }
+    }
+    return ObjectiveAdvance::advanced;
 }
 
 /** @return True when every objective slot of the record reads at or above its threshold. */
@@ -453,6 +491,29 @@ struct FlagOperation {
     ObjectiveAdvance advance{ObjectiveAdvance::unavailable};
 };
 
+/** Progress, score, redemption and the final flag share the caller's SQLite mutation. */
+[[nodiscard]] bool claim_tripmine_locked(Table& table,
+                                         const catalog::Definition& record) noexcept {
+    tripmine::Mapping mapping{};
+    if (!tripmine_claimable(table, record, mapping)) {
+        return false;
+    }
+    auto& redeemed = table.objectiveValues[record.redeemedCountValueIndex];
+    const auto points = static_cast<std::int32_t>(
+        mapping.intervals[static_cast<std::size_t>(redeemed)].score);
+    if (table.objectiveValues[catalog::kTriumphScoreValueIndex]
+        > (std::numeric_limits<std::int32_t>::max)() - points) {
+        return false;
+    }
+    add_score(table, points);
+    ++redeemed;
+    if (redeemed == record.intervalCount) {
+        table.accountFlags[record.completionFlagIndex] = kFlagSet;
+        publish_derived(table);
+    }
+    return true;
+}
+
 /**
  * Claims one record: sets its flag, completes its objectives, adds its score, republishes.
  * @param table Live banks; the caller holds the table lock.
@@ -461,8 +522,14 @@ struct FlagOperation {
 [[nodiscard]] bool claim_locked(Table& table, std::uint16_t recordIndex) noexcept {
     ensure_cache();
     catalog::Definition record{};
-    if (!build_data::find_record_definition(recordIndex, record)
-        || record.completionFlagIndex == catalog::kUnavailableFlagIndex
+    if (!build_data::find_record_definition(recordIndex, record)) {
+        return false;
+    }
+    // Opcode 1801 reaches this entry point for flagged records, including Tripmine.
+    if (record.definitionHash == tripmine::kRecordHash) {
+        return claim_tripmine_locked(table, record);
+    }
+    if (record.completionFlagIndex == catalog::kUnavailableFlagIndex
         || record.completionFlagIndex >= table.accountFlags.size()
         || flag_set(table, record.completionFlagIndex)) {
         return false;
@@ -515,8 +582,13 @@ struct FlagOperation {
 [[nodiscard]] ObjectiveAdvance advance_locked(Table& table, std::uint16_t flagIndex) noexcept {
     ensure_cache();
     catalog::Definition record{};
-    if (!find_by_flag(flagIndex, record) || record.objectiveCount > 1
-        || counter_granted_flag(flagIndex)) {
+    if (!find_by_flag(flagIndex, record)) {
+        return ObjectiveAdvance::unavailable;
+    }
+    if (record.definitionHash == tripmine::kRecordHash) {
+        return advance_tripmine_locked(table, record);
+    }
+    if (record.objectiveCount > 1 || counter_granted_flag(flagIndex)) {
         return ObjectiveAdvance::unavailable;
     }
     std::array<catalog::Objective, kObjectiveRunCapacity> objectives{};
@@ -568,8 +640,15 @@ bool claimable(std::uint16_t flagIndex) noexcept {
         auto& query = *static_cast<FlagOperation*>(context);
         ensure_cache();
         catalog::Definition record{};
-        query.result = !flag_set(table, query.flagIndex) && find_by_flag(query.flagIndex, record)
-                       && complete(table, record);
+        if (!find_by_flag(query.flagIndex, record)) {
+            return;
+        }
+        if (record.definitionHash == tripmine::kRecordHash) {
+            tripmine::Mapping mapping{};
+            query.result = tripmine_claimable(table, record, mapping);
+            return;
+        }
+        query.result = !flag_set(table, query.flagIndex) && complete(table, record);
     });
     return saved && operation.result;
 }
@@ -609,9 +688,15 @@ bool claim_interval(std::uint16_t recordIndex, std::uint32_t definitionHash) noe
         auto& request = *static_cast<RecordOperation*>(context);
         catalog::Definition record{};
         if (!build_data::find_record_definition(request.recordIndex, record)
-            || record.definitionHash != request.definitionHash
-            || record.intervalCount == 0
-            // An interval record scores per step instead of once, so it carries no flag.
+            || record.definitionHash != request.definitionHash) {
+            return;
+        }
+        if (record.definitionHash == tripmine::kRecordHash) {
+            request.result = claim_tripmine_locked(table, record);
+            return;
+        }
+        if (record.intervalCount == 0
+            // Other supported interval records carry no completion flag.
             || record.completionFlagIndex != catalog::kUnavailableFlagIndex
             || record.redeemedCountValueIndex == catalog::kUnavailableValueIndex
             || record.redeemedCountValueIndex >= table.objectiveValues.size()) {
@@ -693,8 +778,14 @@ ObjectiveAdvance advance_interval_objective(std::uint16_t recordIndex,
         auto& value = *static_cast<Request*>(context);
         catalog::Definition record{};
         catalog::Interval last{};
-        if (!catalog::find(value.index, record) || record.definitionHash != value.hash
-            || record.intervalCount == 0
+        if (!catalog::find(value.index, record) || record.definitionHash != value.hash) {
+            return;
+        }
+        if (record.definitionHash == tripmine::kRecordHash) {
+            value.result = advance_tripmine_locked(table, record);
+            return;
+        }
+        if (record.intervalCount == 0
             || record.completionFlagIndex != catalog::kUnavailableFlagIndex
             || record.objectiveValueIndex >= table.objectiveValues.size()
             || record.objectiveValueIndex == record.redeemedCountValueIndex

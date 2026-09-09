@@ -8,6 +8,17 @@ bool optional_skip(Reader& reader, std::size_t width) noexcept {
     std::uint64_t present{};
     return reader.read(1, present) && (!present || reader.skip(width));
 }
+bool optional_selector(Reader& reader, std::uint8_t width,
+    std::optional<std::int8_t>& output) noexcept {
+    std::uint64_t present{}, value{};
+    if (!reader.read(1, present)) return false;
+    output.reset();
+    if (present) {
+        if (!reader.read(width, value)) return false;
+        output = static_cast<std::int8_t>(static_cast<std::int32_t>(value) - 1);
+    }
+    return true;
+}
 template <typename T>
 bool optional_value(Reader& reader, std::uint8_t width, std::optional<T>& output) noexcept {
     std::uint64_t present{}, value{};
@@ -47,11 +58,19 @@ bool decode_raw(std::span<const std::byte> bytes, Payload& output) noexcept {
     Payload candidate{};
     Reader reader(bytes);
     std::uint64_t sequence{}, target{}, affinity{}, count{}, padding{};
+    // Build 81964380664e7fce: F8CD40 -> F8D5E0 -> F8DAF0 copies canonical
+    // +2A8/+2A9 to mode-3 +18/+19. Schema 80806442 -> 80806454 -> 808087E2
+    // places them after the 99-bit routing prefix: independent presence bits,
+    // type-3 signed bytes, bias 1, widths 5/7 (descriptor RVAs 3851BD8/3851C00).
+    // Preserve omission separately from explicitly encoded -1; do not infer defaults.
     // Routing, common incident fields and the uncompressed XYZ vector.
     if (!reader.read(32, sequence) || !reader.read(3, target)
-        || !reader.read(64, candidate.recipient) || !optional_skip(reader, 5)
-        || !optional_skip(reader, 7) || !reader.skip(96) || !optional_skip(reader, 11)
+        || !reader.read(64, candidate.recipient)
+        || !optional_selector(reader, 5, candidate.equipmentSlot)
+        || !optional_selector(reader, 7, candidate.abilitySelector)
+        || !reader.skip(96) || !optional_skip(reader, 11)
         || !optional_skip(reader, 32) || !reader.skip(11 + 32 + 32) || !reader.read(3, affinity)
+        // F8D5E0 copies canonical +2D5/+2D6 here (+45/+46), not the selectors.
         || !optional_skip(reader, 8 + 3) || !reader.skip(1 + 3 * 64)
         || !actor(reader, candidate.killer) || !actor(reader, candidate.victim)
         || !optional_skip(reader, 32) || !optional_skip(reader, 32) || !reader.read(4, count)

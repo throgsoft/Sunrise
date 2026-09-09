@@ -35,13 +35,14 @@ void republish() noexcept;
 /** @param flagIndex Account flag bank row. @return True when that record is claimed. */
 [[nodiscard]] bool claimed(std::uint16_t flagIndex) noexcept;
 
-/** @param flagIndex Account flag bank row. @return True when complete but unclaimed. */
+/** @param flagIndex Account flag bank row. @return True when a record or next interval is earned. */
 [[nodiscard]] bool claimable(std::uint16_t flagIndex) noexcept;
 
 /**
  * Claims one record: sets its flag, adds its score, and re-derives the bars it feeds.
+ * Tripmine redeems only its next earned interval and sets the flag after the final redemption.
  * @param recordIndex Native record row an opcode-1801 claim names.
- * @return False when the row has no addressable flag or is already claimed.
+ * @return False when the row has no addressable flag, is already claimed, or its interval is unearned.
  */
 [[nodiscard]] bool claim(std::uint16_t recordIndex) noexcept;
 

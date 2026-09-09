@@ -22,6 +22,7 @@
 #include "../../../../../state/unlocks/unlocks_records.h"
 #include "../../../../bap/internal.h"
 #include "activity_incident_grants.h"
+#include "incident_world_reward_policy.h"
 
 namespace sunrise::server::bap::encrypted::activity_message::receipts {
 
@@ -37,10 +38,6 @@ struct LoreOrdinalRange final {
     std::uint16_t lastOrdinal{};
     std::uint16_t firstRecord{};
 };
-
-/** Package names the destination snapshot reports for the two destinations that pay loot. */
-constexpr std::string_view kDreamingCityPackage = "dreaming_city_freeroam";
-constexpr std::string_view kMoonPackage = "luna_freeroam";
 
 /** One target index shared by every interaction that carries no object of its own. */
 constexpr std::uint32_t kGenericInteractionTarget = 3539U;
@@ -288,65 +285,6 @@ void grant_random_moon_loot() noexcept {
     grant_random_world_loot(kMoonWeapons, kMoonTitanArmour, kMoonHunterArmour, kMoonWarlockArmour);
 }
 
-/** Identifies the shared generic target as a Dreaming City cat-statue interaction. */
-[[nodiscard]] bool is_dreaming_city_cat(bool definitionFound,
-                                        const state::build_data::sobjects::Definition& definition,
-                                        std::string_view packageName) noexcept {
-    // Name hash and lane the cat statue's world object carries.
-    constexpr std::uint32_t kCatNameHash = 0x7A0FD954U;
-    constexpr std::uint32_t kCatLane4 = 0x0011FFFFU;
-    if (!definitionFound || definition.typeCode != 2 || definition.nameHash != kCatNameHash
-        || definition.lane4 != kCatLane4) {
-        return false;
-    }
-    return packageName == kDreamingCityPackage;
-}
-
-/**
- * Identifies a Jade Rabbit interaction by its generic target, statue ordinal, and Moon package.
- * @param incident Accepted incident whose extra targets carry the statue.
- * @param primaryFound True when the primary target resolved to a definition.
- * @param primary Definition of the primary target.
- * @param packageName Package the instantiated region reports.
- * @return True when this incident reports one of the nine statues.
- */
-[[nodiscard]] bool is_moon_rabbit(const message::incident::Incident& incident,
-                                  bool primaryFound,
-                                  const state::build_data::sobjects::Definition& primary,
-                                  std::string_view packageName) noexcept {
-    // Name hash and lane every generic interaction object carries.
-    constexpr std::uint32_t kGenericNameHash = 0x7A0FD954U;
-    constexpr std::uint32_t kGenericLane4 = 0x0011FFFFU;
-    // The nine statues have different target indices and name hashes, but their type-code-2 world
-    // object ordinals form one dense run immediately before Luna's Lost ghosts.
-    constexpr std::uint16_t kFirstRabbitOrdinal = 3297U;
-    constexpr std::uint16_t kLastRabbitOrdinal = 3305U;
-    if (!primaryFound || primary.typeCode != 2 || primary.nameHash != kGenericNameHash
-        || primary.lane4 != kGenericLane4) {
-        return false;
-    }
-
-    bool hasRabbitTarget = false;
-    for (std::uint32_t index = 0; index < incident.extraTargetCount; ++index) {
-        const std::uint32_t target = incident.extraTargets[index];
-        state::build_data::sobjects::Definition rabbit{};
-        if (!state::build_data::sobjects::find(static_cast<std::uint16_t>(target), rabbit)
-            || rabbit.typeCode != 2 || rabbit.recordRow() != 0xFFFFU) {
-            continue;
-        }
-        const std::uint16_t ordinal = rabbit.loreObjectOrdinal();
-        hasRabbitTarget = ordinal >= kFirstRabbitOrdinal && ordinal <= kLastRabbitOrdinal;
-        if (hasRabbitTarget) {
-            break;
-        }
-    }
-    if (!hasRabbitTarget) {
-        return false;
-    }
-
-    return packageName == kMoonPackage;
-}
-
 /**
  * Resolves an authored lore target and applies Moon ghost side effects once.
  * @param target Target index carried by the incident.
@@ -480,14 +418,10 @@ static void stage_incident_grants(const message::incident::Incident& incident) n
     // incident names the object; the shared generic target names the interaction only.
     if (isCorruptedEgg) {
         grant_random_dreaming_city_loot();
-    } else if (is_dreaming_city_cat(primaryFound, primary, packageName)) {
-        grant_random_dreaming_city_loot();
-        // Objective slot counting the cat statues fed.
-        constexpr std::uint16_t kRememberYourMannersFlag = 9448U;
-        if (progress_changed(unlock_records::advance_objective(kRememberYourMannersFlag))) {
-            bap::arm_account_resync_everywhere();
-        }
-    } else if (is_moon_rabbit(incident, primaryFound, primary, packageName)) {
+    } else if (world_reward::generic_interaction(
+                   incident.primaryTarget, primaryFound ? &primary : nullptr,
+                   std::span{incident.extraTargets}.first(incident.extraTargetCount), packageName,
+                   state::build_data::sobjects::find) == world_reward::GenericReward::moonRabbit) {
         grant_random_moon_loot();
         // Objective slot counting the Jade Rabbit statues fed.
         constexpr std::uint16_t kLetThemEatRiceCakesFlag = 10696U;

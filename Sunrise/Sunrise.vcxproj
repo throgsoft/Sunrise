@@ -2189,12 +2189,15 @@
     <ClInclude Include="src\core\runtime\wall_clock.h" />
     <ClCompile Include="src\middleware\bap\activity_message\activity_kill_incident_codec.cpp" />
     <ClInclude Include="src\middleware\bap\activity_message\kill_incident.h" />
+    <ClInclude Include="src\server\bap\encrypted\activity_message\receipts\incident_world_reward_policy.h" />
     <ClCompile Include="src\server\bap\bap_gameplay_investment.cpp" />
     <ClInclude Include="src\server\bap\gameplay_bubble_context.h" />
     <ClInclude Include="src\server\bap\gameplay_investment.h" />
     <ClCompile Include="src\server\web_service\vendor\dawning_vendor_actions.cpp" />
     <ClInclude Include="src\server\web_service\vendor\dawning_vendor_actions.h" />
     <ClInclude Include="src\state\account\inventory\dawning_oven_state.h" />
+    <ClInclude Include="src\state\unlocks\tripmine_interval.h" />
+    <ClInclude Include="src\state\bounties\equipped_subclass_fact.h" />
     <ClInclude Include="src\state\bounties\gameplay_kill_investment.h" />
     <ClInclude Include="src\state\bounties\gameplay_progress.h" />
     <ClInclude Include="src\state\bounties\kill_rule_catalog.h" />

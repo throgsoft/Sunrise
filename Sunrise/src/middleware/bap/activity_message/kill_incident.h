@@ -24,6 +24,12 @@ struct Payload {
     std::uint32_t reorderSequence{};
     std::int32_t targetKind{};
     std::uint64_t recipient{};
+    /** Selected native equipment/ability selectors, not item hashes or weapon classes.
+     * Omitted fields remain nullopt; an explicitly encoded sentinel is -1.
+     * Equipment 7/8/9 means kinetic/energy/heavy only with independent weapon-source
+     * validation and no selected ability. Absence alone does not assert sentinel -1.
+     */
+    std::optional<std::int8_t> equipmentSlot{}, abilitySelector{};
     Actor killer{}, victim{};
     std::int32_t damage{};
     Labels source{}, actor{}, target{};

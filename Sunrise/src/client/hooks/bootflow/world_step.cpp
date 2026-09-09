@@ -57,11 +57,7 @@ void poll_world_step() noexcept {
     const std::int32_t step = read_step();
     g_publishedStep.store(step, std::memory_order_relaxed);
     g_publishedTick.store(GetTickCount64(), std::memory_order_release);
-    // A slow load can finish without another spawn callback. Release the transition fade
-    // from the existing camera poll once the native world step confirms arrival.
-    if (step == kInWorld) {
-        release_world_fade();
-    } else if (step < kActivityLoadFirst || step > kInWorld) {
+    if (step < kActivityLoadFirst || step > kInWorld) {
         rearm_fade_release();
     }
 }
@@ -76,6 +72,9 @@ void poll_current_slice_set() noexcept {
     }
     g_publishedSliceSet.store(index, std::memory_order_relaxed);
     g_publishedSliceSetTick.store(GetTickCount64(), std::memory_order_release);
+    // The camera polls the world step first. Release after this frame's slice sample and
+    // rearming, so a bubble change cannot spend the release on the previous slice.
+    release_world_fade();
 }
 
 /** Reads the last fresh local slice-set sample. */

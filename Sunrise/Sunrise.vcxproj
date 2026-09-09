@@ -2241,5 +2241,16 @@
     <ClCompile Include="src\state\runtime\dawning_default_oven_runtime.cpp" />
     <ClInclude Include="src\state\runtime\dawning_default_oven_runtime.h" />
   </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="src\client\hooks\season_xp_toast\season_xp_toast.cpp" />
+    <ClInclude Include="src\client\hooks\season_xp_toast\season_xp_toast.h" />
+    <ClInclude Include="src\client\hooks\season_xp_toast\paired_toast.h" />
+    <ClCompile Include="src\client\material_toast\native_presentation.cpp" />
+    <ClInclude Include="src\client\material_toast\native_presentation.h" />
+    <ClCompile Include="src\client\material_toast\feedback.cpp" />
+    <ClInclude Include="src\client\material_toast\feedback.h" />
+    <ClCompile Include="src\server\bap\presentation\material_notifications.cpp" />
+    <ClInclude Include="src\server\bap\presentation\material_notifications.h" />
+  </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
 </Project>

@@ -1,5 +1,6 @@
 #include "service_outcome_commit.h"
 
+#include <algorithm>
 #include <array>
 #include <cstdio>
 
@@ -8,6 +9,7 @@
 #include "../../../../state/activity/runtime.h"
 #include "../../../../state/matchmaking/matchmaking_state.h"
 #include "../../../../state/runtime/runtime.h"
+#include "../../presentation/material_notifications.h"
 #include "../bap_connection_publication.h"
 #include "../internal.h"
 
@@ -15,6 +17,27 @@ namespace sunrise::server::bap::encrypted::transactions {
 namespace {
 
 namespace slots = state::activity::entity_slots;
+namespace materialNotices = server::bap::presentation::material_notifications;
+static_assert(materialNotices::kIngredientCount
+              == state::account::inventory::dawning::kIngredientCount);
+
+/** Copies only positive credits from this prepared grant, before State consumes its payload.
+ * The exact snapshots are validated by State at commit, including saturation and repeated rows.
+ * Never read live balances here: another transaction's gains must not become this grant's toast.
+ */
+[[nodiscard]] std::array<std::int32_t, materialNotices::kIngredientCount>
+ingredient_gains(const state::PendingRecordRewardGrant& pending) noexcept {
+    std::array<std::int32_t, materialNotices::kIngredientCount> gains{};
+    if (!pending.prepared || !pending.beforeDawning || !pending.afterDawning) return gains;
+    for (std::size_t i = 0; i < gains.size(); ++i) {
+        const auto before = pending.beforeDawning->ingredients[i];
+        const auto after = pending.afterDawning->ingredients[i];
+        if (before < 0 || after < 0) return {};
+        // Both snapshots are nonnegative int32 balances, so a positive difference fits int32.
+        if (after > before) gains[i] = after - before;
+    }
+    return gains;
+}
 
 /** Log names for each lease operation, in the enum's own order. */
 constexpr std::array<const char*, 4> kLeaseKinds = {"none", "join", "grant", "release"};
@@ -346,9 +369,20 @@ bool commit(ServiceOutcome& outcome, Publication& publication, const char*& reas
     }
     if (auto* transaction = transaction_if<RecordRewardGrantTransaction>(outcome)) {
         reason = "record_reward";
-        return transaction->pending != nullptr
-               && report_commit(state::commit_record_reward(*transaction->pending),
-                                "ev=record_reward stage=transaction_commit result=fail");
+        if (transaction->pending == nullptr) return false;
+        const auto accountSoid = transaction->pending->accountSoid;
+        const auto characterSoid = transaction->pending->characterSoid;
+        const auto gains = ingredient_gains(*transaction->pending);
+        const bool committed =
+            report_commit(state::commit_record_reward(*transaction->pending),
+                          "ev=record_reward stage=transaction_commit result=fail");
+        if (committed && std::any_of(gains.begin(), gains.end(), [](auto gain) { return gain > 0; })) {
+            // This State commit releases a nested savepoint. Only the caller's CommitScope may
+            // publish after the enclosing BAP SQLite transaction commits; rollback drops it.
+            static_cast<void>(
+                materialNotices::stage_committed_gains(accountSoid, characterSoid, gains));
+        }
+        return committed;
     }
     return true;
 }

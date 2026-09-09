@@ -34,6 +34,7 @@
 #include "../hooks/polled_input/runtime.h"
 #include "../hooks/queuez/queuez_hook_lifecycle.h"
 #include "../hooks/retail_log/retail_log_lifecycle.h"
+#include "../hooks/season_xp_toast/season_xp_toast.h"
 #include "../hooks/sense_chain_guard/sense_chain_guard.h"
 #include "../hooks/spawn/spawn_runtime.h"
 #include "../hooks/stall_probe/stall_probe.h"
@@ -196,6 +197,8 @@ void clear_game_targets() noexcept {
     (void)hooks::teleport::install();
     // This branch carries the native developer spawner unconditionally.
     (void)hooks::spawn::install();
+    // Both XP banks remain authoritative. This optional filter removes only a paired HUD toast.
+    (void)hooks::season_xp_toast::install();
     // Noclip owns its Havok-step target, so a patch-specific miss cannot disable teleport.
     (void)hooks::noclip::install();
     // Attaches whether or not the feature is on, so the interface can enable it without a restart.

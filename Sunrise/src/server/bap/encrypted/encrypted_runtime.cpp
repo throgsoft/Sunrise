@@ -16,6 +16,7 @@
 #include "../activity_authority_query_owner.h"
 #include "../activity_authority_reset_owner.h"
 #include "../internal.h"
+#include "../presentation/material_notifications.h"
 #include "activity_transaction/activity_transaction_notifications.h"
 #include "bap_connection_publication.h"
 #include "internal.h"
@@ -273,6 +274,7 @@ bool consume(Session& session,
                          core::log::Level::warn,
                          "ev=bap stage=web_service result=refuse reason=stale_manifest");
     }
+    presentation::material_notifications::CommitScope materialNotices;
     state::investment::store::Transaction investmentTransaction;
     if (!investmentTransaction.ready()) {
         return false;
@@ -429,6 +431,9 @@ bool consume(Session& session,
                 frame.serviceId, "commit", fits ? commitReason : "frame_capacity");
         }
         if (handled) {
+            // The inner State grant only released a savepoint. Announce its copied ingredient
+            // credits after the enclosing SQLite commit; every refusal drops the scope instead.
+            static_cast<void>(materialNotices.publish(GetTickCount64()));
             std::copy_n(scratch.framed.begin(), framedSize, response.begin());
             written = framedSize;
             entityLease.release();

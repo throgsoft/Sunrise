@@ -25,11 +25,13 @@
 #include "../hooks/polled_input/runtime.h"
 #include "../hooks/queuez/queuez_hook_lifecycle.h"
 #include "../hooks/retail_log/retail_log_lifecycle.h"
+#include "../hooks/season_xp_toast/season_xp_toast.h"
 #include "../hooks/sense_chain_guard/sense_chain_guard.h"
 #include "../hooks/spawn/spawn_runtime.h"
 #include "../hooks/stall_probe/stall_probe.h"
 #include "../hooks/teleport/runtime.h"
 #include "../hooks/world_objects/world_object_registry.h"
+#include "../material_toast/feedback.h"
 #include "../movement/movement_settings_store.h"
 #include "../player/player_settings_store.h"
 #include "../targets/game.h"
@@ -67,6 +69,13 @@ bool shutdown() noexcept {
         core::log::write(core::log::Channel::client,
                          core::log::Level::error,
                          "ev=shutdown stage=developer_spawn result=fail");
+        ReleaseSRWLockExclusive(&runtime::g_lock);
+        return false;
+    }
+    if (!hooks::season_xp_toast::uninstall()) {
+        core::log::write(core::log::Channel::client,
+                         core::log::Level::error,
+                         "ev=shutdown stage=season_xp_toast result=fail");
         ReleaseSRWLockExclusive(&runtime::g_lock);
         return false;
     }
@@ -171,6 +180,7 @@ bool shutdown() noexcept {
     content::activity::sdk_generation::reset();
     content::activity::scriptables::reset();
     server::bap::unregister_client_investment_consumers();
+    material_toast::shutdown();
     content::investment::worker::reset();
     (void)hooks::async_io::uninstall();
     targets::steam::clear();

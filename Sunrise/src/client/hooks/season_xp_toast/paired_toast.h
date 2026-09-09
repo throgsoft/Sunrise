@@ -55,11 +55,16 @@ inline Pair paired_update(std::span<const Entry> before, std::span<const Entry> 
             {b % kRankXp, a % kRankXp, kRankXp, kRankXp, 0, 0}};
 }
 
-/** A coalesced canonical toast may start earlier, but must already cover this same rank/gain. */
+/** Native coalescing retains the first before-fields while replacing all three after-fields. */
 inline bool covers(const Progress& queued, const Progress& expected) noexcept {
-    return queued.beforeXp >= 0 && queued.beforeXp <= expected.beforeXp
-           && queued.afterXp == expected.afterXp && queued.beforeCost == expected.beforeCost
-           && queued.afterCost == expected.afterCost && queued.beforeRank == expected.beforeRank
+    // Compare the start as (rank, remainder). A toast begun before a rank crossing can cover
+    // later gains in the new rank even when its starting remainder is numerically larger.
+    const bool startsEarlier =
+        queued.beforeRank >= 1 && queued.beforeRank <= expected.beforeRank && queued.beforeXp >= 0
+        && queued.beforeXp < kRankXp
+        && (queued.beforeRank < expected.beforeRank || queued.beforeXp <= expected.beforeXp);
+    return startsEarlier && queued.afterXp == expected.afterXp
+           && queued.beforeCost == expected.beforeCost && queued.afterCost == expected.afterCost
            && queued.afterRank == expected.afterRank;
 }
 

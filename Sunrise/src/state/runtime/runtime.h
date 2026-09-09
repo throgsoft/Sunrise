@@ -314,6 +314,8 @@ struct PendingItemDismantle {
         afterProfileItems{};
     std::array<DismantleReward, kDismantleRewardCapacity> rewards{};
     account::inventory::Item dismantledItem{};
+    /** No-instance character-stack discard; never creates or releases an item resident. */
+    std::optional<account::inventory::CharacterStack> discardedStack{};
     std::uint64_t accountSoid{};
     std::uint64_t characterSoid{};
     std::uint64_t dismantledInstanceSoid{};
@@ -661,6 +663,12 @@ commit_profile_item_acquisition(PendingProfileItemAcquisition& mutation) noexcep
 [[nodiscard]] bool prepare_item_dismantle(std::uint64_t instanceSoid,
                                           std::int32_t expectedStackQuantity,
                                           PendingItemDismantle& mutation) noexcept;
+
+/** One-unit discard of the selected character's unique non-instanced stack at its observed count.
+ */
+[[nodiscard]] bool prepare_character_stack_discard(std::uint16_t definitionIndex,
+                                                   std::int32_t expectedStackQuantity,
+                                                   PendingItemDismantle& mutation) noexcept;
 
 /** Builds the exact account after-image while a prepared dismantle remains current. */
 [[nodiscard]] bool preview_item_dismantle(const PendingItemDismantle& mutation,

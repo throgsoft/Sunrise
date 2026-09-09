@@ -33,7 +33,7 @@ bool initialize() noexcept {
     const bool playerOwned = g_playerPage.acquire(
         core::ui::modules::Owner::client, kPlayerStableId, kPlayerDisplayName, &player::draw);
     const bool spawnOwned = g_spawnPage.acquire(
-        core::ui::modules::Owner::client, "client.developer_spawn", "Spawner (Dev)", &spawn::draw);
+        core::ui::modules::Owner::client, "client.developer_spawn", "Spawn", &spawn::draw);
     return movementOwned && playerOwned && spawnOwned;
 }
 

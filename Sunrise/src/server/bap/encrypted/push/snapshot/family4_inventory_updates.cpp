@@ -603,7 +603,10 @@ bool prepare_item_dismantle(Scratch& scratch,
     }
 
     state::AccountState account{};
-    if (!mutation.prepared || mutation.characterSoid == 0 || mutation.dismantledInstanceSoid == 0
+    const bool stackDiscard = mutation.discardedStack.has_value();
+    if (!mutation.prepared || mutation.characterSoid == 0
+        || stackDiscard != (mutation.dismantledInstanceSoid == 0)
+        || (stackDiscard && (mutation.releasesDismantledInstance || mutation.profileChanged))
         || mutation.dismantledItem.instanceSoid != mutation.dismantledInstanceSoid
         || mutation.accountSoid != dismantle.accountSoid
         || mutation.characterSoid != dismantle.characterSoid
@@ -632,8 +635,9 @@ bool prepare_item_dismantle(Scratch& scratch,
     }
     const family4_datagen::instance::ResolvedInstance* retainedInstance = nullptr;
     for (std::size_t index = 0; index < selected.loadout.itemCount; ++index) {
-        if (selected.loadout.items[index].instance.instanceSoid
-            == mutation.dismantledInstanceSoid) {
+        if (!stackDiscard
+            && selected.loadout.items[index].instance.instanceSoid
+                   == mutation.dismantledInstanceSoid) {
             if (dismantle.releasesInstance || retainedInstance)
                 return report_failure("dismantle_item_present");
             retainedInstance = &selected.loadout.items[index].instance;
@@ -669,12 +673,14 @@ bool prepare_item_dismantle(Scratch& scratch,
     }
     // Queuez represents a release with the ordinary object key and an empty payload. The
     // encoding selector is not read for empty descriptors; oodle matches the surrounding objects.
-    staged.objects[1] = middleware::queuez::Object{
-        dismantle.itemInstanceDefinitionId,
-        dismantle.dismantledInstanceSoid,
-        middleware::queuez::Encoding::oodle,
-        {},
-    };
+    if (!stackDiscard) {
+        staged.objects[1] = middleware::queuez::Object{
+            dismantle.itemInstanceDefinitionId,
+            dismantle.dismantledInstanceSoid,
+            middleware::queuez::Encoding::oodle,
+            {},
+        };
+    }
     if (retainedInstance) {
         const auto instanceBytes = rawStorage.first(family4_datagen::instance::layout::kObjectSize);
         if (!family4_datagen::instance::encode(*retainedInstance, instanceBytes)
@@ -692,7 +698,8 @@ bool prepare_item_dismantle(Scratch& scratch,
                        reservation.rawWriteOffset + family4_datagen::instance::layout::kObjectSize);
     }
 
-    std::size_t objectCount = 2;
+    // A character stack has no resident object. Its character row is the entire publication.
+    std::size_t objectCount = stackDiscard ? 1 : 2;
     if (dismantle.updatesAccount) {
         if (family4_datagen::account::layout::kObjectSize > rawStorage.size()) {
             clear_after(scratch, reservation);

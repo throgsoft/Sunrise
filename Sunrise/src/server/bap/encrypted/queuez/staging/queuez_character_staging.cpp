@@ -713,12 +713,14 @@ bool stage_item_dismantle(const SessionState& before,
                           bool releasesInstance,
                           ItemDismantle& dismantle) noexcept {
     dismantle = {};
+    const bool stackDiscard = dismantledInstanceSoid == 0;
     std::uint32_t accountDefinitionId = 0;
     std::uint32_t characterDefinitionId = 0;
     std::uint32_t itemInstanceDefinitionId = 0;
     if (!valid(before) || !before.family4Active || before.family4RootSoid == 0 || accountSoid == 0
         || accountSoid != before.family4RootSoid || characterSoid == 0
-        || dismantledInstanceSoid == 0 || before.family4ResidentCount == 0
+        || (stackDiscard && (updatesAccount || releasesInstance))
+        || before.family4ResidentCount == 0
         || before.family4ResidentCount > before.family4Residents.size()
         || before.family4Version == (std::numeric_limits<std::int32_t>::max)()
         || !middleware::datagen::object_id(
@@ -751,7 +753,7 @@ bool stage_item_dismantle(const SessionState& before,
         dismantledResidentIndex = index;
     }
     if (!accountResident || !characterResident
-        || dismantledResidentIndex >= before.family4ResidentCount) {
+        || (!stackDiscard && dismantledResidentIndex >= before.family4ResidentCount)) {
         return false;
     }
 

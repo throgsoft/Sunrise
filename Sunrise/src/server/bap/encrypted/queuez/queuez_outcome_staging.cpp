@@ -427,7 +427,8 @@ bool stage_service_outcome(Scratch& scratch,
             removedCount += static_cast<std::size_t>(before.family4Residents[index].objectSoid
                                                      == dismantle.dismantledInstanceSoid);
         }
-        if (!valid(dismantle.after) || removedCount != 1U
+        if (!valid(dismantle.after) || removedCount != (pending.discardedStack ? 0U : 1U)
+            || pending.discardedStack.has_value() != (dismantle.dismantledInstanceSoid == 0)
             || dismantle.accountSoid != pending.accountSoid
             || dismantle.characterSoid != pending.characterSoid
             || dismantle.dismantledInstanceSoid != pending.dismantledInstanceSoid

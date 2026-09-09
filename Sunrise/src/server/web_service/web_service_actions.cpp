@@ -312,11 +312,36 @@ void dismantle_item(const middleware::web_service::Message& message, Outcome& ou
     if (!request.hasInstance && request.instanceSoid == 0 && request.definitionIndex >= 0
         && request.value > 0 && request.selector >= 0) {
         state::build_data::items::Definition definition{};
+        state::build_data::inventory::buckets::Descriptor bucket{};
+        const auto definitionIndex = static_cast<std::uint16_t>(request.definitionIndex);
+        const bool resolved =
+            state::build_data::find_item_definition_index(definitionIndex, definition);
+        // The UI selector is not an inventory owner. Installed bucket routing decides whether
+        // this no-instance request names a character quest stack or a profile material.
+        if (resolved
+            && state::build_data::find_inventory_bucket_descriptor(definition.bucketId, bucket)
+            && bucket.arraySelector
+                   == state::build_data::inventory::buckets::ArraySelector::character) {
+            auto* mutation = emplace_mutation<state::PendingItemDismantle>(outcome);
+            const bool staged = mutation
+                                && state::prepare_character_stack_discard(
+                                    definitionIndex, request.value, *mutation);
+            core::log::writef(core::log::Channel::server,
+                              core::log::Level::info,
+                              "ev=ws402 stage=character_stack_discard result=%s definition=%d "
+                              "value=%d selector=%d remaining=%d",
+                              staged ? "prepared" : "refused",
+                              static_cast<int>(request.definitionIndex),
+                              request.value,
+                              static_cast<int>(request.selector),
+                              staged ? request.value - mutation->discardedQuantity : -1);
+            if (!staged) clear_mutation(outcome);
+            return;
+        }
         auto* mutation = emplace_mutation<state::PendingProfileItemAcquisition>(outcome);
         if (mutation == nullptr) return;
         const bool staged =
-            state::build_data::find_item_definition_index(
-                static_cast<std::uint16_t>(request.definitionIndex), definition)
+            resolved
             && definition.definitionIndex == static_cast<std::uint16_t>(request.definitionIndex)
             && state::item_discard::stage(
                 state::account_snapshot(), definition.definitionHash, request.value, *mutation);

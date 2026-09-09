@@ -266,7 +266,8 @@ bool bounty_page(std::span<const Value> arguments, Output& output) noexcept {
         "bounty.page: %zu installed bounties; pages 1-%zu, %zu per page", total, pages, pageSize);
     if (arguments.empty()) {
         output.line(
-            "bounty.page <page> [complete|give]: default completes; give preserves progress.");
+            "bounty.page <page> [complete|give]: discards held bounties first without rewards; "
+            "default completes the new page, give leaves objectives incomplete.");
         return total != 0;
     }
     const auto page = static_cast<std::size_t>(arguments[0].integer);
@@ -274,20 +275,26 @@ bool bounty_page(std::span<const Value> arguments, Output& output) noexcept {
         output.line("Page is outside the installed bounty range.");
         return false;
     }
+    const auto dropped = state::developer::drop_bounties();
+    output.format("bounty.page: %zu discarded; %s", dropped.changed, dropped.reason);
+    if (!dropped.accepted) return false;
+    // Read after the committed discard so removed residents cannot be treated as reused entries.
     const auto account = account_view(output);
     if (!account || !selected(*account)) {
+        if (dropped.changed != 0) server::bap::request_account_resync();
         output.line("bounty.page: no selected character");
         return false;
     }
     const auto first = (page - 1) * pageSize;
     const auto* character = selected(*account);
-    std::size_t ordinal = 0, changed = 0, completed = 0, refused = 0;
+    std::size_t ordinal = 0, changed = dropped.changed, completed = 0, refused = 0;
     std::size_t granted = 0, reused = 0, unchanged = 0;
     core::log::writef(core::log::Channel::client,
                       core::log::Level::info,
-                      "ev=bounty_page stage=begin page=%zu mode=%s held=%zu",
+                      "ev=bounty_page stage=begin page=%zu mode=%s discarded=%zu held=%zu",
                       page,
                       giveOnly ? "give" : "complete",
+                      dropped.changed,
                       character->inventory.count);
     for (std::size_t i = 0; i < definitions && ordinal < first + pageSize; ++i) {
         data::items::Definition item{};
@@ -329,8 +336,7 @@ bool bounty_page(std::span<const Value> arguments, Output& output) noexcept {
                               static_cast<unsigned>(item.definitionIndex),
                               result.reason);
     }
-    // Publish once, after all per-bounty transactions release SQLite. No completion of other
-    // held pursuits and no duplicate acquisition of an already-held page entry.
+    // Publish removals even if every grant was refused, after all transactions release SQLite.
     if (changed != 0) server::bap::request_account_resync();
     output.format("bounty.page: page %zu/%zu; %zu granted, %zu reused, %zu completed, %zu "
                   "unchanged, %zu refused",
@@ -835,7 +841,8 @@ bool install_commands() noexcept {
                          0,
                          65535}}},
         Entry{"bounty.page",
-              "Lists page bounds, or grants one ordered bounty page; complete is the default mode.",
+              "Lists page bounds, or discards held bounties without rewards and grants a new page; "
+              "complete is the default mode.",
               &bounty_page,
               {Parameter{"page",
                          "One-based page; omit to list the range.",

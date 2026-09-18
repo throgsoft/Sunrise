@@ -16,6 +16,7 @@
 #include "../../core/logging/log.h"
 #include "../../middleware/datagen/family4/loadout/loadout_resolver.h"
 #include "../build_data/runtime.h"
+#include "character_encoding_preflight.h"
 #include "runtime.h"
 #include "state.h"
 #include "state_account_transaction_helpers.h"
@@ -451,9 +452,11 @@ apply_dismantle_rewards(const AccountState& before,
 [[nodiscard]] bool stage_item_dismantle(const AccountState& account,
                                         std::size_t characterIndex,
                                         std::uint64_t instanceSoid,
+                                        std::int32_t expectedStackQuantity,
                                         PendingItemDismantle& mutation) noexcept {
     mutation = {};
-    if (instanceSoid == 0 || !account::valid(account) || characterIndex >= account.characterCount
+    if (instanceSoid == 0 || expectedStackQuantity <= 0 || !account::valid(account)
+        || characterIndex >= account.characterCount
         || !account.characters[characterIndex].selected) {
         return false;
     }
@@ -467,6 +470,9 @@ apply_dismantle_rewards(const AccountState& before,
         }
     }
     if (inventoryIndex >= before.inventory.count
+        || before.inventory.values[inventoryIndex].placement
+               != authored_inventory::ItemPlacement::inventory
+        || before.inventory.values[inventoryIndex].quantity != expectedStackQuantity
         || (before.inventory.values[inventoryIndex].flags & authored_inventory::kLockedItemFlag)
                != 0) {
         return false;
@@ -484,19 +490,27 @@ apply_dismantle_rewards(const AccountState& before,
 
     CharacterState after = before;
     const authored_inventory::Item dismantledItem = after.inventory.values[inventoryIndex];
-    for (std::size_t index = inventoryIndex; index + 1U < after.inventory.count; ++index) {
-        after.inventory.values[index] = after.inventory.values[index + 1U];
+    const bool releasesInstance = dismantledItem.quantity == 1;
+    if (releasesInstance) {
+        for (std::size_t index = inventoryIndex; index + 1U < after.inventory.count; ++index) {
+            after.inventory.values[index] = after.inventory.values[index + 1U];
+        }
+        --after.inventory.count;
+        after.inventory.values[after.inventory.count] = {};
+    } else {
+        // Only the quantity changed, so the row keeps the serial that holds its grid cell.
+        authored_inventory::Item& retained = after.inventory.values[inventoryIndex];
+        --retained.quantity;
     }
-    --after.inventory.count;
-    after.inventory.values[after.inventory.count] = {};
 
     AccountState candidate = account;
     candidate.characters[characterIndex] = after;
     family4_loadout::ResolvedLoadout placedAfter{};
     if (!account::valid(candidate)
         || !family4_loadout::resolve(candidate, characterIndex, placedAfter)
-        || loadout_contains(placedAfter, instanceSoid)
-        || beforeLoadout.itemCount != placedAfter.itemCount + 1U) {
+        || loadout_contains(placedAfter, instanceSoid) == releasesInstance
+        || beforeLoadout.itemCount
+               != placedAfter.itemCount + static_cast<std::size_t>(releasesInstance)) {
         return false;
     }
 
@@ -522,7 +536,7 @@ apply_dismantle_rewards(const AccountState& before,
     if (!account::valid(candidate)
         || !family4_loadout::resolve(candidate, characterIndex, checkedAfter)
         || checkedAfter.itemCount != placedAfter.itemCount
-        || loadout_contains(checkedAfter, instanceSoid)) {
+        || loadout_contains(checkedAfter, instanceSoid) == releasesInstance) {
         return false;
     }
     for (std::size_t index = 0; index < after.inventory.count; ++index) {
@@ -547,11 +561,13 @@ apply_dismantle_rewards(const AccountState& before,
         || dismantledDetail.definitionIndex != dismantledDefinition.definitionIndex
         || dismantledDetail.definitionHash != dismantledDefinition.definitionHash
         || dismantledDetail.bucketId != dismantledDefinition.bucketId
-        // A quest step is authored stackable, so a single-unit row is accepted. A larger stack is
-        // refused: decrementing one is a different mutation.
         || (dismantledDetail.instancedDefinitionState
-                != item_details::InstancedDefinitionState::instanced
-            && dismantledItem.quantity != 1)
+                    == item_details::InstancedDefinitionState::instanced
+                ? !releasesInstance
+                : dismantledDetail.instancedDefinitionState
+                          != item_details::InstancedDefinitionState::stackable
+                      || dismantledItem.quantity > dismantledDetail.maxStackSize
+                      || dismantledDetail.equipmentSlot.has_value())
         // A pursuit names no equipment slot, and the loadout resolver stands it at slot zero.
         // Slot zero maps to no gear class, so a dismantled pursuit pays out nothing.
         || (dismantledDetail.equipmentSlot.has_value()
@@ -594,7 +610,86 @@ apply_dismantle_rewards(const AccountState& before,
     mutation.rewardCount = rewardCount;
     mutation.inventoryRow = dismantledRow;
     mutation.equipmentSlot = dismantledSlot;
+    mutation.requestedStackQuantity = expectedStackQuantity;
+    mutation.discardedQuantity = 1;
+    mutation.releasesDismantledInstance = releasesInstance;
     mutation.profileChanged = rewardCount != 0;
+    mutation.prepared = true;
+    return true;
+}
+
+// No-SOID opcode 402 discards one unit of a unique character stack, including quest materials
+// and objective-bearing pursuits. Installed metadata supplies identity, routing and stack limits.
+// Abandoning is not redeeming: this transition grants nothing and touches no residents, and a
+// stack row carries no instance identity, so it leaves no orphaned objective rows behind.
+bool stage_character_stack_discard(const AccountState& account,
+                                   std::size_t characterIndex,
+                                   std::uint16_t definitionIndex,
+                                   std::int32_t expectedStackQuantity,
+                                   PendingItemDismantle& mutation) noexcept {
+    mutation = {};
+    if (expectedStackQuantity <= 0 || !account::valid(account) || !valid_profile_inventory(account)
+        || characterIndex >= account.characterCount || !account.characters[characterIndex].selected)
+        return false;
+    build_data::items::Definition item{}, reverse{};
+    item_details::Definition detail{};
+    inventory_buckets::Descriptor bucket{};
+    if (!build_data::find_item_definition_index(definitionIndex, item)
+        || !build_data::find_item_definition_hash(item.definitionHash, reverse)
+        || reverse.definitionIndex != definitionIndex || reverse.bucketId != item.bucketId
+        || !build_data::find_configured_item_detail(definitionIndex, detail)
+        || detail.definitionIndex != definitionIndex || detail.definitionHash != item.definitionHash
+        || detail.bucketId != item.bucketId || detail.equipmentSlot.has_value()
+        || detail.instancedDefinitionState != item_details::InstancedDefinitionState::stackable
+        || detail.maxStackSize <= 0 || expectedStackQuantity > detail.maxStackSize
+        || !build_data::find_inventory_bucket_descriptor(item.bucketId, bucket)
+        || bucket.bucketId != item.bucketId
+        || bucket.arraySelector != inventory_buckets::ArraySelector::character
+        || bucket.equipmentSlot != inventory_buckets::kUnavailableEquipmentSlot)
+        return false;
+
+    const auto& before = account.characters[characterIndex];
+    auto target = before.stacks.count;
+    for (std::size_t i = 0; i < before.stacks.count; ++i) {
+        const auto& stack = before.stacks.values[i];
+        if (stack.definitionHash != item.definitionHash) continue;
+        if (target != before.stacks.count || stack.quantity != expectedStackQuantity) return false;
+        target = i;
+    }
+    if (target == before.stacks.count) return false;
+    for (std::size_t i = 0; i < before.inventory.count; ++i)
+        if (before.inventory.values[i].definitionHash == item.definitionHash) return false;
+
+    auto after = before;
+    if (expectedStackQuantity == 1) {
+        for (std::size_t i = target + 1; i < after.stacks.count; ++i)
+            after.stacks.values[i - 1] = after.stacks.values[i];
+        after.stacks.values[--after.stacks.count] = {};
+    } else {
+        // Only the quantity changed, so the row keeps the serial that holds its grid cell.
+        --after.stacks.values[target].quantity;
+    }
+    AccountState candidate = account;
+    candidate.characters[characterIndex] = after;
+    family4_loadout::ResolvedLoadout beforeLoadout{}, afterLoadout{};
+    if (!family4_loadout::resolve(account, characterIndex, beforeLoadout)
+        || !account::valid(candidate)
+        || !family4_loadout::resolve(candidate, characterIndex, afterLoadout)
+        || !character_encoding_preflight(candidate, characterIndex, afterLoadout, false))
+        return false;
+
+    mutation.beforeCharacter = before;
+    mutation.afterCharacter = after;
+    mutation.beforeProfileItems = mutation.afterProfileItems = account.profileItems;
+    mutation.discardedStack = before.stacks.values[target];
+    mutation.accountSoid = account.primarySoid;
+    mutation.characterSoid = before.soid;
+    mutation.characterIndex = characterIndex;
+    mutation.expectedInventoryCount = before.inventory.count;
+    mutation.expectedProfileItemCount = mutation.afterProfileItemCount = account.profileItemCount;
+    mutation.inventoryIndex = target;
+    mutation.requestedStackQuantity = expectedStackQuantity;
+    mutation.discardedQuantity = 1;
     mutation.prepared = true;
     return true;
 }
@@ -610,6 +705,12 @@ apply_dismantle_rewards(const AccountState& before,
 /** @return True when two independently staged dismantles carry the exact same after-images. */
 [[nodiscard]] bool same_dismantle_transition(const PendingItemDismantle& left,
                                              const PendingItemDismantle& right) noexcept {
+    if (left.discardedStack.has_value() != right.discardedStack.has_value()
+        || (left.discardedStack
+            && (left.discardedStack->definitionHash != right.discardedStack->definitionHash
+                || left.discardedStack->quantity != right.discardedStack->quantity
+                || left.discardedStack->mutationSerial != right.discardedStack->mutationSerial)))
+        return false;
     if (left.prepared != right.prepared || left.accountSoid != right.accountSoid
         || left.characterSoid != right.characterSoid
         || left.dismantledInstanceSoid != right.dismantledInstanceSoid
@@ -621,6 +722,9 @@ apply_dismantle_rewards(const AccountState& before,
         || left.movedInventoryItemCount != right.movedInventoryItemCount
         || left.rewardCount != right.rewardCount || left.inventoryRow != right.inventoryRow
         || left.equipmentSlot != right.equipmentSlot || left.profileChanged != right.profileChanged
+        || left.requestedStackQuantity != right.requestedStackQuantity
+        || left.discardedQuantity != right.discardedQuantity
+        || left.releasesDismantledInstance != right.releasesDismantledInstance
         || !same_stationary_item(left.dismantledItem, right.dismantledItem)
         || !same_character(left.beforeCharacter, right.beforeCharacter)
         || !same_character(left.afterCharacter, right.afterCharacter)
@@ -647,10 +751,28 @@ apply_dismantle_rewards(const AccountState& before,
                                               const PendingItemDismantle& mutation,
                                               AccountState& after) noexcept {
     after = {};
+    if (mutation.discardedStack) {
+        build_data::items::Definition item{};
+        PendingItemDismantle canonical{};
+        if (!build_data::find_item_definition_hash(mutation.discardedStack->definitionHash, item)
+            || !stage_character_stack_discard(current,
+                                              mutation.characterIndex,
+                                              item.definitionIndex,
+                                              mutation.requestedStackQuantity,
+                                              canonical)
+            || !same_dismantle_transition(canonical, mutation))
+            return false;
+        after = current;
+        after.characters[mutation.characterIndex] = canonical.afterCharacter;
+        return true;
+    }
     if (!mutation.prepared || mutation.accountSoid == 0 || mutation.characterSoid == 0
         || mutation.dismantledInstanceSoid == 0
         || mutation.dismantledItem.instanceSoid != mutation.dismantledInstanceSoid
         || mutation.dismantledItem.definitionHash == authored_inventory::kNoDefinitionHash
+        || mutation.requestedStackQuantity <= 0 || mutation.discardedQuantity != 1
+        || mutation.dismantledItem.quantity != mutation.requestedStackQuantity
+        || mutation.releasesDismantledInstance != (mutation.requestedStackQuantity == 1)
         || mutation.characterIndex >= current.characterCount || mutation.expectedInventoryCount == 0
         || mutation.expectedInventoryCount > authored_inventory::kCharacterItemCapacity
         || mutation.expectedProfileItemCount > authored_inventory::kProfileItemCapacity
@@ -661,7 +783,9 @@ apply_dismantle_rewards(const AccountState& before,
         || mutation.beforeCharacter.soid != mutation.characterSoid
         || mutation.afterCharacter.soid != mutation.characterSoid
         || mutation.beforeCharacter.inventory.count != mutation.expectedInventoryCount
-        || mutation.afterCharacter.inventory.count + 1U != mutation.expectedInventoryCount
+        || mutation.afterCharacter.inventory.count
+                   + static_cast<std::size_t>(mutation.releasesDismantledInstance)
+               != mutation.expectedInventoryCount
         || !same_stationary_item(mutation.beforeCharacter.inventory.values[mutation.inventoryIndex],
                                  mutation.dismantledItem)
         || current.primarySoid != mutation.accountSoid
@@ -703,8 +827,11 @@ apply_dismantle_rewards(const AccountState& before,
     }
 
     PendingItemDismantle canonical{};
-    if (!stage_item_dismantle(
-            current, mutation.characterIndex, mutation.dismantledInstanceSoid, canonical)
+    if (!stage_item_dismantle(current,
+                              mutation.characterIndex,
+                              mutation.dismantledInstanceSoid,
+                              mutation.requestedStackQuantity,
+                              canonical)
         || !same_dismantle_transition(canonical, mutation)) {
         return false;
     }
@@ -714,7 +841,8 @@ apply_dismantle_rewards(const AccountState& before,
     after.profileItems = mutation.afterProfileItems;
     after.profileItemCount = mutation.afterProfileItemCount;
     return account::valid(after) && valid_profile_inventory(after)
-           && !identity_uses_soid(after, mutation.dismantledInstanceSoid);
+           && identity_uses_soid(after, mutation.dismantledInstanceSoid)
+                  != mutation.releasesDismantledInstance;
 }
 
 } // namespace runtime::detail

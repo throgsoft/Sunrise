@@ -56,8 +56,15 @@ Table<InstalledRow, kInstalledRowCapacity> g_installedRows;
     if (definition.index >= index.size() || definition.definitionClass != kDefinitionClass
         || definition.definitionSize == 0
         || definition.definitionHash != index[definition.index].definitionHash
-        || definition.definitionTag != index[definition.index].definitionTag) {
+        || definition.definitionTag != index[definition.index].definitionTag
+        || definition.transferRuleCount > definition.transferRules.size()
+        || (!definition.transferRulesAvailable && definition.transferRuleCount != 0)) {
         return false;
+    }
+    for (std::size_t row = definition.transferRuleCount; row < definition.transferRules.size();
+         ++row) {
+        const auto& rule = definition.transferRules[row];
+        if (rule.sourceBucket != 0 || rule.destinationBucket != 0) return false;
     }
     return array_fits(definition.installedCount,
                       definition.installedRowBase,
@@ -84,7 +91,7 @@ Table<InstalledRow, kInstalledRowCapacity> g_installedRows;
  * Checks the sale rows one definition owns.
  * @param definition Owning definition.
  * @param saleRows Complete flat sale bank.
- * @return True when every row names a category of this definition, or none at all.
+ * @return True when every row names a category or none, and has a known refund policy.
  */
 [[nodiscard]] bool canonical_sale_rows(const Definition& definition,
                                        std::span<const SaleRow> saleRows) noexcept {
@@ -94,7 +101,7 @@ Table<InstalledRow, kInstalledRowCapacity> g_installedRows;
         const bool selects =
             value.categoryIndex == kAbsentCategoryIndex
             || (value.categoryIndex >= 0 && value.categoryIndex < definition.installedCount);
-        if (!selects) {
+        if (!selects || !valid_refund_policy(value.refundPolicy)) {
             return false;
         }
     }

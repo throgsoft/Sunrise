@@ -1426,6 +1426,9 @@
     <ClInclude Include="src\state\unlocks\unlocks_runtime.h" />
     <ClInclude Include="src\state\unlocks\unlocks_records.h" />
     <ClInclude Include="src\state\runtime\runtime.h" />
+    <ClInclude Include="src\state\runtime\item_discard_policy.h" />
+    <ClInclude Include="src\state\runtime\profile_discard.h" />
+    <ClInclude Include="src\state\runtime\character_encoding_preflight.h" />
     <ClInclude Include="src\state\runtime\state_account_transaction_helpers.h" />
     <ClInclude Include="src\state\runtime\state_rolled_socket_plugs.h" />
     <ClInclude Include="src\state\runtime\state.h" />
@@ -2218,6 +2221,79 @@
     <ClInclude Include="src\server\activity\mission\mission_script_runtime_objective.h" />
     <ClInclude Include="src\server\ui\activity_host\activity_host_sdk_actor_sequences.h" />
     <ClInclude Include="src\state\build_data\items\quest_initialization.h" />
+    <ClCompile Include="src\client\content\items\packages\package_objective_build.cpp" />
+    <ClInclude Include="src\client\content\items\packages\package_objective_build.h" />
+    <ClCompile Include="src\core\runtime\wall_clock.cpp" />
+    <ClInclude Include="src\core\runtime\wall_clock.h" />
+    <ClInclude Include="src\server\bap\encrypted\activity_message\receipts\incident_world_reward_policy.h" />
+    <ClInclude Include="src\state\account\inventory\dawning_oven_state.h" />
+    <ClInclude Include="src\state\build_data\objectives\definition.h" />
+    <ClCompile Include="src\state\build_data\objectives\objective_build_data_runtime.cpp" />
+    <ClCompile Include="src\state\build_data\pursuits\pursuit_progress.cpp" />
+    <ClInclude Include="src\state\build_data\pursuits\pursuit_progress.h" />
+    <ClInclude Include="src\state\runtime\bounty_redemption_runtime.h" />
+    <ClCompile Include="src\state\runtime\bounty_reward_grant_runtime.cpp" />
+    <ClInclude Include="src\state\runtime\bounty_reward_policy.h" />
+    <ClInclude Include="src\state\runtime\bounty_reward_policy_data.h" />
+    <ClInclude Include="src\state\runtime\bounty_stack_reward_plan.h" />
+    <ClCompile Include="src\state\runtime\dawning_oven_persistence.cpp" />
+
+    <ClCompile Include="src\state\runtime\dawning_oven_runtime.cpp" />
+    <ClInclude Include="src\state\runtime\dawning_oven_runtime.h" />
+    <ClCompile Include="src\state\runtime\dawning_reward_runtime.cpp" />
+    <ClCompile Include="src\server\bap\encrypted\queuez\dawning_pickup_release.cpp" />
+    <ClInclude Include="src\server\bap\encrypted\queuez\dawning_pickup_release.h" />
+    <ClCompile Include="src\server\bap\encrypted\queuez\synthesizer_family4_refresh.cpp" />
+    <ClInclude Include="src\server\bap\encrypted\queuez\synthesizer_family4_refresh.h" />
+    <ClInclude Include="src\state\runtime\dawning_reward_runtime.h" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="src\state\runtime\developer_investment_runtime.cpp" />
+    <ClInclude Include="src\state\runtime\developer_investment_runtime.h" />
+    <ClInclude Include="src\server\bap\developer_grant.h" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="src\state\runtime\bounty_redemption_runtime.cpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="src\server\bap\encrypted\push\snapshot\dawning_oven_projection.h" />
+    <ClInclude Include="src\state\account\inventory\dawning_oven_readiness.h" />
+    <ClCompile Include="src\state\runtime\dawning_default_oven_runtime.cpp" />
+    <ClInclude Include="src\state\runtime\dawning_default_oven_runtime.h" />
+  </ItemGroup>
+  <ItemGroup>
+  </ItemGroup>
+  <ItemGroup>
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+  <ItemGroup>
+    <ClCompile Include="src\state\runtime\synthesizer_upgrade_runtime.cpp" />
+    <ClInclude Include="src\state\runtime\synthesizer_upgrade_runtime.h" />
+    <ClCompile Include="src\state\runtime\synthesizer_crafting_runtime.cpp" />
+    <ClInclude Include="src\state\runtime\synthesizer_crafting_runtime.h" />
+    <ClCompile Include="src\state\runtime\chalice_crafting_runtime.cpp" />
+    <ClInclude Include="src\state\runtime\chalice_crafting_runtime.h" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="src\client\ui\items\items_catalog.cpp" />
+    <ClInclude Include="src\client\ui\items\items_catalog.h" />
+    <ClCompile Include="src\client\ui\items\items_icon_cache.cpp" />
+    <ClInclude Include="src\client\ui\items\items_icon_cache.h" />
+    <ClCompile Include="src\client\ui\items\items_panel.cpp" />
+    <ClInclude Include="src\client\ui\items\items_panel.h" />
+    <ClCompile Include="src\client\ui\items\items_service_bridge.cpp" />
+    <ClInclude Include="src\client\ui\items\items_service_bridge.h" />
+    <ClCompile Include="src\middleware\content\packages\items\item_presentation_reader.cpp" />
+    <ClInclude Include="src\middleware\content\packages\items\item_presentation_reader.h" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="src\middleware\web_service\messages\opcode405.h" />
+    <ClCompile Include="src\middleware\web_service\messages\opcode405_codec.cpp" />
+    <ClCompile Include="src\server\web_service\web_service_postmaster.cpp" />
+    <ClInclude Include="src\state\account\inventory\postmaster_policy.h" />
+    <ClInclude Include="src\state\runtime\postmaster_runtime.h" />
+    <ClCompile Include="src\state\runtime\postmaster_runtime.cpp" />
+  </ItemGroup>
+  <ItemGroup>
+  </ItemGroup>
 </Project>

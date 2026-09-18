@@ -30,7 +30,10 @@ constexpr std::int32_t kEquipmentSlotCount = 20;
 /** A socket entry stores its type index first and its initial plug next. */
 constexpr std::size_t kSocketTypeOffset = 0;
 constexpr std::size_t kSocketPlugOffset = 2;
-/** Fixed fields end after the instanced predicate. */
+/** The item header names the permanent acquired unlock slot here. */
+constexpr std::size_t kAcquireEffectOffset = 0xD8;
+constexpr std::size_t kAcquiredFlagSlotOffset = 0xDA;
+/** Fixed fields end after the acquired unlock slot. */
 constexpr std::size_t kFixedFieldEnd = kInstancedOffset + 1;
 /** Optional plug category used to expand three native reusable plug families. */
 constexpr std::size_t kPlugCategoryOffset = 392;
@@ -75,6 +78,98 @@ read(std::span<const std::byte> blob, std::size_t offset, Value& value) noexcept
         return false;
     }
     std::memcpy(&value, blob.data() + offset, sizeof value);
+    return true;
+}
+
+/** Reads the serialized reward header and every declared row; partial payouts are refused. */
+[[nodiscard]] bool read_reward_metadata(std::span<const std::byte> definition, Row& row) noexcept {
+    row.rewardCount = 0;
+    std::fill_n(row.rewards, kRewardCapacity, Reward{});
+    constexpr std::size_t pointerOffset = 152;
+    constexpr std::uint32_t rewardClass = 0x80807875U;
+    std::int64_t relative = 0;
+    if (!read(definition, pointerOffset, relative)) return false;
+    if (relative == 0) return true;
+    // Validate before adding the signed relative offset; no negative or wrapped blob pointer.
+    if (relative < -static_cast<std::int64_t>(pointerOffset)
+        || relative > static_cast<std::int64_t>(definition.size())
+                          - static_cast<std::int64_t>(pointerOffset))
+        return false;
+    const auto at = static_cast<std::size_t>(static_cast<std::int64_t>(pointerOffset) + relative);
+    std::uint32_t cls = 0, count = 0, headerItem = 0;
+    std::int32_t headerQuantity = 0;
+    if (at < 4 || !read(definition, at - 4, cls) || cls != rewardClass
+        || !read(definition, at, count) || count >= kRewardCapacity
+        || !read(definition, at + 4, headerItem) || headerItem > 0xFFFFU
+        || !read(definition, at + 8, headerQuantity) || headerQuantity < 0)
+        return false;
+    row.rewards[0] = {static_cast<std::uint16_t>(headerItem), 0xFFFFU, headerQuantity};
+    for (std::size_t i = 0; i < count; ++i) {
+        const auto entry = at + 12 + i * 12;
+        std::uint32_t item = 0, companion = 0;
+        std::int32_t quantity = 0;
+        if (!read(definition, entry, companion) || companion > 0xFFFFU
+            || !read(definition, entry + 4, item) || item > 0xFFFFU
+            || !read(definition, entry + 8, quantity) || quantity < 0)
+            return false;
+        row.rewards[i + 1] = {
+            static_cast<std::uint16_t>(item), static_cast<std::uint16_t>(companion), quantity};
+    }
+    row.rewardCount = static_cast<std::uint8_t>(count + 1);
+    return true;
+}
+
+/** Reads serialized pursuit metadata through checked package-array descriptors. */
+[[nodiscard]] bool read_pursuit_metadata(std::span<const std::byte> definition, Row& row) noexcept {
+    row.objectiveCount = 0;
+    std::fill_n(row.objectiveIndices, kObjectiveCapacity, 0);
+    row.lifetimeSeconds = 0;
+    // Non-pursuit definitions reuse this descriptor for other block types (including
+    // equipment). An absent decoded equipment slot does not make such a row a pursuit.
+    constexpr std::uint8_t pursuitBucket = 40;
+    if (row.bucketId != pursuitBucket || row.equipmentSlot.has_value() || row.maxStackSize > 1)
+        return true;
+    // The fixed field points at a variable block; its position depends on preceding blocks.
+    constexpr std::size_t objectivePointer = 48;
+    constexpr std::uint32_t objectiveBlockClass = 0x808077EBU;
+    std::int64_t relative = 0;
+    if (!read(definition, objectivePointer, relative)) return false;
+    if (relative == 0) return true;
+    if (relative < -static_cast<std::int64_t>(objectivePointer)
+        || relative > static_cast<std::int64_t>(definition.size())
+                          - static_cast<std::int64_t>(objectivePointer))
+        return false;
+    const auto objectiveDescriptor =
+        static_cast<std::size_t>(static_cast<std::int64_t>(objectivePointer) + relative);
+    std::uint32_t blockClass = 0;
+    if (objectiveDescriptor < 4 || !read(definition, objectiveDescriptor - 4, blockClass)
+        || blockClass != objectiveBlockClass)
+        return false;
+    constexpr std::size_t lifetimeDescriptor = 192;
+    constexpr std::uint32_t lifetimeClass = 0x80807D31U;
+    Array objectives{};
+    if (!find_optional_array_at(definition, objectiveDescriptor, objectives)) {
+        // Bucket 40 is the pursuit bucket. Refuse malformed rows rather than grant empty tails.
+        return false;
+    }
+    if (objectives.count == 0) return true;
+    if (objectives.elementClass != kObjectiveReferenceArrayClass
+        || objectives.count > kObjectiveCapacity)
+        return false;
+    for (std::size_t i = 0; i < objectives.count; ++i) {
+        if (!read(definition,
+                  objectives.dataOffset + i * sizeof(std::uint16_t),
+                  row.objectiveIndices[i]))
+            return false;
+    }
+    row.objectiveCount = static_cast<std::uint8_t>(objectives.count);
+    Array lifetime{};
+    if (!find_optional_array_at(definition, lifetimeDescriptor, lifetime)) return false;
+    if (lifetime.count != 0
+        && (lifetime.count != 1 || lifetime.elementClass != lifetimeClass
+            || !read(definition, lifetime.dataOffset + 4, row.lifetimeSeconds)
+            || row.lifetimeSeconds < 0))
+        return false;
     return true;
 }
 
@@ -343,6 +438,11 @@ bool read_definition(std::span<const std::byte> definition, Row& row) noexcept {
         return false;
     }
     row.instanced = instanced != 0;
+    // Both late fields carry their own absent sentinels, so a definition too short to declare
+    // them stays in the catalog rather than being dropped from it.
+    (void)read(definition, kAcquiredFlagSlotOffset, row.acquiredFlagSlot);
+    std::uint16_t effect{};
+    if (read(definition, kAcquireEffectOffset, effect)) row.acquireEffectIndex = effect;
     // Short legacy definitions simply do not declare a plug category.
     (void)read(definition, kPlugCategoryOffset, row.plugCategoryHash);
     read_plug_block(definition, row);
@@ -354,8 +454,12 @@ bool read_definition(std::span<const std::byte> definition, Row& row) noexcept {
                row.enabledMaterialRequirementSetIndex);
     read_stats(definition, row);
     read_appearance(definition, row);
-    read_socket_entry_list(definition, row);
     read_equipment_slot(definition, row.equipmentSlot, row.rawEquipmentSlot);
+    row.objectiveMetadataValid = read_pursuit_metadata(definition, row);
+    if (row.objectiveMetadataValid && row.objectiveCount != 0) {
+        row.objectiveMetadataValid = read_reward_metadata(definition, row);
+    }
+    read_socket_entry_list(definition, row);
     read_sockets(definition, row);
     return true;
 }

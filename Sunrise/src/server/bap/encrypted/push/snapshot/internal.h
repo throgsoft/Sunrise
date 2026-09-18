@@ -13,6 +13,10 @@
 #include "snapshot_storage.h"
 
 namespace sunrise::server::bap::encrypted::push::snapshot {
+[[nodiscard]] bool prepare_postmaster_claim(Scratch& scratch,
+                                            const queuez::EquipmentSwap& update,
+                                            const state::PendingPostmasterClaim& mutation,
+                                            Prepared& prepared) noexcept;
 
 /** Initial family snapshots start at version zero. */
 inline constexpr std::int32_t kInitialFamilyVersion = 0;

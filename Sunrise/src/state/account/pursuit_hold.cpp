@@ -3,6 +3,7 @@
 #include <cstddef>
 
 #include "../../core/logging/log.h"
+#include "../build_data/items/quest_initialization.h"
 #include "../build_data/runtime.h"
 #include "../runtime/runtime.h"
 #include "account_state.h"
@@ -33,7 +34,10 @@ void report_classification(std::uint16_t itemDefinitionIndex,
 
 /** @return True when the detail row describes a pursuit rather than gear or a stack. */
 [[nodiscard]] bool pursuit_definition(const detail_domain::Definition& detail) noexcept {
-    return !detail.equipmentSlot.has_value() && detail.maxStackSize <= 1;
+    // Singleton non-equipment items also include engrams. Only the Pursuits bucket is
+    // character-unique; identical engrams occupy separate rows with separate instance SOIDs.
+    return detail.bucketId == build_data::items::kPursuitBucketId
+           && !detail.equipmentSlot.has_value() && detail.maxStackSize <= 1;
 }
 
 } // namespace

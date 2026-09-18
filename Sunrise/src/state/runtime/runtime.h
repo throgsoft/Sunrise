@@ -3,11 +3,14 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <span>
 #include <variant>
 
+#include "../account/inventory/dawning_oven_state.h"
 #include "../build_data/items/quest_initialization.h"
 #include "../build_data/records/definition.h"
+#include "chalice_crafting_runtime.h"
 #include "state.h"
 
 namespace sunrise::state::account::settings {
@@ -187,7 +190,9 @@ struct PendingProfileItemAcquisition {
     /**
      * Rows this mutation announces to the account's change ring, which is the only way the Client
      * is told of a currency gain. Empty marks an ordinary acquisition, which announces its one
-     * acquired row instead; non-empty marks an exchange.
+
+     * * acquired row instead, or a discard, which announces no gain; non-empty marks an exchange.
+
      */
     std::array<ProfileStackChange, kProfileStackChangeCapacity> changes{};
     std::size_t changeCount{};
@@ -196,6 +201,8 @@ struct PendingProfileItemAcquisition {
     bool appended{};
     /** Skips Collections revalidation for direct rewards. */
     bool directGrant{};
+    /** Canonical no-SOID profile discard; no acquisition feedback or rewards. */
+    bool profileDiscard{};
     bool prepared{};
 };
 
@@ -227,6 +234,7 @@ enum class RecordRewardKind : std::uint8_t {
     characterInstance,
     characterStack,
     profileStack,
+    accountMaterial,
 };
 
 /** Native row identity of one item inside a prepared record-reward batch. */
@@ -245,8 +253,26 @@ struct PreparedRecordReward {
 /** A reward grant that claims no record carries this instead of a record row. */
 inline constexpr std::uint16_t kUnclaimedRecordIndex = 0xFFFFU;
 
-/** Record claim and all of its item rows committed as one transaction. */
+/** Checked pursuit source and progression before-images associated with a reward batch. */
+struct PursuitRedemptionContext {
+    struct RankCredit {
+        std::uint16_t index{};
+        std::int32_t before{}, after{};
+        bool operator==(const RankCredit&) const = default;
+    };
+    std::array<RankCredit, 2> ranks{};
+    std::size_t rankCount{};
+    std::uint64_t sourceInstanceSoid{};
+    std::uint32_t sourceDefinitionHash{};
+    std::int64_t stagedAt{};
+    std::int32_t seasonalBefore{}, experience{}, expectedQuantity{};
+    bool redeemed{}, prepared{};
+};
+
+/** Record claim or pursuit consumption and all reward rows committed as one transaction. */
 struct PendingRecordRewardGrant {
+    std::optional<PursuitRedemptionContext> pursuitRedemption{};
+    std::optional<account::inventory::dawning::State> beforeDawning{}, afterDawning{};
     CharacterState beforeCharacter{};
     CharacterState afterCharacter{};
     std::array<account::inventory::ProfileItem, account::inventory::kProfileItemCapacity>
@@ -264,6 +290,14 @@ struct PendingRecordRewardGrant {
     std::size_t rewardCount{};
     bool prepared{};
 };
+
+/** Resident identity consumed by this transaction, if the entire source is removed. */
+[[nodiscard]] inline std::uint64_t
+released_reward_source(const PendingRecordRewardGrant& mutation) noexcept {
+    if (mutation.pursuitRedemption && mutation.pursuitRedemption->expectedQuantity == 1)
+        return mutation.pursuitRedemption->sourceInstanceSoid;
+    return 0;
+}
 
 /** One uncommitted Season reward and the exact native row or bundle it will claim. */
 struct PendingSeasonPassReward {
@@ -302,6 +336,8 @@ struct PendingItemDismantle {
         afterProfileItems{};
     std::array<DismantleReward, kDismantleRewardCapacity> rewards{};
     account::inventory::Item dismantledItem{};
+    /** No-instance character-stack discard; never creates or releases an item resident. */
+    std::optional<account::inventory::CharacterStack> discardedStack{};
     std::uint64_t accountSoid{};
     std::uint64_t characterSoid{};
     std::uint64_t dismantledInstanceSoid{};
@@ -314,20 +350,26 @@ struct PendingItemDismantle {
     std::size_t rewardCount{};
     std::uint16_t inventoryRow{};
     std::uint8_t equipmentSlot{};
+    /** Client-observed quantity, checked again when the canonical transition is materialized. */
+    std::int32_t requestedStackQuantity{};
+    std::int32_t discardedQuantity{};
+    bool releasesDismantledInstance{};
     bool profileChanged{};
     bool prepared{};
 };
 
-/** Prepared ordinary-socket selection for one selected-character item instance. */
+/** Prepared socket selection or material exchange for one selected-character item instance. */
 struct PendingSocketPlug {
+    std::optional<account::inventory::dawning::State> beforeDawning{}, afterDawning{};
+    std::optional<runtime::detail::chalice::State> beforeChalice{}, afterChalice{};
     /** Exact prepare-time character view used as the commit staleness guard. */
     CharacterState beforeCharacter{};
-    /** Canonical after-image. Only the target item's authored socket block differs. */
+    /** Canonical after-image, including objective credit earned by an exchange. */
     CharacterState afterCharacter{};
     /** Exact account-wide material balances observed before applying the installed cost set. */
     std::array<account::inventory::ProfileItem, account::inventory::kProfileItemCapacity>
         beforeProfileItems{};
-    /** Canonical material balances after every consuming row in the installed cost set. */
+    /** Canonical material balances after payment and any exchange output. */
     std::array<account::inventory::ProfileItem, account::inventory::kProfileItemCapacity>
         afterProfileItems{};
     std::uint64_t accountSoid{};
@@ -351,6 +393,7 @@ struct PendingSocketPlug {
     std::uint8_t targetBucketId{};
     std::uint8_t plugBucketId{};
     std::uint8_t materialRequirementCount{};
+    /** Publish account stacks and any native Chalice bank changes with the socket. */
     bool profileChanged{};
     bool targetEquipped{};
     bool prepared{};
@@ -525,6 +568,18 @@ set_selected_title(std::uint16_t recordIndex, std::uint64_t& characterSoid, bool
  * @param mutation Gets a checked after-image without changing account State.
  * @return True when the item and every existing loadout row resolve with one free native row.
  */
+/**
+ * Writes one item's authored quest first step when its saved row is still unset.
+ *
+ * A quest with no first step has no active step, so the Client cannot track it. The acquisition
+ * path seeds this itself; reward grants call it so a quest handed out as a reward is trackable.
+ * Call inside the caller's store transaction.
+ *
+ * @param definitionHash Installed identity of the granted item.
+ * @return False only when the item or its authored plan cannot be read, or the write fails.
+ */
+[[nodiscard]] bool seed_quest_initialization(std::uint32_t definitionHash) noexcept;
+
 [[nodiscard]] bool prepare_item_acquisition(std::uint16_t collectibleIndex,
                                             std::uint32_t definitionHash,
                                             PendingItemAcquisition& mutation) noexcept;
@@ -636,7 +691,14 @@ commit_profile_item_acquisition(PendingProfileItemAcquisition& mutation) noexcep
  * @return True when the selected character uniquely owns it and both loadouts resolve.
  */
 [[nodiscard]] bool prepare_item_dismantle(std::uint64_t instanceSoid,
+                                          std::int32_t expectedStackQuantity,
                                           PendingItemDismantle& mutation) noexcept;
+
+/** One-unit discard of the selected character's unique non-instanced stack at its observed count.
+ */
+[[nodiscard]] bool prepare_character_stack_discard(std::uint16_t definitionIndex,
+                                                   std::int32_t expectedStackQuantity,
+                                                   PendingItemDismantle& mutation) noexcept;
 
 /** Builds the exact account after-image while a prepared dismantle remains current. */
 [[nodiscard]] bool preview_item_dismantle(const PendingItemDismantle& mutation,
@@ -747,7 +809,8 @@ struct ProfileExchangePayout {
  * @param output Receives one complete Family-5 snapshot on success.
  * @return False when the fixed override banks cannot hold the complete state.
  */
-[[nodiscard]] bool investment_snapshot(InvestmentState& output) noexcept;
+[[nodiscard]] bool investment_snapshot(InvestmentState& output,
+                                       std::uint16_t previousMoteMask = 0) noexcept;
 
 /** Seasonal artifact item definition, whose equipped row carries the Power bonus stat. */
 inline constexpr std::uint32_t kSeasonalArtifactItemHash = 0x613A3DA6U;

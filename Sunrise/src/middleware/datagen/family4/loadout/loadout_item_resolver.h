@@ -16,6 +16,10 @@ struct Candidate {
     state::build_data::inventory::buckets::Descriptor bucket{};
 };
 
+/** Resolves the supported Lost Items range; refuses incompatible installed layouts. */
+[[nodiscard]] bool
+resolve_postmaster_bucket(state::build_data::inventory::buckets::Descriptor& output) noexcept;
+
 /**
  * Resolves one authored item into native mappings without choosing an inventory row.
  * @param authored Semantic equipment item from State.

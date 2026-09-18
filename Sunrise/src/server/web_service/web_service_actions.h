@@ -6,6 +6,8 @@
 #include "web_service_runtime.h"
 
 namespace sunrise::server::web_service {
+void claim_postmaster_item(const middleware::web_service::Message& message,
+                           Outcome& outcome) noexcept;
 
 void select_character(const middleware::web_service::Message& message, Outcome& outcome) noexcept;
 void mutate_equipment(const middleware::web_service::Message& message,

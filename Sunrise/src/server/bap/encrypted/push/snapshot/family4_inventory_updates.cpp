@@ -159,9 +159,11 @@ bool prepare_profile_item_acquisition(Scratch& scratch,
     std::size_t acquiredRow = accountObject.profileItems.size();
     // An exchange names every row it credited; an ordinary acquisition names the one row it added
     // to or grew. Both write the same kind of record, which is what the observer draws.
+    // A canonical discard has zero credited rows, so leave the ring empty after validating it.
     const char* const ringFailure =
-        mutation.changeCount != 0 ? write_exchange_changes(accountObject, mutation)
-                                  : write_acquisition_change(accountObject, mutation, acquiredRow);
+        (mutation.profileDiscard || mutation.changeCount != 0)
+            ? write_exchange_changes(accountObject, mutation)
+            : write_acquisition_change(accountObject, mutation, acquiredRow);
     if (ringFailure != nullptr) {
         clear_after(scratch, reservation);
         return report_failure(ringFailure);
@@ -602,12 +604,16 @@ bool prepare_item_dismantle(Scratch& scratch,
     }
 
     state::AccountState account{};
-    if (!mutation.prepared || mutation.characterSoid == 0 || mutation.dismantledInstanceSoid == 0
+    const bool stackDiscard = mutation.discardedStack.has_value();
+    if (!mutation.prepared || mutation.characterSoid == 0
+        || stackDiscard != (mutation.dismantledInstanceSoid == 0)
+        || (stackDiscard && (mutation.releasesDismantledInstance || mutation.profileChanged))
         || mutation.dismantledItem.instanceSoid != mutation.dismantledInstanceSoid
         || mutation.accountSoid != dismantle.accountSoid
         || mutation.characterSoid != dismantle.characterSoid
         || mutation.dismantledInstanceSoid != dismantle.dismantledInstanceSoid
         || mutation.profileChanged != dismantle.updatesAccount
+        || mutation.releasesDismantledInstance != dismantle.releasesInstance
         || mutation.rewardCount > state::kDismantleRewardCapacity
         || mutation.profileChanged != (mutation.rewardCount != 0)
         || dismantle.accountDefinitionId == 0 || dismantle.characterDefinitionId == 0
@@ -628,12 +634,20 @@ bool prepare_item_dismantle(Scratch& scratch,
         || selected.itemInstanceObjectId != dismantle.itemInstanceDefinitionId) {
         return report_failure("dismantle_selection");
     }
+    const family4_datagen::instance::ResolvedInstance* retainedInstance = nullptr;
     for (std::size_t index = 0; index < selected.loadout.itemCount; ++index) {
-        if (selected.loadout.items[index].instance.instanceSoid
-            == mutation.dismantledInstanceSoid) {
-            return report_failure("dismantle_item_present");
+        if (!stackDiscard
+            && selected.loadout.items[index].instance.instanceSoid
+                   == mutation.dismantledInstanceSoid) {
+            if (dismantle.releasesInstance || retainedInstance)
+                return report_failure("dismantle_item_present");
+            retainedInstance = &selected.loadout.items[index].instance;
         }
     }
+    // Character stacks live entirely in the character row and never own an item resident.
+    // Only a partial discard of an instanced item requires a retained instance update.
+    if (!stackDiscard && !dismantle.releasesInstance && !retainedInstance)
+        return report_failure("dismantle_retained_item_missing");
 
     const auto rawStorage = std::span(scratch.plaintext).subspan(reservation.rawWriteOffset);
     if (family4_datagen::character::layout::kObjectSize > rawStorage.size()) {
@@ -662,14 +676,33 @@ bool prepare_item_dismantle(Scratch& scratch,
     }
     // Queuez represents a release with the ordinary object key and an empty payload. The
     // encoding selector is not read for empty descriptors; oodle matches the surrounding objects.
-    staged.objects[1] = middleware::queuez::Object{
-        dismantle.itemInstanceDefinitionId,
-        dismantle.dismantledInstanceSoid,
-        middleware::queuez::Encoding::oodle,
-        {},
-    };
+    if (!stackDiscard) {
+        staged.objects[1] = middleware::queuez::Object{
+            dismantle.itemInstanceDefinitionId,
+            dismantle.dismantledInstanceSoid,
+            middleware::queuez::Encoding::oodle,
+            {},
+        };
+    }
+    if (retainedInstance) {
+        const auto instanceBytes = rawStorage.first(family4_datagen::instance::layout::kObjectSize);
+        if (!family4_datagen::instance::encode(*retainedInstance, instanceBytes)
+            || !append_object(scratch,
+                              instanceBytes,
+                              dismantle.itemInstanceDefinitionId,
+                              dismantle.dismantledInstanceSoid,
+                              staged.objects[1],
+                              compressedExtent)) {
+            clear_after(scratch, reservation);
+            return report_failure("dismantle_retained_instance");
+        }
+        staged.rawClearSize =
+            (std::max)(staged.rawClearSize,
+                       reservation.rawWriteOffset + family4_datagen::instance::layout::kObjectSize);
+    }
 
-    std::size_t objectCount = 2;
+    // A character stack has no resident object. Its character row is the entire publication.
+    std::size_t objectCount = stackDiscard ? 1 : 2;
     if (dismantle.updatesAccount) {
         if (family4_datagen::account::layout::kObjectSize > rawStorage.size()) {
             clear_after(scratch, reservation);

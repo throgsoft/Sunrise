@@ -1,6 +1,7 @@
 #include <algorithm>
 #include <limits>
 
+#include "../../../unlocks/definition.h"
 #include "codec.h"
 
 namespace sunrise::state::build_data::cache::records {
@@ -8,6 +9,13 @@ namespace {
 
 /** Cache padding fields are always written as zero. */
 constexpr unsigned int kReservedFieldValue = 0;
+
+/** An account mapping requires an addressable native slot and account bank index. */
+[[nodiscard]] bool acquired_mapping_valid(std::uint16_t slot, std::uint16_t accountFlag) noexcept {
+    return (slot == 0xFFFFU || slot <= INT16_MAX)
+           && (accountFlag == 0xFFFFU
+               || (slot != 0xFFFFU && accountFlag < unlocks::kAccountFlagCapacity));
+}
 
 } // namespace
 
@@ -204,6 +212,11 @@ bool decode(const MaterialRequirementSetRecord& record,
 
 /** Encodes the optional equipment slot without writing the optional's own storage. */
 bool encode(const items::details::Definition& value, ItemDetailRecord& record) noexcept {
+    if (!acquired_mapping_valid(value.acquiredFlagSlot, value.acquiredAccountFlag)) {
+        return false;
+    }
+    if (value.objectiveCount > value.objectiveIndices.size() || value.lifetimeSeconds < 0)
+        return false;
     if (value.instancedDefinitionState != items::details::InstancedDefinitionState::stackable
         && value.instancedDefinitionState != items::details::InstancedDefinitionState::instanced) {
         return false;
@@ -213,6 +226,18 @@ bool encode(const items::details::Definition& value, ItemDetailRecord& record) n
     record.bucketId = value.bucketId;
     record.equipmentSlot = value.equipmentSlot.value_or(kAbsentEquipmentSlot);
     record.instancedDefinition = static_cast<std::uint8_t>(value.instancedDefinitionState);
+    record.acquireEffectKnown = value.acquireEffectIndex.has_value() ? 1 : 0;
+    record.acquireEffectIndex = value.acquireEffectIndex.value_or(0);
+    record.acquiredFlagSlot = value.acquiredFlagSlot;
+    record.acquiredAccountFlag = value.acquiredAccountFlag;
+    record.objectiveCount = value.objectiveCount;
+    if (value.rewardCount > value.rewards.size()) return false;
+    record.rewardCount = value.rewardCount;
+    for (std::size_t i = 0; i < record.rewards.size(); ++i)
+        record.rewards[i] = {
+            value.rewards[i].itemIndex, value.rewards[i].companionIndex, value.rewards[i].quantity};
+    record.objectiveIndices = value.objectiveIndices;
+    record.lifetimeSeconds = value.lifetimeSeconds;
     record.ordinarySocketState = static_cast<std::uint8_t>(value.ordinarySocketState);
     record.ordinarySocketCount = value.ordinarySocketCount;
     record.maxStackSize = value.maxStackSize;
@@ -240,6 +265,14 @@ bool encode(const items::details::Definition& value, ItemDetailRecord& record) n
 
 /** Turns the equipment-slot unset value back into a runtime optional. */
 bool decode(const ItemDetailRecord& record, items::details::Definition& value) noexcept {
+    if (record.acquireEffectKnown > 1
+        || (!record.acquireEffectKnown && record.acquireEffectIndex != 0))
+        return false;
+    if (!acquired_mapping_valid(record.acquiredFlagSlot, record.acquiredAccountFlag)) {
+        return false;
+    }
+    if (record.objectiveCount > record.objectiveIndices.size() || record.lifetimeSeconds < 0)
+        return false;
     value = {};
     if (record.instancedDefinition
         > static_cast<std::uint8_t>(items::details::InstancedDefinitionState::instanced)) {
@@ -250,6 +283,18 @@ bool decode(const ItemDetailRecord& record, items::details::Definition& value) n
     value.maxStackSize = record.maxStackSize;
     value.instancedDefinitionState =
         static_cast<items::details::InstancedDefinitionState>(record.instancedDefinition);
+    if (record.acquireEffectKnown) value.acquireEffectIndex = record.acquireEffectIndex;
+    value.acquiredFlagSlot = record.acquiredFlagSlot;
+    value.acquiredAccountFlag = record.acquiredAccountFlag;
+    value.objectiveCount = record.objectiveCount;
+    if (record.rewardCount > record.rewards.size()) return false;
+    value.rewardCount = record.rewardCount;
+    for (std::size_t i = 0; i < value.rewards.size(); ++i)
+        value.rewards[i] = {record.rewards[i].itemIndex,
+                            record.rewards[i].companionIndex,
+                            record.rewards[i].quantity};
+    value.objectiveIndices = record.objectiveIndices;
+    value.lifetimeSeconds = record.lifetimeSeconds;
     if (record.equipmentSlot != kAbsentEquipmentSlot) {
         value.equipmentSlot = record.equipmentSlot;
     }
@@ -284,7 +329,7 @@ bool encode(const inventory::buckets::Descriptor& value, InventoryBucketRecord& 
         value.firstSlot,
         value.slotCount,
         value.equipmentSlot,
-        value.reserved,
+        value.policyFlags,
     };
     return true;
 }
@@ -297,7 +342,7 @@ bool decode(const InventoryBucketRecord& record, inventory::buckets::Descriptor&
         record.firstSlot,
         record.slotCount,
         record.equipmentSlot,
-        record.reserved,
+        record.policyFlags,
     };
     return true;
 }

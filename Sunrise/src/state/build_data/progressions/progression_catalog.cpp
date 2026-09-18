@@ -17,6 +17,19 @@ Table<Step, kStepCapacity> g_steps;
 
 } // namespace
 
+bool find_hash(std::uint32_t hash, Definition& output) noexcept {
+    output = {};
+    if (hash == 0) return false;
+    const std::shared_lock guard(g_lock);
+    for (const auto& row : g_definitions.rows()) {
+        if (row.definitionHash == hash) {
+            output = row;
+            return true;
+        }
+    }
+    return false;
+}
+
 /** Clears every generated progression definition and its step bank under the catalog lock. */
 void clear() noexcept {
     const std::lock_guard guard(g_lock);

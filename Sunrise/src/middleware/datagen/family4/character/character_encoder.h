@@ -15,12 +15,16 @@ namespace sunrise::middleware::datagen::family4::character {
  * @param resolvedLoadout Row-sorted inventory and equipment mappings for this character.
  * @param lightEvaluation Complete raw and aggregate equipment-light values.
  * @param output Exact runtime-mapped character-object storage.
+ * @param requireCollectibleSpace Grant preflight reserves every applicable synthetic prerequisite.
+ * Normal publication defers only the synthetic rows that do not fit, preserving owned items on
+ * older saves.
  * @return True when State, mappings, and the mapped object span fit the native layout.
  */
 [[nodiscard]] bool encode(const state::CharacterState& state,
                           const loadout::ResolvedLoadout& resolvedLoadout,
                           const state::equipment::light::Evaluation& lightEvaluation,
-                          std::span<std::byte> output) noexcept;
+                          std::span<std::byte> output,
+                          bool requireCollectibleSpace = false) noexcept;
 
 /**
  * Character unlocks must match the live or prepared inventory view being encoded.
@@ -29,12 +33,15 @@ namespace sunrise::middleware::datagen::family4::character {
  * @param lightEvaluation Equipment light values for the same loadout.
  * @param output Receives the character object; unchanged on failure.
  * @param unlocks Unlock snapshot for this character, including any prepared quest value.
+ * @param requireCollectibleSpace Reserve every synthetic prerequisite rather than deferring the
+ * rows that do not fit.
  * @return False when state, mappings, light values, or output bounds are invalid.
  */
 [[nodiscard]] bool encode(const state::CharacterState& state,
                           const loadout::ResolvedLoadout& resolvedLoadout,
                           const state::equipment::light::Evaluation& lightEvaluation,
                           std::span<std::byte> output,
-                          const state::unlocks::Table& unlocks) noexcept;
+                          const state::unlocks::Table& unlocks,
+                          bool requireCollectibleSpace = false) noexcept;
 
 } // namespace sunrise::middleware::datagen::family4::character

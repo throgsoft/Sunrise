@@ -51,6 +51,8 @@ struct DetailSource {
     std::span<const std::byte> table{};
     tables::Array array{};
     std::vector<std::byte>* definition{};
+    /** Account bank index per native unlock slot; 0xFFFF marks an unmapped slot. */
+    std::span<const std::uint16_t> accountFlagSlotMap{};
 };
 
 /** The container name is not always unique, so every match is a candidate. */

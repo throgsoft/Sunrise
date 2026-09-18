@@ -13,6 +13,8 @@ namespace sunrise::server::bap::encrypted::push {
 
 /** Appends the global family-five unlock overrides as one full-snapshot notification. */
 bool append_family5_override_notification(Scratch& scratch,
+                                          std::uint16_t previousMoteMask,
+                                          std::uint16_t& publishedMoteMask,
                                           std::int32_t version,
                                           std::span<const std::byte, state::kAesKeySize> key,
                                           std::span<const std::byte, state::kBapNonceSize> nonce,
@@ -21,7 +23,7 @@ bool append_family5_override_notification(Scratch& scratch,
     namespace family5 = middleware::web_service::messages::family5;
     static_assert(client::network::kBapFrameCapacity >= family5::kObjectCapacity);
     state::InvestmentState investment{};
-    if (!state::investment_snapshot(investment)
+    if (!state::investment_snapshot(investment, previousMoteMask)
         || investment.family5.objectSoid != middleware::datagen::kUnlockSentinelSoid) {
         core::log::write(core::log::Channel::server,
                          core::log::Level::warn,
@@ -57,8 +59,11 @@ bool append_family5_override_notification(Scratch& scratch,
         middleware::queuez::kFullSnapshotFlag,
         objects,
     };
-    return queuez_frame::append(
-        scratch, family, family5::kObjectCapacity, 0, key, nonce, response, written);
+    if (!queuez_frame::append(
+            scratch, family, family5::kObjectCapacity, 0, key, nonce, response, written))
+        return false;
+    publishedMoteMask = investment.moteOwnershipMask;
+    return true;
 }
 
 } // namespace sunrise::server::bap::encrypted::push

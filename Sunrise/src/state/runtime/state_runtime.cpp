@@ -8,6 +8,7 @@
 #include <cstdio>
 #include <limits>
 #include <memory>
+#include <mutex>
 #include <new>
 #include <span>
 #include <utility>
@@ -24,6 +25,7 @@
 #include "state.h"
 #include "state_account_transaction_helpers.h"
 #include "storage/internal.h"
+#include "synthesizer_crafting_runtime.h"
 
 namespace sunrise::state {
 namespace runtime::storage {
@@ -151,7 +153,7 @@ void secure_reset(State& state) noexcept {
 }
 
 /**
- * Canonicalizes only profile rows which the installed socket UI materializes as action sources.
+ * Assigns resident identities to socket sources and validated unopened profile wrappers.
  * @param accountState Account canonicalized in place.
  * @return True when every profile row canonicalizes.
  */
@@ -178,10 +180,12 @@ void secure_reset(State& state) noexcept {
             || !build_data::find_configured_item_detail(item.definitionIndex, detail)
             || detail.definitionIndex != item.definitionIndex
             || detail.definitionHash != item.definitionHash || detail.bucketId != item.bucketId
-            || detail.instancedDefinitionState
-                   != build_data::items::details::InstancedDefinitionState::stackable
             || !build_data::find_inventory_bucket_descriptor(item.bucketId, bucket)
             || bucket.arraySelector != build_data::inventory::buckets::ArraySelector::profile) {
+            return false;
+        }
+        if (detail.instancedDefinitionState
+            != build_data::items::details::InstancedDefinitionState::stackable) {
             return false;
         }
         actionSources[index] =
@@ -371,16 +375,57 @@ bool new_bap_session(BapState& output) noexcept {
 }
 
 /** Copies one complete evaluated content state with build-derived catalyst overrides. */
-bool investment_snapshot(InvestmentState& output) noexcept {
-    investment::store::g_mutex.lock();
+bool investment_snapshot(InvestmentState& output, std::uint16_t previousMoteMask) noexcept {
+    namespace synthesizer = runtime::detail::synthesizer;
+    const bool projectsMotes = synthesizer::mote_output_flags_ready();
+    const std::unique_ptr<AccountState> account{projectsMotes ? new (std::nothrow) AccountState
+                                                              : nullptr};
     InvestmentState snapshot;
-    const bool loaded = investment::store::read_family5(snapshot.family5);
-    investment::store::g_mutex.unlock();
+    bool loaded = false;
+    {
+        const std::lock_guard lock{investment::store::g_mutex};
+        loaded = investment::store::read_family5(snapshot.family5)
+                 && (!projectsMotes || (account && investment::store::read_account(*account)));
+    }
     if (!loaded || !build_data::complete_exotic_catalyst_investment(snapshot.family5)) {
         core::log::write(core::log::Channel::state,
                          core::log::Level::warn,
                          "ev=investment stage=snapshot result=fail reason=catalyst");
         return false;
+    }
+    // Legacy defaults force every character's Synthesizer to tier 3. The actual tier now
+    // comes from the character's durable Prime state in Family 4; a global override wins
+    // over that bank, so omit it for both existing saves and newly seeded accounts.
+    constexpr std::uint16_t kSynthesizerTierValueSlot = 5159;
+    const auto oldCount = snapshot.family5.valueCount;
+    std::size_t kept = 0;
+    for (std::size_t read = 0; read < oldCount; ++read) {
+        const auto row = snapshot.family5.values[read];
+        if (row.slot != kSynthesizerTierValueSlot) snapshot.family5.values[kept++] = row;
+    }
+    for (std::size_t index = kept; index < oldCount; ++index)
+        snapshot.family5.values[index] = {};
+    snapshot.family5.valueCount = kept;
+    snapshot.moteOwnershipMask = previousMoteMask;
+    const bool projectedMotes =
+        projectsMotes
+        && synthesizer::project_mote_output_flags(*account, snapshot.family5, previousMoteMask);
+    if (projectedMotes)
+        snapshot.moteOwnershipMask = synthesizer::mote_publication_mask(
+            std::span(account->profileItems).first(account->profileItemCount), previousMoteMask);
+    if (projectsMotes && !projectedMotes) {
+        // An optional inventory predicate must not turn WS-503 into an undecodable
+        // echo. The projection is atomic; retain the valid base snapshot on failure.
+        // Socket exchanges still require a representable candidate before spending.
+        core::log::writef(core::log::Channel::state,
+                          core::log::Level::warn,
+                          "ev=investment stage=snapshot result=degraded reason=mote_output_flags "
+                          "flags=%zu capacity=%zu",
+                          snapshot.family5.flagCount,
+                          snapshot.family5.flags.size());
+        // Once a connection has received an override, omission cannot safely clear it.
+        // Exchanges preflight this same cumulative history before spending inventory.
+        if (previousMoteMask != 0) return false;
     }
     output = snapshot;
     return true;

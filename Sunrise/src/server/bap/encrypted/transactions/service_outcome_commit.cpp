@@ -1,5 +1,6 @@
 #include "service_outcome_commit.h"
 
+#include <algorithm>
 #include <array>
 #include <cstdio>
 
@@ -15,7 +16,6 @@ namespace sunrise::server::bap::encrypted::transactions {
 namespace {
 
 namespace slots = state::activity::entity_slots;
-
 /** Log names for each lease operation, in the enum's own order. */
 constexpr std::array<const char*, 4> kLeaseKinds = {"none", "join", "grant", "release"};
 
@@ -240,6 +240,16 @@ bool commit(ServiceOutcome& outcome, Publication& publication, const char*& reas
                                    : "ev=ws701 stage=transaction_commit result=fail");
         return committed;
     }
+    if (auto* transaction = transaction_if<PostmasterClaimTransaction>(outcome)) {
+        reason = "postmaster_claim";
+        const bool committed =
+            transaction->pending && state::commit_postmaster_claim(*transaction->pending);
+        core::log::write(core::log::Channel::server,
+                         committed ? core::log::Level::info : core::log::Level::warn,
+                         committed ? "ev=postmaster stage=commit result=ok"
+                                   : "ev=postmaster stage=commit result=refused");
+        return committed;
+    }
     if (auto* transaction = transaction_if<EquipmentSwapTransaction>(outcome)) {
         if (transaction->pending == nullptr) {
             return false;
@@ -337,9 +347,9 @@ bool commit(ServiceOutcome& outcome, Publication& publication, const char*& reas
     }
     if (auto* transaction = transaction_if<RecordRewardGrantTransaction>(outcome)) {
         reason = "record_reward";
-        return transaction->pending != nullptr
-               && report_commit(state::commit_record_reward(*transaction->pending),
-                                "ev=record_reward stage=transaction_commit result=fail");
+        if (transaction->pending == nullptr) return false;
+        return report_commit(state::commit_record_reward(*transaction->pending),
+                             "ev=record_reward stage=transaction_commit result=fail");
     }
     return true;
 }

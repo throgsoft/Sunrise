@@ -1,7 +1,9 @@
 #include <Windows.h>
 
 #include <array>
+#include <atomic>
 #include <span>
+#include <vector>
 
 #include "../../../../core/filesystem/path.h"
 #include "../../../../core/logging/log.h"
@@ -9,6 +11,8 @@
 #include "../../../../middleware/content/packages/tables/definition_index_table.h"
 #include "../../../../state/build_data/activities/activity_catalog.h"
 #include "../../../../state/build_data/runtime.h"
+#include "../../../../state/runtime/chalice_crafting_runtime.h"
+#include "../../../../state/runtime/synthesizer_crafting_runtime.h"
 #include "../../activity/activity_catalog_build.h"
 #include "../../activity/entity_position_profile_build.h"
 #include "../../hash_names/hash_name_build.h"
@@ -17,14 +21,142 @@
 #include "../../vendors/vendor_build.h"
 #include "build.h"
 #include "internal.h"
+#include "package_objective_build.h"
 #include "package_socket_plug_build.h"
 
 namespace sunrise::client::content::items::packages {
 namespace {
 
+std::atomic_bool g_synthesizerMetadataAttempted{};
+std::atomic_bool g_chaliceMetadataAttempted{};
+
+/** Revalidate the bounded Chalice contract on cache hits as well as fresh extraction. */
+void configure_chalice_metadata(const reader::Source& source, Storage& storage) noexcept {
+    namespace chalice = state::runtime::detail::chalice;
+    if (g_chaliceMetadataAttempted.load(std::memory_order_acquire)) return;
+    std::array<std::uint32_t, kContainerCandidates> candidates{};
+    std::size_t count = 0;
+    bool configured = false;
+    if (investment_globals_tags(candidates, count)) {
+        for (std::size_t i = 0; i < count && !configured; ++i) {
+            std::uint32_t root{}, rootClass{}, tag{};
+            if (!reader::read_tag(source, storage.scratch, candidates[i], storage.container)
+                || !tables::child_tag(storage.container, tables::kInvestmentRootChild, root)
+                || root == 0
+                || !reader::read_tag(source, storage.scratch, root, storage.root, rootClass)
+                || rootClass != tables::kInvestmentRootClass)
+                continue;
+            std::array<std::vector<std::byte>, 4> banks{};
+            constexpr std::array<std::size_t, 4> slots{112, 114, 111, 113};
+            bool readBanks = true;
+            for (std::size_t bank = 0; bank < slots.size(); ++bank) {
+                if (!tables::slot_tag(storage.root, slots[bank], tag) || tag == 0
+                    || !reader::read_tag(source, storage.scratch, tag, banks[bank])) {
+                    readBanks = false;
+                    break;
+                }
+            }
+            if (!readBanks || !chalice::configure_banks(banks[0], banks[1], banks[2], banks[3])
+                || !tables::slot_tag(storage.root, tables::kSocketTypeTableSlot, tag) || tag == 0
+                || !reader::read_tag(source, storage.scratch, tag, storage.child)
+                || !chalice::configure_sockets(storage.child)
+                || !tables::slot_tag(storage.root, tables::kItemTableSlot, tag) || tag == 0
+                || !reader::read_tag(source, storage.scratch, tag, storage.itemIndexTable))
+                continue;
+            tables::Array items{};
+            if (!tables::find_array_at(storage.itemIndexTable, tables::kTableArrayDescriptor, items)
+                || items.elementClass != tables::kItemIndexTableClass || items.count <= 8019)
+                continue;
+            bool readItems = true;
+            for (std::uint16_t index = 7937; index <= 8019; ++index) {
+                if (!chalice::needs_item(index)) continue;
+                tables::IndexRow row{};
+                if (!tables::index_row(storage.itemIndexTable, items, index, row)
+                    || row.targetTag == 0
+                    || !reader::read_tag(source, storage.scratch, row.targetTag, storage.definition)
+                    || !chalice::configure_item(index, row.definitionHash, storage.definition)) {
+                    readItems = false;
+                    break;
+                }
+            }
+            configured = readItems && chalice::metadata_ready();
+        }
+    }
+    core::log::writef(core::log::Channel::state,
+                      configured ? core::log::Level::info : core::log::Level::warn,
+                      "ev=chalice_metadata source=installed_packages result=%s",
+                      configured ? "ready" : "unavailable_exchanges_disabled");
+    g_chaliceMetadataAttempted.store(true, std::memory_order_release);
+}
+
+/** Menu predicates come from real Mote definitions, not the similarly named action plugs. */
+bool configure_mote_visibility(const reader::Source& source, Storage& storage) noexcept {
+    namespace synthesizer = state::runtime::detail::synthesizer;
+    std::uint32_t itemTag = 0, flagTag = 0;
+    tables::Array items{};
+    if (!tables::slot_tag(storage.root, tables::kItemTableSlot, itemTag) || itemTag == 0
+        || !tables::slot_tag(storage.root, tables::kUnlockFlagSlotTableSlot, flagTag)
+        || flagTag == 0
+        || !reader::read_tag(source, storage.scratch, itemTag, storage.itemIndexTable)
+        || !reader::read_tag(source, storage.scratch, flagTag, storage.unlockSlotTable)
+        || !tables::find_array_at(storage.itemIndexTable, tables::kTableArrayDescriptor, items)
+        || items.elementClass != tables::kItemIndexTableClass
+        || items.count > state::build_data::items::kDefinitionCapacity)
+        return false;
+    std::size_t configured = 0;
+    for (std::uint64_t index = 0; index < items.count; ++index) {
+        tables::IndexRow row{};
+        if (!tables::index_row(storage.itemIndexTable, items, index, row)) return false;
+        if (!synthesizer::is_mote(row.definitionHash)) continue;
+        if (row.targetTag == 0
+            || !reader::read_tag(source, storage.scratch, row.targetTag, storage.definition)
+            || !synthesizer::configure_mote_output_flags(
+                row.definitionHash, storage.definition, storage.unlockSlotTable))
+            return false;
+        ++configured;
+    }
+    return configured == 12 && synthesizer::mote_output_flags_ready();
+}
+
+/** Optional exchange metadata is read once per boot, including a build-data cache hit. */
+void configure_synthesizer_metadata(const reader::Source& source, Storage& storage) noexcept {
+    if (g_synthesizerMetadataAttempted.load(std::memory_order_acquire)) return;
+    std::array<std::uint32_t, kContainerCandidates> candidates{};
+    std::size_t count = 0;
+    bool configured = false;
+    bool visibility = false;
+    if (investment_globals_tags(candidates, count)) {
+        for (std::size_t i = 0; i < count && (!configured || !visibility); ++i) {
+            std::uint32_t root = 0, rootClass = 0, table = 0;
+            if (!reader::read_tag(source, storage.scratch, candidates[i], storage.container)
+                || !tables::child_tag(storage.container, tables::kInvestmentRootChild, root)
+                || root == 0
+                || !reader::read_tag(source, storage.scratch, root, storage.root, rootClass)
+                || rootClass != tables::kInvestmentRootClass)
+                continue;
+            if (!configured && tables::slot_tag(storage.root, tables::kSocketTypeTableSlot, table)
+                && table != 0 && reader::read_tag(source, storage.scratch, table, storage.child))
+                configured =
+                    state::runtime::detail::synthesizer::configure_socket_costs(storage.child);
+            if (!visibility) visibility = configure_mote_visibility(source, storage);
+        }
+    }
+    core::log::writef(core::log::Channel::state,
+                      configured ? core::log::Level::info : core::log::Level::warn,
+                      "ev=synthesizer_costs source=installed_packages result=%s",
+                      configured ? "ready" : "unavailable_exchanges_disabled");
+    core::log::writef(core::log::Channel::state,
+                      visibility ? core::log::Level::info : core::log::Level::warn,
+                      "ev=synthesizer_visibility source=installed_packages result=%s",
+                      visibility ? "ready" : "unavailable");
+    // Missing optional exchange data must not prevent account startup.
+    g_synthesizerMetadataAttempted.store(true, std::memory_order_release);
+}
+
 /** @return True when every item and investment-root domain is published. */
 [[nodiscard]] bool root_domains_ready() noexcept {
-    return state::build_data::item_definitions_ready()
+    return state::build_data::objective_definitions_ready()
+           && state::build_data::item_definitions_ready()
            && state::build_data::collectible_definitions_ready()
            && state::build_data::material_requirement_sets_ready()
            && state::build_data::configured_item_details_ready()
@@ -46,9 +178,10 @@ namespace {
 
 /** @return True when every domain owned by the package pass is published. */
 bool ready() noexcept {
-    return root_domains_ready() && state::build_data::scenario_layouts_ready()
-           && state::build_data::spawn_sets_ready() && state::build_data::hash_names_ready()
-           && state::build_data::vendor_catalog_ready()
+    return g_synthesizerMetadataAttempted.load(std::memory_order_acquire)
+           && g_chaliceMetadataAttempted.load(std::memory_order_acquire) && root_domains_ready()
+           && state::build_data::scenario_layouts_ready() && state::build_data::spawn_sets_ready()
+           && state::build_data::hash_names_ready() && state::build_data::vendor_catalog_ready()
            && content::activity::entity_position_profiles::ready()
            && (state::build_data::activities::ready()
                || state::build_data::activities::extraction_failed());
@@ -77,6 +210,8 @@ bool build() noexcept {
     // storage. Both are independent of the item table, so a failure here leaves it alone.
     {
         const reader::Source packageSource{directory.chars.data(), &keys};
+        configure_synthesizer_metadata(packageSource, storage);
+        configure_chalice_metadata(packageSource, storage);
         // Process-local launcher data is extracted even when persistent build data was loaded.
         (void)content::activity::build_catalog(packageSource, storage.scratch);
         (void)content::activity::entity_position_profiles::build(packageSource, storage.scratch);
@@ -122,8 +257,14 @@ bool build() noexcept {
             }
             // The same root names the bucket and socket-list tables.
             storage.root = storage.child;
-            // Quest, record, node, season and catalyst reads share these unlock maps.
+            if (!build_objectives(source, storage.scratch, storage.root)) {
+                reason = "objectives";
+                continue;
+            }
+            // Quest, item detail, record, node, season and catalyst reads share these unlock maps.
             if (!state::build_data::item_definitions_ready()
+                || !state::build_data::configured_item_details_ready()
+                || !state::build_data::socket_plug_rules_ready()
                 || !state::build_data::record_definitions_ready()
                 || !state::build_data::node_definitions_ready()
                 || !state::build_data::season_pass_ready() || !exotic_catalysts_settled()) {

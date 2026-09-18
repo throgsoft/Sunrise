@@ -8,6 +8,8 @@
 
 namespace sunrise::state::build_data::progressions {
 
+[[nodiscard]] bool find_hash(std::uint32_t hash, Definition& output) noexcept;
+
 /** Clears every generated progression definition and its step bank. */
 void clear() noexcept;
 

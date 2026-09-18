@@ -11,6 +11,7 @@
 #include "../../../middleware/web_service/messages/opcode206.h"
 #include "../../../state/activity/bubble_authority/runtime.h"
 #include "../../../state/runtime/runtime.h"
+#include "../../../state/runtime/synthesizer_crafting_runtime.h"
 #include "../../activity/host_runtime.h"
 #include "../../gameplay/peer/peer_transport.h"
 #include "../../gameplay/squad_entity_retirement.h"
@@ -397,9 +398,43 @@ bool consume(Session& session,
         }
     }
     const bool artifactPurchase = transaction_if<ArtifactPurchaseTransaction>(outcome) != nullptr;
+    const auto* socketTransaction = transaction_if<SocketPlugTransaction>(outcome);
+    const auto* profileTransaction = transaction_if<ProfileItemAcquisitionTransaction>(outcome);
+    const auto* rewardTransaction = transaction_if<RecordRewardGrantTransaction>(outcome);
+    // Capture before commit consumes pending state. Only ownership changes need this
+    // refresh; profile compaction and Synth debits alone do not change Mote predicates.
+    const bool changesMoteOwnership =
+        (socketTransaction && socketTransaction->pending
+         && state::runtime::detail::synthesizer::mote_ownership_changed(
+             socketTransaction->pending->beforeProfileItems,
+             socketTransaction->pending->afterProfileItems))
+        || (profileTransaction && profileTransaction->pending
+            && state::runtime::detail::synthesizer::mote_ownership_changed(
+                profileTransaction->pending->beforeItems, profileTransaction->pending->afterItems))
+        || (rewardTransaction && rewardTransaction->pending
+            && state::runtime::detail::synthesizer::mote_ownership_changed(
+                rewardTransaction->pending->beforeProfileItems,
+                rewardTransaction->pending->afterProfileItems));
+    // The oven and chalice publish their slots from received banks, exactly as the Synthesizer
+    // does. A change to either has to rearm the same predicate refresh or the Client keeps
+    // drawing its previous derived view.
+    const bool changesCraftingState =
+        (rewardTransaction && rewardTransaction->pending
+         && rewardTransaction->pending->beforeDawning != rewardTransaction->pending->afterDawning)
+        || (socketTransaction && socketTransaction->pending
+            && (socketTransaction->pending->beforeDawning
+                    != socketTransaction->pending->afterDawning
+                || socketTransaction->pending->beforeChalice
+                       != socketTransaction->pending->afterChalice));
+    const bool pursuitRedemption = rewardTransaction && rewardTransaction->pending
+                                   && rewardTransaction->pending->pursuitRedemption.has_value();
+    const bool consumesRewardSource =
+        rewardTransaction && rewardTransaction->pending
+        && state::released_reward_source(*rewardTransaction->pending) != 0;
     const bool mutatesAccount =
         outcome.hasSelectCharacter || outcome.hasRecordClaim || outcome.hasArtifactReset
         || transaction_if<EquipmentSwapTransaction>(outcome) != nullptr
+        || transaction_if<PostmasterClaimTransaction>(outcome) != nullptr
         || transaction_if<SubclassSelectionTransaction>(outcome) != nullptr
         || transaction_if<SocketPlugTransaction>(outcome) != nullptr
         || transaction_if<ItemStateTransaction>(outcome) != nullptr || artifactPurchase
@@ -412,11 +447,14 @@ bool consume(Session& session,
     const bool presentsAcquisition =
         transaction_if<ItemAcquisitionTransaction>(outcome) != nullptr
         || transaction_if<ProfileItemAcquisitionTransaction>(outcome) != nullptr
-        || transaction_if<RecordRewardGrantTransaction>(outcome) != nullptr
+        || (rewardTransaction && rewardTransaction->pending
+            && rewardTransaction->pending->rewardCount != 0)
         || transaction_if<SeasonPassRewardTransaction>(outcome) != nullptr;
     const bool invalidatesAcquisitionPresentation =
         outcome.hasChangeCharacter || outcome.hasSelectCharacter || outcome.hasArtifactReset
-        || transaction_if<ItemDismantleTransaction>(outcome) != nullptr;
+        || transaction_if<PostmasterClaimTransaction>(outcome) != nullptr
+        || transaction_if<ItemDismantleTransaction>(outcome) != nullptr || pursuitRedemption
+        || consumesRewardSource;
     const bool hasPrecommittedAccountAction =
         outcome.hasRecordClaim || outcome.hasSelectCharacter || outcome.hasArtifactReset;
     // Commit consumes pending payloads, so retain the connection fields first.
@@ -535,13 +573,22 @@ bool consume(Session& session,
             }
             const bool resyncsCommittedAccount =
                 hasPrecommittedAccountAction && !queuezPublication.hasState;
-            if (resyncsCommittedAccount) {
+            // Pursuit XP/rank banks commit after the prepared inventory frame. Republish those
+            // committed banks through the ordinary deferred refresh; never grant them again.
+            if (resyncsCommittedAccount || pursuitRedemption) {
                 bap::arm_account_resync_everywhere();
+            }
+            if (outcome.hasPublishedMoteMask)
+                session.queuez.publishedMoteMask = outcome.publishedMoteMask;
+            if (changesMoteOwnership || changesCraftingState || outcome.hasSelectCharacter
+                || outcome.hasChangeCharacter) {
+                // A committed synthesis/recycle/discard needs only the evaluated predicates.
+                session.family5RefreshArmed = true;
             }
             if (artifactPurchase || outcome.hasArtifactReset) {
                 // Artifact overrides live in Family 5, so they need their own refresh. A record
                 // claim does not: its Family-4 replacement rearms the client rebuild.
-                session.artifactRefreshArmed = true;
+                session.family5RefreshArmed = true;
                 session.artifactFamily4RefreshDueTick =
                     GetTickCount64() + kArtifactFamily4RefreshDelayMs;
                 session.artifactFamily4RefreshArmed = true;

@@ -187,8 +187,17 @@ bool process(const ServiceRoute& route,
         return middleware::bap::user_message::encode_minimal_response(output, written);
     case BodyCodec::webService: {
         middleware::web_service::Message message;
-        if (middleware::web_service::parse_request(requestBody, message)
-            && message.opcode == middleware::web_service::messages::opcode505::kOpcode) {
+        const bool parsed = middleware::web_service::parse_request(requestBody, message);
+        // Log every action opcode except the two routine polls, so an unrecognized binding is
+        // visible without assuming which opcode family it belongs to.
+        if (parsed && message.opcode != 206 && message.opcode != 701) {
+            core::log::writef(core::log::Channel::server,
+                              core::log::Level::info,
+                              "ev=ws stage=receipt opcode=%u payload_bytes=%zu",
+                              static_cast<unsigned>(message.opcode),
+                              message.payload.size());
+        }
+        if (parsed && message.opcode == middleware::web_service::messages::opcode505::kOpcode) {
             auto* changeCharacter = emplace_transaction<queuez::ChangeCharacter>(outcome);
             if (!middleware::web_service::messages::opcode505::parse_request(message)
                 || changeCharacter == nullptr
@@ -209,8 +218,12 @@ bool process(const ServiceRoute& route,
             return false;
         }
         web_service::Outcome webOutcome;
-        if (!sunrise::server::web_service::consume(
-                requestBody, output, written, webOutcome, presentation)) {
+        if (!sunrise::server::web_service::consume(requestBody,
+                                                   output,
+                                                   written,
+                                                   webOutcome,
+                                                   presentation,
+                                                   queuezState.publishedMoteMask)) {
             return false;
         }
         if (webOutcome.hasTitleEquip) {
@@ -235,11 +248,15 @@ bool process(const ServiceRoute& route,
         }
         outcome.hasSubscription = webOutcome.hasSubscription;
         outcome.hasRecordClaim = webOutcome.hasRecordClaim;
+        outcome.hasPublishedMoteMask = webOutcome.hasPublishedMoteMask;
+        outcome.publishedMoteMask = webOutcome.publishedMoteMask;
         outcome.hasArtifactReset = webOutcome.hasArtifactReset;
         outcome.artifactReset = webOutcome.artifactReset;
         outcome.subscription = webOutcome.subscription;
         const auto* equipmentSwap =
             web_service::mutation_if<state::PendingEquipmentSwap>(webOutcome);
+        const auto* postmasterClaim =
+            web_service::mutation_if<state::PendingPostmasterClaim>(webOutcome);
         const auto* subclassSelection =
             web_service::mutation_if<state::PendingSubclassSelection>(webOutcome);
         const auto* socketPlug = web_service::mutation_if<state::PendingSocketPlug>(webOutcome);
@@ -305,6 +322,28 @@ bool process(const ServiceRoute& route,
                 == nullptr) {
                 return refuse_web_action(message, output, written);
             }
+        }
+        if (postmasterClaim != nullptr) {
+            auto* transaction = emplace_transaction<PostmasterClaimTransaction>(outcome);
+            if (!transaction
+                || !queuez::stage_equipment_swap(
+                    queuezState, postmasterClaim->characterSoid, transaction->update)) {
+                clear_transaction(outcome);
+                return refuse_web_action(message, output, written);
+            }
+            middleware::web_service::StatusResponse status{};
+            status.value = transaction->update.after.family4Version;
+            if (!middleware::web_service::encode_response(
+                    message,
+                    middleware::web_service::ResponseShape::statusPair,
+                    status,
+                    output,
+                    written)) {
+                clear_transaction(outcome);
+                return refuse_web_action(message, output, written);
+            }
+            transaction->pending =
+                web_service::take_mutation<state::PendingPostmasterClaim>(webOutcome);
         }
         if (equipmentSwap != nullptr) {
             // Promise the Family-4 revision carrying this optimistic equip.
@@ -503,6 +542,7 @@ bool process(const ServiceRoute& route,
                                                  itemDismantle->characterSoid,
                                                  itemDismantle->dismantledInstanceSoid,
                                                  itemDismantle->profileChanged,
+                                                 itemDismantle->releasesDismantledInstance,
                                                  transaction->update)) {
                 core::log::write(core::log::Channel::server,
                                  core::log::Level::warn,
@@ -538,13 +578,14 @@ bool process(const ServiceRoute& route,
                     residents[residentCount++] = reward.instanceSoid;
                 }
             }
-            const bool staged =
-                transaction != nullptr
-                && queuez::stage_record_reward_grant(queuezState,
-                                                     recordRewardGrant->accountSoid,
-                                                     recordRewardGrant->characterSoid,
-                                                     std::span(residents).first(residentCount),
-                                                     transaction->update);
+            const bool staged = transaction != nullptr
+                                && queuez::stage_record_reward_grant(
+                                    queuezState,
+                                    recordRewardGrant->accountSoid,
+                                    recordRewardGrant->characterSoid,
+                                    std::span(residents).first(residentCount),
+                                    transaction->update,
+                                    state::released_reward_source(*recordRewardGrant));
             if (!staged) {
                 core::log::write(core::log::Channel::server,
                                  core::log::Level::warn,
@@ -554,12 +595,14 @@ bool process(const ServiceRoute& route,
             }
             middleware::web_service::StatusResponse status{};
             status.value = transaction->update.after.family4Version;
+            middleware::web_service::ResponseShape rewardShape{};
+            web_service::resolve_response_shape(message.opcode, rewardShape);
+            // Store acquisitions are presented by the inventory changes in this revision.
+            // The 901 bool separately invokes the client's local purchase-item effect.
+            status.trailingBool =
+                rewardShape == middleware::web_service::ResponseShape::statusPairWithBool;
             if (!middleware::web_service::encode_response(
-                    message,
-                    middleware::web_service::ResponseShape::statusPair,
-                    status,
-                    output,
-                    written)) {
+                    message, rewardShape, status, output, written)) {
                 core::log::write(core::log::Channel::server,
                                  core::log::Level::warn,
                                  "ev=ws1801 stage=reward_response result=fail");

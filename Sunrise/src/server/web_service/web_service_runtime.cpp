@@ -7,12 +7,14 @@
 #include <cstdio>
 
 #include "../../core/logging/log.h"
+#include "../../core/runtime/wall_clock.h"
 #include "../../middleware/web_service/messages/opcode1801.h"
 #include "../../middleware/web_service/messages/opcode1821.h"
 #include "../../middleware/web_service/messages/opcode1901.h"
 #include "../../middleware/web_service/messages/opcode205.h"
 #include "../../middleware/web_service/messages/opcode206.h"
 #include "../../middleware/web_service/messages/opcode2400.h"
+#include "../../middleware/web_service/messages/opcode405.h"
 #include "../../middleware/web_service/messages/opcode501_codec.h"
 #include "../../middleware/web_service/messages/opcode503.h"
 #include "../../middleware/web_service/messages/opcode504.h"
@@ -73,20 +75,12 @@ constexpr std::uint16_t kArtifactResetSaleIndex = 5;
  * @return Current time in Unix seconds.
  */
 [[nodiscard]] std::int64_t server_clock_seconds() noexcept {
-    const auto sinceEpoch = std::chrono::system_clock::now().time_since_epoch();
-    return std::chrono::duration_cast<std::chrono::seconds>(sinceEpoch).count();
+    return core::runtime::server_clock_seconds();
 }
 
-/** Issues a strictly increasing family-5 clock, including multiple requests in one second. */
+/** Family-5 publication and item deadlines share the server-issued investment clock. */
 std::uint64_t next_family5_clock() noexcept {
-    static std::atomic<std::uint64_t> issued{0};
-    const auto wall = static_cast<std::uint64_t>(server_clock_seconds());
-    std::uint64_t previous = issued.load(std::memory_order_relaxed);
-    std::uint64_t next = 0;
-    do {
-        next = wall > previous ? wall : previous + 1;
-    } while (!issued.compare_exchange_weak(previous, next, std::memory_order_relaxed));
-    return next;
+    return core::runtime::next_family5_clock_seconds();
 }
 
 /** Records the authoritative world state carried by the client's character write-back. */
@@ -306,7 +300,8 @@ bool consume(std::span<const std::byte> request,
              std::span<std::byte> response,
              std::size_t& written,
              Outcome& outcome,
-             std::span<const state::account::inventory::PresentedItemRow> presentation) noexcept {
+             std::span<const state::account::inventory::PresentedItemRow> presentation,
+             std::uint16_t previousMoteMask) noexcept {
     written = 0;
     outcome = {};
     middleware::web_service::Message message;
@@ -321,10 +316,13 @@ bool consume(std::span<const std::byte> request,
     }
     if (message.opcode == middleware::web_service::messages::opcode205::kOpcode) {
         state::InvestmentState investment{};
-        return (state::investment_snapshot(investment)
-                && middleware::web_service::messages::opcode205::encode_response(
-                    message, investment, next_family5_clock(), response, written))
-               || encode_echo(message, response, written);
+        if (!(state::investment_snapshot(investment, previousMoteMask)
+              && middleware::web_service::messages::opcode205::encode_response(
+                  message, investment, next_family5_clock(), response, written)))
+            return encode_echo(message, response, written);
+        outcome.hasPublishedMoteMask = true;
+        outcome.publishedMoteMask = investment.moteOwnershipMask;
+        return true;
     }
 
     if (message.opcode == middleware::web_service::messages::opcode503::kOpcode) {
@@ -337,11 +335,13 @@ bool consume(std::span<const std::byte> request,
             bootstrap.primarySoid = state::account_snapshot().primarySoid;
         }
         state::InvestmentState investment{};
-        if (!parsed || !state::investment_snapshot(investment)
+        if (!parsed || !state::investment_snapshot(investment, previousMoteMask)
             || !middleware::web_service::messages::opcode503::encode_response(
                 message, bootstrap, investment, next_family5_clock(), response, written)) {
             return encode_echo(message, response, written);
         }
+        outcome.hasPublishedMoteMask = true;
+        outcome.publishedMoteMask = investment.moteOwnershipMask;
         if (bootstrap.hasPrimarySoid && !state::set_primary_soid(bootstrap.primarySoid)) {
             core::log::write(core::log::Channel::server,
                              core::log::Level::warn,
@@ -419,6 +419,8 @@ bool consume(std::span<const std::byte> request,
         purchase_item(message, outcome);
     } else if (message.opcode == middleware::web_service::messages::opcode904::kOpcode) {
         acquire_quest(message, outcome);
+    } else if (message.opcode == middleware::web_service::messages::opcode405::kOpcode) {
+        claim_postmaster_item(message, outcome);
     } else {
         dispatched = false;
     }

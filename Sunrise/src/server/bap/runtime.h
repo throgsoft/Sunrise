@@ -18,6 +18,9 @@
 
 namespace sunrise::server::bap {
 
+/** Schedules a full persisted account image on every active Family-4 peer. */
+void request_account_resync() noexcept;
+
 /** Makes the next investment refresh pump take one more slice. */
 using InvestmentSliceConsumer = void (*)() noexcept;
 

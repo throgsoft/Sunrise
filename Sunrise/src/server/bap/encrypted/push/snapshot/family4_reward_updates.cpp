@@ -6,6 +6,7 @@
 #include <optional>
 #include <span>
 
+#include "../../../../../core/logging/log.h"
 #include "../../../../../middleware/datagen/definitions.h"
 #include "../../../../../middleware/datagen/family4/account/account_encoder.h"
 #include "../../../../../middleware/datagen/family4/account/layout.h"
@@ -14,12 +15,76 @@
 #include "../../../../../state/build_data/runtime.h"
 #include "../../../../../state/runtime/runtime.h"
 #include "../../queuez/queuez_state_validation.h"
+#include "dawning_oven_projection.h"
 #include "internal.h"
 #include "snapshot_storage.h"
 
 namespace sunrise::server::bap::encrypted::push::snapshot {
 
 namespace family4_datagen = middleware::datagen::family4;
+
+namespace {
+/** Definition/socket replacements retain their QueueZ key but need a new instance payload. */
+bool append_changed_inventory_instances(
+    const state::CharacterState& beforeCharacter,
+    const state::CharacterState& afterCharacter,
+    const queuez::SessionState& beforeSession,
+    const queuez::SessionState& afterSession,
+    std::uint32_t instanceDefinitionId,
+    const family4_datagen::loadout::ResolvedLoadout& loadout,
+    family4_datagen::loadout::ResolvedInstances& output) noexcept {
+    if (beforeCharacter.inventory.count > beforeCharacter.inventory.values.size()
+        || afterCharacter.inventory.count > afterCharacter.inventory.values.size()
+        || beforeSession.family4ResidentCount > beforeSession.family4Residents.size()
+        || afterSession.family4ResidentCount > afterSession.family4Residents.size()
+        || loadout.itemCount > loadout.items.size() || output.itemCount > output.items.size())
+        return false;
+    for (std::size_t i = 0; i < afterCharacter.inventory.count; ++i) {
+        const auto& held = afterCharacter.inventory.values[i];
+        const state::account::inventory::Item* prior = nullptr;
+        for (std::size_t j = 0; j < beforeCharacter.inventory.count; ++j) {
+            const auto& candidate = beforeCharacter.inventory.values[j];
+            if (candidate.instanceSoid != held.instanceSoid) continue;
+            if (prior) return false;
+            prior = &candidate;
+        }
+        if (!prior
+            || (held.definitionHash == prior->definitionHash
+                && held.sockets.policy == prior->sockets.policy
+                && held.sockets.plugCount == prior->sockets.plugCount
+                && held.sockets.plugs == prior->sockets.plugs))
+            continue;
+        const auto resident_matches = [&](const queuez::SessionState& session) noexcept {
+            std::size_t matches = 0;
+            for (std::size_t j = 0; j < session.family4ResidentCount; ++j) {
+                const auto& resident = session.family4Residents[j];
+                if (resident.objectSoid == held.instanceSoid
+                    && resident.definitionId == instanceDefinitionId)
+                    ++matches;
+            }
+            return matches == 1;
+        };
+        if (!resident_matches(beforeSession) || !resident_matches(afterSession)) return false;
+        // An objective update may already have appended this survivor's complete after-image.
+        bool present = false;
+        for (std::size_t j = 0; j < output.itemCount; ++j)
+            present |= output.items[j].instance.instanceSoid == held.instanceSoid;
+        if (present) continue;
+        bool found = false;
+        for (std::size_t j = 0; j < loadout.itemCount; ++j) {
+            const auto& item = loadout.items[j];
+            if (item.instance.instanceSoid != held.instanceSoid) continue;
+            if (found || item.equipped || item.mutationSerial != held.mutationSerial
+                || output.itemCount == output.items.size())
+                return false;
+            output.items[output.itemCount++] = {item.equipmentSlot, item.instance};
+            found = true;
+        }
+        if (!found) return false;
+    }
+    return true;
+}
+} // namespace
 
 /** Builds one atomic Season package update with one acquisition record per granted item. */
 bool prepare_season_pass_package(
@@ -217,7 +282,9 @@ bool prepare_record_reward_grant(
     Prepared& prepared) noexcept {
     namespace account_layout = family4_datagen::account::layout;
     namespace character_layout = family4_datagen::character::layout;
-    if (!mutation.prepared || mutation.rewardCount == 0
+    const auto released = state::released_reward_source(mutation);
+    const std::size_t removed = released != 0;
+    if (!mutation.prepared || (mutation.rewardCount == 0 && !mutation.pursuitRedemption)
         || mutation.rewardCount > mutation.rewards.size() || !queuez::valid(before)
         || !queuez::valid(update.after) || !before.family4Active || before.family4ResidentCount == 0
         || before.family4Version == (std::numeric_limits<std::int32_t>::max)()
@@ -227,7 +294,8 @@ bool prepare_record_reward_grant(
         || update.after.family4Version != before.family4Version + 1
         || update.appendedResidentCount > mutation.rewardCount
         || update.after.family4ResidentCount
-               != before.family4ResidentCount + update.appendedResidentCount
+               != before.family4ResidentCount - removed + update.appendedResidentCount
+        || update.releasedInstanceSoid != released
         || update.accountDefinitionId != before.family4Residents.front().definitionId
         || update.characterDefinitionId == 0 || update.itemInstanceDefinitionId == 0) {
         return report_failure("record_reward_session");
@@ -293,12 +361,26 @@ bool prepare_record_reward_grant(
         return report_failure("record_reward_resident_count");
     }
     for (std::size_t index = 0; index < residents.itemCount; ++index) {
-        const auto& expected = update.after.family4Residents[before.family4ResidentCount + index];
+        const auto& expected =
+            update.after.family4Residents[before.family4ResidentCount - removed + index];
         if (expected.objectSoid != residents.items[index].instance.instanceSoid
             || expected.definitionId != update.itemInstanceDefinitionId) {
             return report_failure("record_reward_resident_order");
         }
     }
+    // Identity additions above remain in their QueueZ order. Existing bounty tails follow
+    // them in the same update without incrementing appendedResidentCount.
+    if (!dawning::append_changed_objectives(
+            mutation.beforeCharacter, mutation.afterCharacter, selected.loadout, residents))
+        return report_failure("record_reward_objective_items");
+    if (!append_changed_inventory_instances(mutation.beforeCharacter,
+                                            mutation.afterCharacter,
+                                            before,
+                                            update.after,
+                                            update.itemInstanceDefinitionId,
+                                            selected.loadout,
+                                            residents))
+        return report_failure("record_reward_changed_instances");
 
     const Reservation reservation = reserve_prior(scratch, prepared);
     if (reservation.rawWriteOffset > scratch.plaintext.size()
@@ -326,6 +408,10 @@ bool prepare_record_reward_grant(
         clear_after(scratch, reservation);
         return report_failure("record_reward_residents");
     }
+    if (released) {
+        staged.objects[residentCursor++] = middleware::queuez::Object{
+            update.itemInstanceDefinitionId, released, middleware::queuez::Encoding::oodle, {}};
+    }
 
     const auto characterBytes = rawStorage.first(character_layout::kObjectSize);
     const state::CharacterState& character = account.characters[mutation.characterIndex];
@@ -346,7 +432,8 @@ bool prepare_record_reward_grant(
     std::size_t characterChanges = 0;
     for (std::size_t rewardIndex = 0; rewardIndex < mutation.rewardCount; ++rewardIndex) {
         const state::PreparedRecordReward& reward = mutation.rewards[rewardIndex];
-        if (reward.kind == state::RecordRewardKind::profileStack) {
+        if (reward.kind == state::RecordRewardKind::profileStack
+            || reward.kind == state::RecordRewardKind::accountMaterial) {
             continue;
         }
         state::build_data::items::Definition definition{};
@@ -384,6 +471,8 @@ bool prepare_record_reward_grant(
         change.flags = kChangeFlags;
         ++characterChanges;
     }
+    // Ingredient balances commit here. Their durable pickup queue publishes separately
+    // after the native FIFO has room, with one acquisition record per actual row.
     characterObject.inventoryChanges.writeSlot = static_cast<std::uint16_t>(characterChanges);
     characterObject.inventoryChanges.nextSequence = static_cast<std::uint16_t>(characterChanges);
     if (!apply_acquisition_presentation(
@@ -407,6 +496,10 @@ bool prepare_record_reward_grant(
         return report_failure("record_reward_account_encode");
     }
     auto& accountObject = *reinterpret_cast<account_layout::Object*>(accountBytes.data());
+    if (mutation.afterDawning && !dawning::project_banks(*mutation.afterDawning, accountObject)) {
+        clear_after(scratch, reservation);
+        return report_failure("record_reward_material_banks");
+    }
     if (accountObject.profileInventoryChanges.writeSlot != 0
         || accountObject.profileInventoryChanges.nextSequence != 0
         || !std::all_of(accountObject.profileInventoryChanges.records.cbegin(),
@@ -480,6 +573,13 @@ bool prepare_record_reward_grant(
         clear_after(scratch, reservation);
         return report_failure("record_reward_commit");
     }
+    if (mutation.afterDawning)
+        core::log::writef(core::log::Channel::server,
+                          core::log::Level::info,
+                          "ev=dawning_pickup stage=queued revision=%d character_changes=%zu "
+                          "source=durable_queue",
+                          update.after.family4Version,
+                          characterChanges);
     return true;
 }
 

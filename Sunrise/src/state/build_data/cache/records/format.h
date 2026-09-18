@@ -30,8 +30,12 @@ namespace sunrise::state::build_data::cache::records {
 
 /** These 8 ASCII bytes mark a Sunrise build-data file. */
 inline constexpr std::array<char, 8> kCacheMagic{'S', 'U', 'N', 'R', 'I', 'S', 'E', 'B'};
-/** Bump when stored layouts or extracted values change; other versions are rebuilt. */
-inline constexpr std::uint32_t kCacheFormatVersion = 65;
+/**
+ * Current build-data cache format. Any other version on disk is rebuilt rather than read.
+ * Bump it when a stored shape changes or when the extraction filling it changes what it writes,
+ * because a cached row survives a code change and a corrected walk keeps publishing old rows.
+ */
+inline constexpr std::uint32_t kCacheFormatVersion = 70;
 /** Signed -1 on disk means there is no equipment slot. */
 inline constexpr std::int8_t kAbsentEquipmentSlot = -1;
 /** The standard 64-bit FNV-1a offset basis starts the payload checksum. */
@@ -192,8 +196,24 @@ struct MaterialRequirementSetRecord {
         requirements{};
 };
 
+/** Packed disk reward row; runtime Reward has natural alignment and is not embedded here. */
+struct ItemRewardRecord {
+    std::uint16_t itemIndex{};
+    std::uint16_t companionIndex{};
+    std::int32_t quantity{};
+};
+
 /** Disk form of the supported item fields instance generation uses. */
 struct ItemDetailRecord {
+    std::uint8_t acquireEffectKnown{};
+    std::uint16_t acquireEffectIndex{};
+    std::uint16_t acquiredFlagSlot{0xFFFFU};
+    std::uint16_t acquiredAccountFlag{0xFFFFU};
+    std::uint8_t rewardCount{};
+    std::array<ItemRewardRecord, items::details::kRewardCapacity> rewards{};
+    std::uint8_t objectiveCount{};
+    std::array<std::uint16_t, items::details::kObjectiveCapacity> objectiveIndices{};
+    std::int32_t lifetimeSeconds{};
     std::uint16_t definitionIndex{};
     std::uint8_t bucketId{};
     std::int8_t equipmentSlot{kAbsentEquipmentSlot};
@@ -270,7 +290,7 @@ struct InventoryBucketRecord {
     std::uint16_t firstSlot{};
     std::uint16_t slotCount{};
     std::int8_t equipmentSlot{inventory::buckets::kUnavailableEquipmentSlot};
-    std::uint8_t reserved{};
+    std::uint8_t policyFlags{};
 };
 
 /** Disk form of the buckets one subclass publishes under one ability selection. */
@@ -291,6 +311,7 @@ struct AbilityBucketRecord {
 
 /** Disk form of one progression definition, the object array it routes to, and its step range. */
 struct ProgressionRecord {
+    std::uint32_t definitionHash{};
     std::uint16_t definitionIndex{};
     std::uint16_t stepOffset{};
     std::uint8_t stepCount{};
@@ -544,6 +565,9 @@ struct VendorDefinitionRecord {
     std::uint16_t installedCount{};
     std::uint16_t saleCount{};
     std::uint16_t thirdCount{};
+    std::uint8_t transferRulesAvailable{};
+    std::uint8_t transferRuleCount{};
+    std::array<std::uint8_t, vendors::kTransferRuleCapacity * 2> transferRules{};
 };
 
 /** Disk form of one vendor sale row. */
@@ -555,6 +579,14 @@ struct VendorSaleRowRecord {
     std::uint16_t costItemIndex{};
     /** Must be zero, so the packed sale row always matches. */
     std::uint16_t reserved{};
+    std::int32_t quantity{};
+    std::uint16_t costCount{};
+    std::uint16_t purchaseUnlockSlot{0xFFFFU};
+    std::uint8_t costIsConstant{};
+    std::uint8_t purchaseGate{};
+    /** Native RefundPolicy byte; version 70 assigns one formerly reserved byte. */
+    std::uint8_t refundPolicy{};
+    std::uint8_t reservedStore{};
 };
 
 /** Disk form of one vendor category row. */
@@ -587,8 +619,9 @@ static_assert(sizeof(SpawnPointRecord)
                      + sizeof(std::uint16_t) + 2 * sizeof(std::uint8_t));
 static_assert(sizeof(VendorIndexRecord) == 2 * sizeof(std::uint32_t) + 2 * sizeof(std::uint16_t));
 static_assert(sizeof(VendorDefinitionRecord)
-              == 14 * sizeof(std::uint32_t) + 4 * sizeof(std::uint16_t));
-static_assert(sizeof(VendorSaleRowRecord) == 4 * sizeof(std::uint16_t) + 2 * sizeof(std::uint32_t));
+              == 14 * sizeof(std::uint32_t) + 4 * sizeof(std::uint16_t) + 2
+                     + vendors::kTransferRuleCapacity * 2);
+static_assert(sizeof(VendorSaleRowRecord) == 28);
 static_assert(sizeof(VendorInstalledRowRecord) == sizeof(std::uint32_t));
 static_assert(sizeof(HashNameRecord)
               == hash_names::kNameLength + sizeof(std::uint32_t) + 4 * sizeof(std::uint8_t));
@@ -614,7 +647,8 @@ static_assert(sizeof(RosterGroupRecord)
               == 2 * sizeof(std::uint32_t) + sizeof(std::uint16_t)
                      + 2 * scenarios::kRosterSlotCapacity * sizeof(std::uint8_t)
                      + scenarios::kRosterSlotCapacity * sizeof(std::uint16_t));
-static_assert(sizeof(ProgressionRecord) == 2 * sizeof(std::uint16_t) + 2 * sizeof(std::uint8_t));
+static_assert(sizeof(ProgressionRecord)
+              == sizeof(std::uint32_t) + 2 * sizeof(std::uint16_t) + 2 * sizeof(std::uint8_t));
 static_assert(sizeof(ProgressionStepRecord) == sizeof(std::int32_t));
 static_assert(sizeof(SeasonPassRewardRecord)
               == 2 * sizeof(std::uint32_t) + 2 * sizeof(std::uint16_t) + 4 * sizeof(std::uint8_t));
@@ -653,9 +687,13 @@ static_assert(sizeof(MaterialRequirementSetRecord)
               == sizeof(std::uint32_t) + sizeof(std::uint16_t) + 2 * sizeof(std::uint8_t)
                      + material_requirements::kRequirementCapacity
                            * sizeof(MaterialRequirementRecord));
+static_assert(sizeof(ItemRewardRecord) == 2 * sizeof(std::uint16_t) + sizeof(std::int32_t));
 static_assert(sizeof(ItemDetailRecord)
-              == 7 * sizeof(std::uint16_t) + 8 * sizeof(std::uint8_t) + sizeof(std::int32_t)
-                     + sizeof(std::uint32_t)
+              == 3 * sizeof(std::uint8_t) + sizeof(std::uint16_t)
+                     + items::details::kRewardCapacity * sizeof(ItemRewardRecord)
+                     + items::details::kObjectiveCapacity * sizeof(std::uint16_t)
+                     + sizeof(std::int32_t) + 9 * sizeof(std::uint16_t) + 8 * sizeof(std::uint8_t)
+                     + sizeof(std::int32_t) + sizeof(std::uint32_t)
                      + 2 * items::details::kInitialPlugCapacity * sizeof(std::uint16_t)
                      + items::details::kStatCapacity * (sizeof(std::uint8_t) + sizeof(std::int32_t))
                      + items::details::kSandboxPerkCapacity * sizeof(std::uint16_t)

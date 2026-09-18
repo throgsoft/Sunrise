@@ -14,6 +14,7 @@ inline constexpr std::size_t kInstalledArrayDescriptor = 32;
 inline constexpr std::size_t kSaleArrayDescriptor = 48;
 /** A vendor definition holds its unnamed third array descriptor here. */
 inline constexpr std::size_t kThirdArrayDescriptor = 80;
+inline constexpr std::size_t kTransferArrayDescriptor = 96;
 /** Raw reset interval. Its unit, epoch and scope are open, so it is stored unconverted. */
 inline constexpr std::size_t kResetIntervalOffset = 20;
 /** Raw reset phase, paired with the interval. */
@@ -29,6 +30,8 @@ inline constexpr std::size_t kSaleCostQuantityOffset = 4;
 inline constexpr std::size_t kSaleItemIndexOffset = 70;
 /** Sale row vendor category index. */
 inline constexpr std::size_t kSaleCategoryIndexOffset = 100;
+/** Sale row raw refund policy byte. */
+inline constexpr std::size_t kSaleRefundPolicyOffset = 154;
 /** Sale row secondary item-definition index. */
 inline constexpr std::size_t kSaleSecondaryItemOffset = 176;
 /** A category row names its item by definition hash at this offset. */

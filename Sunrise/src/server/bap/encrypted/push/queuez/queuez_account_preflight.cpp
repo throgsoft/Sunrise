@@ -3,6 +3,7 @@
 #include <cstdio>
 
 #include "../../../../../core/logging/log.h"
+#include "../../../../../state/runtime/dawning_default_oven_runtime.h"
 #include "../../../../../state/runtime/runtime.h"
 #include "../../internal.h"
 
@@ -11,6 +12,11 @@ namespace {
 
 /** Set once the verdict can no longer change, so later frames skip the state lock. */
 std::atomic<bool> g_settled{false};
+/** Diagnostic suppression only; the durable per-character marker decides whether to grant. */
+std::atomic<state::DefaultInventoryBootstrapStatus> g_ovenStatus{
+    state::DefaultInventoryBootstrapStatus::notReady};
+std::atomic<state::DefaultInventoryBootstrapStatus> g_containerStatus{
+    state::DefaultInventoryBootstrapStatus::notReady};
 
 /**
  * Reports one preflight that left the account uncanonical.
@@ -33,6 +39,32 @@ void report(core::log::Level level, const char* reason) noexcept {
 
 /** Canonicalizes the account before any family image is allowed to read it. */
 void ensure_account_canonical() noexcept {
+    // Seed all character slots before the initial snapshot, even before a character is picked.
+    // Durable per-character markers preserve later discards across requests and restarts.
+    const auto oven = state::ensure_default_dawning_oven();
+    const auto previous = g_ovenStatus.exchange(oven.status, std::memory_order_relaxed);
+    if (oven.status == state::DefaultInventoryBootstrapStatus::refused && previous != oven.status) {
+        report(core::log::Level::warn, "default_oven_refused");
+    }
+    if (oven.changed) {
+        core::log::write(core::log::Channel::server,
+                         core::log::Level::info,
+                         "ev=queuez stage=default_oven result=granted");
+    }
+    const auto containers = state::ensure_default_activity_containers();
+    const auto previousContainers =
+        g_containerStatus.exchange(containers.status, std::memory_order_relaxed);
+    if (containers.status == state::DefaultInventoryBootstrapStatus::refused
+        && previousContainers != containers.status) {
+        report(core::log::Level::warn, "default_activity_containers_refused");
+    }
+    if (containers.changed) {
+        core::log::write(core::log::Channel::server,
+                         core::log::Level::info,
+                         "ev=queuez stage=default_activity_containers result=granted");
+    }
+    // State has released SQLite, and the upcoming snapshot reads the committed default items.
+    // Do not reacquire the session lock through the public resync wrapper from this preflight.
     if (g_settled.load(std::memory_order_acquire)) {
         return;
     }

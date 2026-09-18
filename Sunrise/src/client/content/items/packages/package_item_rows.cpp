@@ -193,8 +193,12 @@ bool build_item_rows(const reader::Source& source,
     // malformed row is omitted independently so unrelated Collections categories stay usable.
     if (published && needDetailRows) {
         reason = "details";
-        const DetailSource detailSource{
-            &source, &storage.scratch, container, table, &storage.definition};
+        const DetailSource detailSource{&source,
+                                        &storage.scratch,
+                                        container,
+                                        table,
+                                        &storage.definition,
+                                        storage.slotMaps.accountFlag};
         std::size_t builtDetailCount = 0;
         for (std::size_t slot = 0; slot < detailCount; ++slot) {
             build_details::Definition detail{};

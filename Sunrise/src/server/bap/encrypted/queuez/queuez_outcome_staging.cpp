@@ -105,12 +105,17 @@ bool stage_service_outcome(Scratch& scratch,
     const auto* changeCharacter = transaction_if<ChangeCharacter>(outcome);
     const auto* selectCharacter = transaction_if<SelectCharacter>(outcome);
     const auto* equipment = transaction_if<EquipmentSwapTransaction>(outcome);
+    const auto* postmasterClaim = transaction_if<PostmasterClaimTransaction>(outcome);
     const auto* subclassSelection = transaction_if<SubclassSelectionTransaction>(outcome);
     const auto* itemState = transaction_if<ItemStateTransaction>(outcome);
     const auto* artifactPurchase = transaction_if<ArtifactPurchaseTransaction>(outcome);
     const auto* socket = transaction_if<SocketPlugTransaction>(outcome);
     const auto* itemDismantle = transaction_if<ItemDismantleTransaction>(outcome);
-    const auto presentationRows = preserveAcquisitionPresentation
+    const auto* reward = transaction_if<RecordRewardGrantTransaction>(outcome);
+    const bool consumesSource = reward && reward->pending
+                                && (reward->pending->pursuitRedemption.has_value()
+                                    || state::released_reward_source(*reward->pending) != 0);
+    const auto presentationRows = preserveAcquisitionPresentation && !consumesSource
                                       ? acquisitionPresentationRows
                                       : std::span<const AcquisitionPresentationRow>{};
     // Set before the branch chain rather than inside the equipment arm. That arm returns early
@@ -156,6 +161,20 @@ bool stage_service_outcome(Scratch& scratch,
         }
         middleware::secure_channel::advance_nonce(nonce);
         after = changeCharacter->after;
+    } else if (postmasterClaim != nullptr) {
+        const auto& update = postmasterClaim->update;
+        if (!postmasterClaim->pending || !valid(update.after)
+            || update.characterSoid != postmasterClaim->pending->characterSoid
+            || update.after.family4RootSoid != before.family4RootSoid
+            || before.family4Version == (std::numeric_limits<std::int32_t>::max)()
+            || update.after.family4Version != before.family4Version + 1
+            || !push::append_postmaster_claim_notification(
+                scratch, update, *postmasterClaim->pending, key, nonce, response, written))
+            return false;
+        middleware::secure_channel::advance_nonce(nonce);
+        after = update.after;
+        publication.updatesAcquisitionPresentationRows = true;
+        publication.acquisitionPresentationRowCount = 0;
     } else if (equipment != nullptr) {
         // Body processing already staged this exact after-image so the correlated opcode-403
         // response could promise its version. Reuse it here; staging a second revision would make
@@ -407,11 +426,16 @@ bool stage_service_outcome(Scratch& scratch,
             removedCount += static_cast<std::size_t>(before.family4Residents[index].objectSoid
                                                      == dismantle.dismantledInstanceSoid);
         }
-        if (!valid(dismantle.after) || removedCount != 1U
+        if (!valid(dismantle.after) || removedCount != (pending.discardedStack ? 0U : 1U)
+            || pending.discardedStack.has_value() != (dismantle.dismantledInstanceSoid == 0)
             || dismantle.accountSoid != pending.accountSoid
             || dismantle.characterSoid != pending.characterSoid
             || dismantle.dismantledInstanceSoid != pending.dismantledInstanceSoid
             || dismantle.updatesAccount != pending.profileChanged
+            || dismantle.releasesInstance != pending.releasesDismantledInstance
+            || dismantle.after.family4ResidentCount
+                       + static_cast<unsigned>(dismantle.releasesInstance)
+                   != before.family4ResidentCount
             || dismantle.accountSoid != before.family4RootSoid || before.family4ResidentCount == 0
             || dismantle.accountDefinitionId != before.family4Residents.front().definitionId
             || dismantle.after.family4RootSoid != before.family4RootSoid

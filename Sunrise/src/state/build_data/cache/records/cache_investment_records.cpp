@@ -61,6 +61,7 @@ bool decode(const AbilityBucketRecord& record, abilities::Definition& value) noe
 /** Encodes one progression definition with its padding zeroed. */
 bool encode(const progressions::Definition& value, ProgressionRecord& record) noexcept {
     record = {
+        value.definitionHash,
         value.definitionIndex,
         value.stepOffset,
         value.stepCount,
@@ -74,7 +75,8 @@ bool decode(const ProgressionRecord& record, progressions::Definition& value) no
     value = {record.definitionIndex,
              record.stepOffset,
              record.stepCount,
-             static_cast<progressions::Scope>(record.scope)};
+             static_cast<progressions::Scope>(record.scope),
+             record.definitionHash};
     return true;
 }
 
@@ -215,24 +217,22 @@ bool decode(const RecordRewardRecord& record, build_data::records::Reward& value
 
 /** Encodes one record with its padding zeroed. */
 bool encode(const build_data::records::Definition& value, RecordDefinitionRecord& record) noexcept {
-    record = {
-        value.definitionIndex,
-        value.definitionHash,
-        value.completionFlagIndex,
-        value.loreRow,
-        value.scoreValue,
-        value.categoryValueIndex,
-        value.objectiveValueIndex,
-        value.objectiveOffset,
-        value.intervalOffset,
-        value.rewardOffset,
-        value.redeemedCountValueIndex,
-        value.objectiveCount,
-        value.intervalCount,
-        value.rewardCount,
-        static_cast<std::uint8_t>(value.hasTitle),
-        0,
-    };
+    record = {};
+    record.definitionIndex = value.definitionIndex;
+    record.definitionHash = value.definitionHash;
+    record.completionFlagIndex = value.completionFlagIndex;
+    record.loreRow = value.loreRow;
+    record.scoreValue = value.scoreValue;
+    record.categoryValueIndex = value.categoryValueIndex;
+    record.objectiveValueIndex = value.objectiveValueIndex;
+    record.objectiveOffset = value.objectiveOffset;
+    record.intervalOffset = value.intervalOffset;
+    record.rewardOffset = value.rewardOffset;
+    record.redeemedCountValueIndex = value.redeemedCountValueIndex;
+    record.objectiveCount = value.objectiveCount;
+    record.intervalCount = value.intervalCount;
+    record.rewardCount = value.rewardCount;
+    record.hasTitle = static_cast<std::uint8_t>(value.hasTitle);
     return true;
 }
 

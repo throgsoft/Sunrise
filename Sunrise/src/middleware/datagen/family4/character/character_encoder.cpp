@@ -2,10 +2,12 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cstring>
 #include <limits>
 #include <optional>
 
+#include "../../../../core/logging/log.h"
 #include "../../../../state/build_data/runtime.h"
 #include "../../../../state/unlocks/unlocks_records.h"
 #include "../../../../state/unlocks/unlocks_runtime.h"
@@ -93,6 +95,12 @@ constexpr std::int32_t kOccupiedRowWatermark = 1;
             return false;
         }
         const std::size_t end = static_cast<std::size_t>(bucket.firstSlot) + bucket.slotCount;
+        // Repeated single-use acquisitions occupy distinct FIFO entries. Other character
+        // stacks retain their definition-unique contract until their multi-stack path exists.
+        if ((bucket.policyFlags & state::build_data::inventory::buckets::kFifo) == 0) {
+            for (std::size_t prior = 0; prior < index; ++prior)
+                if (state.stacks.values[prior].definitionHash == stack.definitionHash) return false;
+        }
         std::size_t rowIndex = bucket.firstSlot;
         while (rowIndex < end
                && object.inventoryItems[rowIndex].definitionIndex != kEmptyDefinitionIndex) {
@@ -116,10 +124,12 @@ constexpr std::int32_t kOccupiedRowWatermark = 1;
  * Places collectible prerequisites in the character quest bucket. These stackable rows need no
  * item-instance resident.
  */
-[[nodiscard]] bool place_collectible_quest_items(layout::Object& object) noexcept {
+[[nodiscard]] bool place_collectible_quest_items(layout::Object& object,
+                                                 bool requireSpace) noexcept {
     std::optional<std::uint8_t> questBucketId;
     std::size_t nextRow = 0;
     std::size_t rowLimit = 0;
+    std::uint32_t deferred = 0;
     for (const CollectibleQuest& quest : kCollectibleQuests) {
         if (quest.completionFlag != 0
             && (state::unlocks::records::claimed(quest.completionFlag)
@@ -147,7 +157,7 @@ constexpr std::int32_t kOccupiedRowWatermark = 1;
             questBucketId = item.bucketId;
             nextRow = bucket.firstSlot;
             rowLimit = bucket.firstSlot + bucket.slotCount;
-        } else if (*questBucketId != item.bucketId || nextRow >= rowLimit) {
+        } else if (*questBucketId != item.bucketId) {
             return false;
         }
         while (nextRow < rowLimit
@@ -155,7 +165,11 @@ constexpr std::int32_t kOccupiedRowWatermark = 1;
             ++nextRow;
         }
         if (nextRow >= rowLimit) {
-            return false;
+            if (requireSpace) return false;
+            // Older grants checked only instanced rows. Do not make their saved inventory
+            // unreadable because a synthesized prerequisite has no remaining display slot.
+            ++deferred;
+            continue;
         }
 
         inventory::layout::Entry& row = object.inventoryItems[nextRow];
@@ -165,6 +179,16 @@ constexpr std::int32_t kOccupiedRowWatermark = 1;
                                                            << (nextRow % kBitsPerFlagByte);
         object.instanceProgressWatermarks[nextRow] = kOccupiedRowWatermark;
         ++nextRow;
+    }
+    if (!requireSpace) {
+        static std::atomic<std::uint32_t> lastDeferred{};
+        if (lastDeferred.exchange(deferred) != deferred) {
+            core::log::writef(
+                core::log::Channel::middleware,
+                core::log::Level::warn,
+                "ev=character_inventory synthetic_quests_deferred=%u owned_items=preserved",
+                deferred);
+        }
     }
     return true;
 }
@@ -240,10 +264,12 @@ summary_matches_loadout(const loadout::ResolvedLoadout& resolvedLoadout,
 bool encode(const state::CharacterState& state,
             const loadout::ResolvedLoadout& resolvedLoadout,
             const state::equipment::light::Evaluation& lightEvaluation,
-            std::span<std::byte> output) noexcept {
+            std::span<std::byte> output,
+            bool requireCollectibleSpace) noexcept {
     state::unlocks::Table unlocks;
     return state::unlocks::snapshot(unlocks)
-           && encode(state, resolvedLoadout, lightEvaluation, output, unlocks);
+           && encode(
+               state, resolvedLoadout, lightEvaluation, output, unlocks, requireCollectibleSpace);
 }
 
 /**
@@ -253,13 +279,16 @@ bool encode(const state::CharacterState& state,
  * @param lightEvaluation Equipment light values for the same loadout.
  * @param output Receives the character object; unchanged on failure.
  * @param unlocks Unlock snapshot for this character, including any prepared quest value.
+ * @param requireCollectibleSpace Reserve every synthetic prerequisite rather than deferring the
+ * rows that do not fit.
  * @return False when state, mappings, light values, or output bounds are invalid.
  */
 bool encode(const state::CharacterState& state,
             const loadout::ResolvedLoadout& resolvedLoadout,
             const state::equipment::light::Evaluation& lightEvaluation,
             std::span<std::byte> output,
-            const state::unlocks::Table& unlocks) noexcept {
+            const state::unlocks::Table& unlocks,
+            bool requireCollectibleSpace) noexcept {
     if (!valid(state) || !valid(resolvedLoadout)
         || !summary_matches_loadout(resolvedLoadout, lightEvaluation)
         || output.size() < layout::kObjectSize) {
@@ -338,7 +367,8 @@ bool encode(const state::CharacterState& state,
             object.equippedInstanceSoids[item.equipmentSlot] = item.instance.instanceSoid;
         }
     }
-    if (!place_character_stacks(state, object) || !place_collectible_quest_items(object)) {
+    if (!place_character_stacks(state, object)
+        || !place_collectible_quest_items(object, requireCollectibleSpace)) {
         return false;
     }
 

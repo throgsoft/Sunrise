@@ -34,6 +34,8 @@ struct Family5State {
 /** Account-wide evaluated content state. */
 struct InvestmentState {
     Family5State family5;
+    /** Cumulative Mote override publication history; not encoded or persisted. */
+    std::uint16_t moteOwnershipMask{};
 };
 
 } // namespace sunrise::state

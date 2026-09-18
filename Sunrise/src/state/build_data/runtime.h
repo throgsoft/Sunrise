@@ -21,6 +21,7 @@
 #include "items/socket_plugs/definition.h"
 #include "material_requirements/material_requirement_catalog.h"
 #include "nodes/definition.h"
+#include "objectives/definition.h"
 #include "progressions/definition.h"
 #include "records/definition.h"
 #include "scenarios/definition.h"
@@ -36,6 +37,17 @@ struct Source;
 }
 
 namespace sunrise::state::build_data {
+
+[[nodiscard]] bool find_progression_definition_hash(std::uint32_t hash,
+                                                    progressions::Definition& output) noexcept;
+/** Objective metadata is read from the installed package on each startup. */
+[[nodiscard]] bool objective_definitions_ready() noexcept;
+[[nodiscard]] std::size_t objective_definition_count() noexcept;
+[[nodiscard]] bool
+publish_objective_definitions(std::span<const objectives::Definition> rows) noexcept;
+[[nodiscard]] bool find_objective_definition(std::uint16_t index,
+                                             objectives::Definition& output) noexcept;
+void clear_objective_definitions() noexcept;
 /** Marks regenerated package data for the next complete shared-cache publication. */
 void invalidate_cache() noexcept;
 

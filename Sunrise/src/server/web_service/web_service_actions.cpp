@@ -16,6 +16,8 @@
 #include "../../state/build_data/items/item_catalog.h"
 #include "../../state/build_data/runtime.h"
 #include "../../state/investment/store_internal.h"
+#include "../../state/runtime/bounty_redemption_runtime.h"
+#include "../../state/runtime/profile_discard.h"
 #include "../../state/runtime/runtime.h"
 #include "internal_actions.h"
 
@@ -267,15 +269,15 @@ void mutate_item_state(const middleware::web_service::Message& message, Outcome&
 void report_item_dismantle(const middleware::web_service::Message& message,
                            std::string_view reason,
                            std::uint64_t instanceSoid,
-                           std::uint32_t definitionIndex,
+                           std::int32_t definitionIndex,
                            std::uint32_t definitionHash,
-                           std::uint32_t quantity) noexcept {
+                           std::int32_t quantity) noexcept {
     std::array<char, core::log::kLineCapacity> line{};
     const int count = std::snprintf(
         line.data(),
         line.size(),
         "ev=ws402 stage=prepare result=fail reason=%.*s transaction=%u payload_bytes=%zu "
-        "instance=0x%llX definition_index=%u definition_hash=0x%08X quantity=%u",
+        "instance=0x%llX definition_index=%d definition_hash=0x%08X observed_quantity=%d",
         static_cast<int>(reason.size()),
         reason.data(),
         static_cast<unsigned>(message.transactionId),
@@ -287,24 +289,108 @@ void report_item_dismantle(const middleware::web_service::Message& message,
     write_warning(line, count);
 }
 
-/** Prepares the exact fixed-width opcode-402 Character-inventory removal request. */
+/** Prepares the fixed-width opcode-402 profile discard or Character-inventory action. */
 void dismantle_item(const middleware::web_service::Message& message, Outcome& outcome) noexcept {
-    middleware::web_service::messages::opcode402::Request request{};
-    if (!middleware::web_service::messages::opcode402::parse_request(message, request)) {
+    namespace opcode402 = middleware::web_service::messages::opcode402;
+    opcode402::Request request{};
+    if (!opcode402::parse_request(message, request)) {
         report_item_dismantle(
             message, "payload_bits", request.instanceSoid, request.definitionIndex, 0, 0);
         return;
     }
+    core::log::writef(core::log::Channel::server,
+                      core::log::Level::info,
+                      "ev=ws402 stage=decode result=ok has_instance=%u instance=0x%llX "
+                      "definition=%d value=%d selector=%d",
+                      request.hasInstance ? 1U : 0U,
+                      static_cast<unsigned long long>(request.instanceSoid),
+                      static_cast<int>(request.definitionIndex),
+                      request.value,
+                      static_cast<int>(request.selector));
+    if (!request.hasInstance && request.instanceSoid == 0 && request.definitionIndex >= 0
+        && request.value > 0 && request.selector >= 0) {
+        state::build_data::items::Definition definition{};
+        state::build_data::inventory::buckets::Descriptor bucket{};
+        const auto definitionIndex = static_cast<std::uint16_t>(request.definitionIndex);
+        const bool resolved =
+            state::build_data::find_item_definition_index(definitionIndex, definition);
+        // The UI selector is not an inventory owner. Installed bucket routing decides whether
+        // this no-instance request names a character quest stack or a profile material.
+        if (resolved
+            && state::build_data::find_inventory_bucket_descriptor(definition.bucketId, bucket)
+            && bucket.arraySelector
+                   == state::build_data::inventory::buckets::ArraySelector::character) {
+            auto* mutation = emplace_mutation<state::PendingItemDismantle>(outcome);
+            const bool staged = mutation
+                                && state::prepare_character_stack_discard(
+                                    definitionIndex, request.value, *mutation);
+            core::log::writef(core::log::Channel::server,
+                              core::log::Level::info,
+                              "ev=ws402 stage=character_stack_discard result=%s definition=%d "
+                              "value=%d selector=%d remaining=%d",
+                              staged ? "prepared" : "refused",
+                              static_cast<int>(request.definitionIndex),
+                              request.value,
+                              static_cast<int>(request.selector),
+                              staged ? request.value - mutation->discardedQuantity : -1);
+            if (!staged) clear_mutation(outcome);
+            return;
+        }
+        auto* mutation = emplace_mutation<state::PendingProfileItemAcquisition>(outcome);
+        if (mutation == nullptr) return;
+        const bool staged =
+            resolved
+            && definition.definitionIndex == static_cast<std::uint16_t>(request.definitionIndex)
+            && state::item_discard::stage(
+                state::account_snapshot(), definition.definitionHash, request.value, *mutation);
+        core::log::writef(core::log::Channel::server,
+                          core::log::Level::info,
+                          "ev=ws402 stage=profile_discard result=%s definition=%d value=%d "
+                          "selector=%d remaining=%d",
+                          staged ? "prepared" : "refused",
+                          static_cast<int>(request.definitionIndex),
+                          request.value,
+                          static_cast<int>(request.selector),
+                          staged ? mutation->acquiredQuantity : -1);
+        if (!staged) clear_mutation(outcome);
+        return;
+    }
+    if (!opcode402::supported_character_action(request)) {
+        report_item_dismantle(message,
+                              "unsupported_form",
+                              request.instanceSoid,
+                              request.definitionIndex,
+                              0,
+                              request.value);
+        return;
+    }
     const std::uint64_t instanceSoid = request.instanceSoid;
-    const std::uint16_t definitionIndex = request.definitionIndex;
-    // The codec owns the value; this alias keeps the dismantle checks below readable.
-    constexpr std::uint32_t kSingleQuantity =
-        middleware::web_service::messages::opcode402::kSingleQuantity;
+    const auto definitionIndex = static_cast<std::uint16_t>(request.definitionIndex);
 
     state::build_data::items::Definition definition{};
     if (!state::build_data::find_item_definition_index(definitionIndex, definition)) {
         report_item_dismantle(
-            message, "definition", instanceSoid, definitionIndex, 0, kSingleQuantity);
+            message, "definition", instanceSoid, definitionIndex, 0, request.value);
+        return;
+    }
+    state::build_data::items::details::Definition detail{};
+    if (!state::build_data::find_configured_item_detail(definitionIndex, detail)) {
+        report_item_dismantle(message, "detail", instanceSoid, definitionIndex, 0, request.value);
+        return;
+    }
+    if (detail.objectiveCount != 0) {
+        auto* reward = emplace_mutation<state::PendingRecordRewardGrant>(outcome);
+        if (!reward
+            || !state::runtime::detail::bounty::prepare_redemption_grant(
+                instanceSoid, request.value, *reward)) {
+            clear_mutation(outcome);
+            report_item_dismantle(message,
+                                  "pursuit_redemption",
+                                  instanceSoid,
+                                  definitionIndex,
+                                  definition.definitionHash,
+                                  request.value);
+        }
         return;
     }
     auto* mutation = emplace_mutation<state::PendingItemDismantle>(outcome);
@@ -314,28 +400,29 @@ void dismantle_item(const middleware::web_service::Message& message, Outcome& ou
                               instanceSoid,
                               definitionIndex,
                               definition.definitionHash,
-                              kSingleQuantity);
+                              request.value);
         return;
     }
-    if (!state::prepare_item_dismantle(instanceSoid, *mutation)) {
+    if (!state::prepare_item_dismantle(instanceSoid, request.value, *mutation)) {
         clear_mutation(outcome);
         report_item_dismantle(message,
                               "state",
                               instanceSoid,
                               definitionIndex,
                               definition.definitionHash,
-                              kSingleQuantity);
+                              request.value);
         return;
     }
     if (mutation->dismantledItem.definitionHash != definition.definitionHash
-        || mutation->dismantledItem.quantity != static_cast<std::int32_t>(kSingleQuantity)) {
+        || mutation->dismantledItem.quantity != request.value
+        || mutation->discardedQuantity != static_cast<std::int32_t>(opcode402::kDiscardQuantity)) {
         clear_mutation(outcome);
         report_item_dismantle(message,
                               "identity",
                               instanceSoid,
                               definitionIndex,
                               definition.definitionHash,
-                              kSingleQuantity);
+                              request.value);
         return;
     }
 }

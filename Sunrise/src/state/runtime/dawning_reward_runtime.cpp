@@ -256,4 +256,36 @@ bool stage_queued_pickups(std::uint64_t characterSoid, std::size_t& acquired) no
     return account::valid(*current) && store::write_account(*current) && transaction.commit();
 }
 
+bool drain_pickups(std::uint64_t characterSoid, std::size_t& removed) noexcept {
+    namespace store = investment::store;
+    removed = 0;
+    store::Transaction transaction;
+    auto current = std::unique_ptr<AccountState>{new (std::nothrow) AccountState};
+    if (!transaction.ready() || !current || !store::read_account(*current)
+        || !account::valid(*current))
+        return false;
+    CharacterState* character = nullptr;
+    for (std::size_t i = 0; i < current->characterCount; ++i)
+        if (current->characters[i].soid == characterSoid) character = &current->characters[i];
+    if (!character || !character->selected) return false;
+    auto& rows = character->stacks;
+    std::size_t retained = 0;
+    for (std::size_t i = 0; i < rows.count; ++i) {
+        const auto& row = rows.values[i];
+        const auto ingredient = identity::ingredient(row.definitionHash);
+        if (ingredient < identity::kIngredientCount
+            && row.definitionHash == identity::kIngredients[ingredient].pickupHash) {
+            buckets::Descriptor bucket{};
+            if (!pickup_bucket(row.definitionHash, bucket) || row.quantity != 1) return false;
+            ++removed;
+        } else {
+            rows.values[retained++] = row;
+        }
+    }
+    if (removed == 0) return transaction.commit();
+    std::fill(
+        rows.values.begin() + retained, rows.values.end(), account::inventory::CharacterStack{});
+    rows.count = retained;
+    return account::valid(*current) && store::write_account(*current) && transaction.commit();
+}
 } // namespace sunrise::state::runtime::detail::dawning

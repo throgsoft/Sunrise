@@ -331,15 +331,6 @@ Result set_objective_lane(std::uint64_t instanceSoid,
     return edit(index, value, lane, false, false, true, instanceSoid);
 }
 
-Result complete_bounty(std::uint16_t index, std::uint32_t expectedHash) noexcept {
-    data::items::Definition item{};
-    data::items::details::Definition detail{};
-    if (!resolve(index, item, detail) || item.definitionHash != expectedHash
-        || detail.bucketId != data::items::kPursuitBucketId || detail.objectiveCount == 0
-        || detail.lifetimeSeconds <= 0)
-        return {false, 0, "installed expiring bounty unavailable"};
-    return edit(index, 0, 0, false, true);
-}
 Result drop_bounties() noexcept {
     return drop(0, DropScope::bounties);
 }

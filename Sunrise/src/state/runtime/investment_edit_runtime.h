@@ -28,8 +28,6 @@ grant_item(std::uint16_t index, std::int32_t quantity, std::uint32_t expectedHas
                                         std::uint16_t index,
                                         std::int32_t value,
                                         std::uint8_t lane) noexcept;
-/** Completes every declared objective of one held installed bounty, preserving its expiry. */
-[[nodiscard]] Result complete_bounty(std::uint16_t index, std::uint32_t expectedHash) noexcept;
 /** Completes the selected character's held, resolved, unexpired bounties; preserves quests. */
 [[nodiscard]] Result complete_bounties() noexcept;
 

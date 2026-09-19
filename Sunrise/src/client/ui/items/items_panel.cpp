@@ -694,7 +694,8 @@ void bounties_tab(const Catalog& data) {
     held_detail(data);
     if (sideBySide) ImGui::EndChild();
 }
-int g_bucketSelected = -1;
+int g_bucketSelected = 0;
+std::size_t g_bucketSelection = 0;
 std::vector<service::BucketSummary> g_buckets{};
 std::vector<service::BucketItem> g_bucketItems{};
 std::vector<int> g_bucketQuantities{};
@@ -720,100 +721,135 @@ void refresh_buckets(bool force) {
 void buckets_tab(const Catalog& data) {
     refresh_buckets(false);
     constexpr std::array<const char*, 3> kArrays{"character", "profile", "small profile"};
-    ImGui::BeginChild("##bucket_list", ImVec2(330.0f, 0.0f), true);
-    for (std::size_t i = 0; i < g_buckets.size(); ++i) {
-        const auto& bucket = g_buckets[i];
-        char label[128]{};
-        std::snprintf(label,
-                      sizeof label,
-                      "%3u  %-13s %2zu/%-3u %s##bucket%zu",
-                      unsigned(bucket.bucketId),
-                      kArrays[bucket.arraySelector < 3U ? bucket.arraySelector : 2U],
-                      bucket.held,
-                      unsigned(bucket.slotCount),
-                      (bucket.policyFlags & 1U) != 0
-                          ? ((bucket.policyFlags & 2U) != 0 ? "FIFO,noXfer" : "FIFO")
-                          : "",
-                      i);
-        if (ImGui::Selectable(label, g_bucketSelected == static_cast<int>(i))) {
-            g_bucketSelected = static_cast<int>(i);
-            refresh_buckets(true);
-        }
-    }
-    ImGui::EndChild();
-    ImGui::SameLine();
-    ImGui::BeginChild("##bucket_contents", ImVec2(0.0f, 0.0f), true);
-    if (g_bucketSelected < 0 || g_bucketSelected >= static_cast<int>(g_buckets.size())) {
-        ImGui::TextDisabled("Select a bucket.");
-        ImGui::EndChild();
+    constexpr float kTile = 64.0f;
+    if (g_buckets.empty()) {
+        ImGui::TextDisabled("No installed buckets.");
         return;
     }
-    const auto& bucket = g_buckets[g_bucketSelected];
-    ImGui::Text("Bucket %u  %s  slots %u..%u",
-                unsigned(bucket.bucketId),
-                kArrays[bucket.arraySelector < 3U ? bucket.arraySelector : 2U],
-                unsigned(bucket.firstSlot),
-                unsigned(bucket.firstSlot + bucket.slotCount));
+    g_bucketSelected = (std::clamp)(g_bucketSelected, 0, static_cast<int>(g_buckets.size()) - 1);
+    const auto label = [&](std::size_t i) {
+        static char text[96];
+        const auto& b = g_buckets[i];
+        std::snprintf(text,
+                      sizeof text,
+                      "%u  %s  %zu/%u%s",
+                      unsigned(b.bucketId),
+                      kArrays[b.arraySelector < 3U ? b.arraySelector : 2U],
+                      b.held,
+                      unsigned(b.slotCount),
+                      (b.policyFlags & 1U) != 0 ? "  FIFO" : "");
+        return text;
+    };
+    ImGui::SetNextItemWidth(320.0f);
+    if (ImGui::BeginCombo("##bucket", label(static_cast<std::size_t>(g_bucketSelected)))) {
+        for (std::size_t i = 0; i < g_buckets.size(); ++i)
+            if (ImGui::Selectable(label(i), g_bucketSelected == static_cast<int>(i))) {
+                g_bucketSelected = static_cast<int>(i);
+                g_bucketSelection = 0;
+                refresh_buckets(true);
+            }
+        ImGui::EndCombo();
+    }
+    const auto& bucket = g_buckets[static_cast<std::size_t>(g_bucketSelected)];
     ImGui::SameLine();
     if (ImGui::Button("Empty bucket")) {
         feedback(service::clear_bucket(bucket.bucketId));
         refresh_buckets(true);
     }
-    ImGui::Separator();
+    ImGui::SameLine();
+    ImGui::TextDisabled(
+        "slots %u..%u", unsigned(bucket.firstSlot), unsigned(bucket.firstSlot + bucket.slotCount));
+
+    const auto& style = ImGui::GetStyle();
+    constexpr std::size_t kColumns = 6;
+    const float gridWidth =
+        kColumns * kTile + (kColumns - 1) * style.ItemSpacing.x + style.WindowPadding.x * 2.0f;
+    const bool sideBySide = ImGui::GetContentRegionAvail().x > gridWidth + 260.0f;
+    const float height = (std::max)(200.0f, ImGui::GetContentRegionAvail().y);
+    ImGui::BeginChild(
+        "##bucket_grid", {sideBySide ? gridWidth : 0.0f, height}, ImGuiChildFlags_Borders);
     if (g_bucketItems.empty()) ImGui::TextDisabled("Nothing held here.");
+    auto* draw = ImGui::GetWindowDrawList();
     for (std::size_t i = 0; i < g_bucketItems.size(); ++i) {
         const auto& item = g_bucketItems[i];
-        const Entry* entry = nullptr;
-        for (const auto& candidate : data.entries)
-            if (candidate.identity.definitionIndex == item.index) entry = &candidate;
+        const auto* entry = find(data, item.index, item.hash);
+        if (i % kColumns != 0) ImGui::SameLine();
         ImGui::PushID(static_cast<int>(i));
-        // The icon cache holds fewer slots than the largest bucket holds rows, so asking for
-        // every one would evict the icons drawn earlier in the same frame.
+        const ImVec2 origin = ImGui::GetCursorScreenPos();
+        const ImVec2 corner{origin.x + kTile, origin.y + kTile};
+        const bool chosen = g_bucketSelection == i + 1;
+        if (ImGui::Selectable("##cell", chosen, 0, {kTile, kTile})) g_bucketSelection = i + 1;
+        // The icon cache holds fewer slots than the largest bucket holds rows.
         constexpr std::size_t kBucketIconBudget = 48;
         const auto texture =
             entry && i < kBucketIconBudget ? icons::get(entry->iconIndex) : ImTextureID_Invalid;
-        const float side = ImGui::GetFrameHeight() * 1.6f;
-        const ImVec2 origin = ImGui::GetCursorScreenPos();
-        ImGui::Dummy({side, side});
         if (texture != ImTextureID_Invalid)
-            ImGui::GetWindowDrawList()->AddImage(
-                ImTextureRef(texture), origin, {origin.x + side, origin.y + side});
+            draw->AddImage(ImTextureRef(texture), origin, corner);
         else
-            ImGui::GetWindowDrawList()->AddRect(origin,
-                                                {origin.x + side, origin.y + side},
-                                                ImGui::GetColorU32(ImGuiCol_TextDisabled));
-        ImGui::SameLine();
-        ImGui::BeginGroup();
-        ImGui::Text("%s", entry && !entry->name.empty() ? entry->name.c_str() : "(unnamed)");
-        ImGui::SameLine();
-        ImGui::TextDisabled("idx=%u serial=%d%s",
-                            unsigned(item.index),
-                            item.mutationSerial,
-                            item.equipped ? " equipped" : "");
-        ImGui::SetNextItemWidth(110.0f);
+            draw->AddRect(origin, corner, ImGui::GetColorU32(ImGuiCol_TextDisabled));
+        if (item.equipped)
+            draw->AddRect(origin, corner, IM_COL32(220, 200, 120, 255), 0.0f, 0, 2.0f);
+        if (chosen)
+            draw->AddRect(origin, corner, ImGui::GetColorU32(ImGuiCol_NavCursor), 0.0f, 0, 2.0f);
+        if (item.quantity > 1) {
+            char count[16]{};
+            std::snprintf(count, sizeof count, "%d", item.quantity);
+            draw->AddText({origin.x + 4.0f, corner.y - ImGui::GetTextLineHeight() - 2.0f},
+                          IM_COL32_WHITE,
+                          count);
+        }
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip(
+                "%u  %s", unsigned(item.index), entry ? name(*entry) : "Metadata unavailable");
+        ImGui::PopID();
+    }
+    ImGui::EndChild();
+    if (sideBySide) {
+        ImGui::SameLine(0, style.ItemSpacing.x);
+        ImGui::BeginChild("##bucket_detail", {0, height}, ImGuiChildFlags_Borders);
+    }
+    if (g_bucketSelection == 0 || g_bucketSelection > g_bucketItems.size()) {
+        ImGui::TextDisabled("Select an item.");
+    } else {
+        const auto slot = g_bucketSelection - 1;
+        const auto& item = g_bucketItems[slot];
+        const auto* entry = find(data, item.index, item.hash);
+        if (entry) {
+            icon(*entry, 72.0f);
+            ImGui::Text("%s", name(*entry));
+            if (!entry->itemType.empty()) ImGui::TextDisabled("%s", entry->itemType.c_str());
+        } else {
+            ImGui::Text("Item %u", unsigned(item.index));
+        }
+        ImGui::Separator();
+        ImGui::TextDisabled("idx=%u  serial=%d", unsigned(item.index), item.mutationSerial);
+        if (item.instance != 0)
+            ImGui::TextDisabled("instance 0x%016llX",
+                                static_cast<unsigned long long>(item.instance));
+        if (item.equipped) ImGui::TextDisabled("equipped");
+        ImGui::Spacing();
         ImGui::BeginDisabled(item.equipped);
-        ImGui::InputInt("##qty", &g_bucketQuantities[i]);
-        g_bucketQuantities[i] =
-            (std::clamp)(g_bucketQuantities[i], 0, (std::max)(1, item.maxStack));
+        ImGui::SetNextItemWidth(160.0f);
+        ImGui::InputInt("##qty", &g_bucketQuantities[slot], 0, 0);
+        g_bucketQuantities[slot] =
+            (std::clamp)(g_bucketQuantities[slot], 0, (std::max)(1, item.maxStack));
         ImGui::SameLine();
-        if (ImGui::Button("Set")) {
-            feedback(service::set_item_quantity(item.instance, item.index, g_bucketQuantities[i]));
+        ImGui::TextDisabled("of %d", (std::max)(1, item.maxStack));
+        if (ImGui::Button("Set quantity")) {
+            feedback(
+                service::set_item_quantity(item.instance, item.index, g_bucketQuantities[slot]));
             refresh_buckets(true);
         }
         ImGui::SameLine();
         if (ImGui::Button("Delete")) {
             feedback(service::set_item_quantity(item.instance, item.index, 0));
+            g_bucketSelection = 0;
             refresh_buckets(true);
         }
         ImGui::EndDisabled();
-        ImGui::SameLine();
-        ImGui::TextDisabled("of %d", (std::max)(1, item.maxStack));
-        ImGui::EndGroup();
-        ImGui::PopID();
     }
-    ImGui::EndChild();
+    if (sideBySide) ImGui::EndChild();
 }
-
 void clear_tab() {
     ImGui::TextWrapped("Drops every held item in the chosen scope. Equipped items are kept.");
     ImGui::BeginDisabled(!g_inventory.ready);

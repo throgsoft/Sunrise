@@ -6,6 +6,7 @@
 #include <memory>
 
 #include "../../../core/runtime/wall_clock.h"
+#include "../../../middleware/datagen/family4/loadout/loadout_item_resolver.h"
 #include "../../../server/bap/runtime.h"
 #include "../../../state/build_data/items/quest_initialization.h"
 #include "../../../state/build_data/pursuits/pursuit_progress.h"
@@ -314,13 +315,20 @@ std::vector<BucketItem> bucket_items(std::uint8_t bucketId) noexcept {
         const std::unique_ptr<state::AccountState> account(
             new state::AccountState(state::account_snapshot()));
         if (!state::account::valid(*account)) return output;
+        // Nothing declares the Postmaster as its home: rows arrive there by placement when their
+        // own bucket is full, so it is listed by that flag rather than by declared identity.
+        data::inventory::buckets::Descriptor postmaster{};
+        const bool postmasterBucket =
+            middleware::datagen::family4::loadout::resolve_postmaster_bucket(postmaster)
+            && postmaster.bucketId == bucketId;
         const auto describe = [&](std::uint64_t instance,
                                   std::uint32_t hash,
                                   std::int32_t quantity,
                                   std::int32_t serial) {
             data::items::Definition identity{};
             data::items::details::Definition detail{};
-            if (!data::find_item_definition_hash(hash, identity) || identity.bucketId != bucketId
+            if (!data::find_item_definition_hash(hash, identity)
+                || (!postmasterBucket && identity.bucketId != bucketId)
                 || !data::find_configured_item_detail(identity.definitionIndex, detail))
                 return;
             BucketItem row{};
@@ -349,9 +357,13 @@ std::vector<BucketItem> bucket_items(std::uint8_t bucketId) noexcept {
             if (!character.selected) continue;
             for (std::size_t i = 0; i < character.inventory.count; ++i) {
                 const auto& item = character.inventory.values[i];
+                const bool stored =
+                    item.placement == state::account::inventory::ItemPlacement::postmaster;
+                if (stored != postmasterBucket) continue;
                 describe(
                     item.instanceSoid, item.definitionHash, item.quantity, item.mutationSerial);
             }
+            if (postmasterBucket) continue;
             for (std::size_t i = 0; i < character.stacks.count; ++i) {
                 const auto& row = character.stacks.values[i];
                 describe(0, row.definitionHash, row.quantity, row.mutationSerial);

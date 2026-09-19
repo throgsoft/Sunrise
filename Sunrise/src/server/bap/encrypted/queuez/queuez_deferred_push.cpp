@@ -292,6 +292,14 @@ selected_character(const state::AccountState& account) noexcept {
     session.queuez = update.after;
     bap::arm_account_resync_elsewhere(session);
     bap::arm_acquisition_presentation_hold(session);
+    core::log::writef(core::log::Channel::server,
+                      core::log::Level::info,
+                      "ev=queuez stage=world_stack_acquisition result=published item=%u "
+                      "quantity=%d rewards=%zu revision=%d",
+                      static_cast<unsigned>(request.itemDefinitionIndex),
+                      request.quantity,
+                      pending->rewardCount,
+                      update.after.family4Version);
     return true;
 }
 

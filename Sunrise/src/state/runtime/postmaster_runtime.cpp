@@ -19,7 +19,9 @@ namespace buckets = build_data::inventory::buckets;
 using namespace runtime::detail;
 
 bool accepted_claim_rule(std::uint16_t vendorIndex, std::uint8_t sourceBucket) noexcept {
-    if (sourceBucket != 34 || (vendorIndex != 12 && vendorIndex != 13)) return false;
+    if (sourceBucket != 34 || (vendorIndex != 12 && vendorIndex != 13)) {
+        return false;
+    }
     const std::uint32_t hash = vendorIndex == 12 ? 3161908920U : 1846565192U;
     build_data::vendors::IndexEntry index{};
     build_data::vendors::Definition vendor{};
@@ -27,12 +29,14 @@ bool accepted_claim_rule(std::uint16_t vendorIndex, std::uint8_t sourceBucket) n
         || index.definitionHash != hash || !build_data::vendors::find(hash, vendor)
         || vendor.index != vendorIndex || vendor.definitionHash != hash
         || vendor.definitionTag != index.definitionTag || !vendor.transferRulesAvailable
-        || vendor.transferRuleCount > vendor.transferRules.size())
+        || vendor.transferRuleCount > vendor.transferRules.size()) {
         return false;
+    }
     for (std::size_t i = 0; i < vendor.transferRuleCount; ++i) {
-        if (vendor.transferRules[i].sourceBucket == sourceBucket)
+        if (vendor.transferRules[i].sourceBucket == sourceBucket) {
             return vendor.transferRules[i].destinationBucket
                    == build_data::vendors::kAuthoredDestination;
+        }
     }
     return false;
 }
@@ -69,33 +73,42 @@ bool stage_claim(const AccountState& before,
     const auto characterIndex = selected_character_index(before);
     if (!account::valid(before) || !valid_profile_inventory(before)
         || characterIndex >= before.characterCount || instanceSoid == 0
-        || !accepted_claim_rule(vendorIndex, sourceBucket))
+        || !accepted_claim_rule(vendorIndex, sourceBucket)) {
         return false;
+    }
     const auto& character = before.characters[characterIndex];
     if (character.nextInventorySerial
-        >= static_cast<std::uint32_t>((std::numeric_limits<std::int32_t>::max)()))
+        >= static_cast<std::uint32_t>((std::numeric_limits<std::int32_t>::max)())) {
         return false;
+    }
     std::size_t index = 0;
     while (index < character.inventory.count
-           && character.inventory.values[index].instanceSoid != instanceSoid)
+           && character.inventory.values[index].instanceSoid != instanceSoid) {
         ++index;
-    if (index == character.inventory.count) return false;
+    }
+    if (index == character.inventory.count) {
+        return false;
+    }
     const auto& source = character.inventory.values[index];
     build_data::items::Definition definition{};
     buckets::Descriptor destination{}, postmaster{};
     if (source.placement != inventory::ItemPlacement::postmaster
         || !ordinary_item(source, definition, destination)
         || definition.definitionIndex != definitionIndex
-        || !loadout::resolve_postmaster_bucket(postmaster))
+        || !loadout::resolve_postmaster_bucket(postmaster)) {
         return false;
+    }
 
     const std::unique_ptr<ClaimScratch> scratch(new (std::nothrow) ClaimScratch{});
-    if (!scratch || !loadout::resolve(before, characterIndex, scratch->beforeLoadout)) return false;
+    if (!scratch || !loadout::resolve(before, characterIndex, scratch->beforeLoadout)) {
+        return false;
+    }
     ResolvedPosition sourcePosition{};
     if (!find_resolved_position(scratch->beforeLoadout, instanceSoid, sourcePosition)
         || sourcePosition.equipped || sourcePosition.inventoryRow < postmaster.firstSlot
-        || sourcePosition.inventoryRow >= postmaster.firstSlot + postmaster.slotCount)
+        || sourcePosition.inventoryRow >= postmaster.firstSlot + postmaster.slotCount) {
         return false;
+    }
     scratch->after = before;
     auto& afterCharacter = scratch->after.characters[characterIndex];
     auto& claimed = afterCharacter.inventory.values[index];
@@ -107,8 +120,9 @@ bool stage_claim(const AccountState& before,
         || !find_resolved_position(scratch->afterLoadout, instanceSoid, destinationPosition)
         || destinationPosition.equipped || destinationPosition.inventoryRow < destination.firstSlot
         || destinationPosition.inventoryRow >= destination.firstSlot + destination.slotCount
-        || !character_encoding_preflight(scratch->after, characterIndex, scratch->afterLoadout))
+        || !character_encoding_preflight(scratch->after, characterIndex, scratch->afterLoadout)) {
         return false;
+    }
 
     mutation.beforeCharacter = character;
     mutation.afterCharacter = afterCharacter;
@@ -137,8 +151,9 @@ bool materialize_claim(const AccountState& current,
         || current.characters[mutation.characterIndex].soid != mutation.characterSoid
         || current.characters[mutation.characterIndex].nextInventorySerial
                != mutation.expectedNextInventorySerial
-        || !same_character(current.characters[mutation.characterIndex], mutation.beforeCharacter))
+        || !same_character(current.characters[mutation.characterIndex], mutation.beforeCharacter)) {
         return false;
+    }
     const std::unique_ptr<PendingPostmasterClaim> canonical(new (std::nothrow)
                                                                 PendingPostmasterClaim{});
     if (!canonical
@@ -152,8 +167,9 @@ bool materialize_claim(const AccountState& current,
         || canonical->inventoryIndex != mutation.inventoryIndex
         || canonical->beforeInventoryRow != mutation.beforeInventoryRow
         || canonical->afterInventoryRow != mutation.afterInventoryRow
-        || !same_character(canonical->afterCharacter, mutation.afterCharacter))
+        || !same_character(canonical->afterCharacter, mutation.afterCharacter)) {
         return false;
+    }
     after = current;
     after.characters[mutation.characterIndex] = canonical->afterCharacter;
     return true;
@@ -168,7 +184,9 @@ bool prepare_postmaster_claim(std::uint16_t vendorIndex,
                               PendingPostmasterClaim& mutation) noexcept {
     std::destroy_at(&mutation);
     std::construct_at(&mutation);
-    if (quantity != 1) return false;
+    if (quantity != 1) {
+        return false;
+    }
     const std::unique_ptr<AccountState> before(new (std::nothrow) AccountState{});
     return before && investment::store::read_account(*before)
            && stage_claim(
@@ -201,8 +219,9 @@ bool place_instanced_reward(const AccountState& before,
                             std::uint64_t& evictedInstanceSoid) noexcept {
     evictedInstanceSoid = 0;
     if (!account::valid(before) || characterIndex >= before.characterCount
-        || item.placement != inventory::ItemPlacement::inventory)
+        || item.placement != inventory::ItemPlacement::inventory) {
         return false;
+    }
     struct Scratch {
         loadout::ResolvedLoadout resolved{};
         loadout::Candidate item{};
@@ -215,35 +234,45 @@ bool place_instanced_reward(const AccountState& before,
                                   build_data::item_definition_count(),
                                   build_data::socket_entry_list_count(),
                                   false,
-                                  scratch->item))
+                                  scratch->item)) {
         return false;
+    }
     const auto& bucket = scratch->item.bucket;
     std::size_t used = 0;
     for (std::size_t i = 0; i < scratch->resolved.itemCount; ++i) {
         const auto row = scratch->resolved.items[i].inventoryRow;
         used += row >= bucket.firstSlot && row < bucket.firstSlot + bucket.slotCount;
     }
-    if (used < bucket.slotCount) return true;
-    if (used != bucket.slotCount) return false;
+    if (used < bucket.slotCount) {
+        return true;
+    }
+    if (used != bucket.slotCount) {
+        return false;
+    }
     build_data::items::Definition definition{};
     buckets::Descriptor destination{}, postmaster{};
     if (!ordinary_item(item, definition, destination)
-        || !loadout::resolve_postmaster_bucket(postmaster))
+        || !loadout::resolve_postmaster_bucket(postmaster)) {
         return false;
+    }
     std::size_t postmasterCount = 0;
     const auto& held = before.characters[characterIndex].inventory;
     std::size_t oldest = held.count;
     for (std::size_t i = 0; i < held.count; ++i) {
-        if (held.values[i].placement != inventory::ItemPlacement::postmaster) continue;
+        if (held.values[i].placement != inventory::ItemPlacement::postmaster) {
+            continue;
+        }
         ++postmasterCount;
         if (oldest == held.count
-            || held.values[i].mutationSerial < held.values[oldest].mutationSerial)
+            || held.values[i].mutationSerial < held.values[oldest].mutationSerial) {
             oldest = i;
+        }
     }
     if (postmasterCount >= inventory::kPostmasterItemCapacity) {
         if ((postmaster.policyFlags & buckets::kFifo) == 0 || oldest == held.count
-            || held.values[oldest].instanceSoid == 0)
+            || held.values[oldest].instanceSoid == 0) {
             return false;
+        }
         evictedInstanceSoid = held.values[oldest].instanceSoid;
     }
     item.placement = inventory::ItemPlacement::postmaster;

@@ -35,7 +35,9 @@ bool PresentationReader::read(std::uint32_t tag,
                               std::vector<std::byte>& output,
                               std::uint32_t& reference) noexcept {
     output.clear();
-    if (tag < reader::layout::kTagBase || tag == 0xFFFFFFFFU) return false;
+    if (tag < reader::layout::kTagBase || tag == 0xFFFFFFFFU) {
+        return false;
+    }
     const auto handle = tag - reader::layout::kTagBase;
     const auto package = static_cast<std::uint16_t>(handle >> reader::layout::kTagEntryBits);
     const auto index = handle & reader::layout::kTagEntryMask;
@@ -48,8 +50,9 @@ bool PresentationReader::read(std::uint32_t tag,
         || index >= header.entryCount
         || !reader::table_cache::entry_record(scratch_, location->latestPath, header, index, entry)
         || reader::layout::placement(entry).size == 0
-        || reader::layout::placement(entry).size > limit)
+        || reader::layout::placement(entry).size > limit) {
         return false;
+    }
     return reader::read_tag(source_, scratch_, tag, output, reference);
 }
 
@@ -63,11 +66,13 @@ bool PresentationReader::initialize() noexcept {
                        && cls == text::kStringBankIndexClass && array(banks_, 0x80805F9EU, 8, rows);
     // Optional domains fail independently, leaving names and numeric catalog entries usable.
     if (!read(kIconsTag, kTableLimit, icons_, cls) || cls != 0x80802951U
-        || !array(icons_, 0x80802957U, 24, rows))
+        || !array(icons_, 0x80802957U, 24, rows)) {
         icons_.clear();
+    }
     if (!read(kObjectivesTag, kTableLimit, objectives_, cls) || cls != 0x808059ECU
-        || !array(objectives_, 0x808059F0U, 64, rows))
+        || !array(objectives_, 0x808059F0U, 64, rows)) {
         objectives_.clear();
+    }
     return ready;
 }
 
@@ -81,8 +86,9 @@ text::Reference PresentationReader::reference(std::span<const std::byte> bytes,
         || !array(banks_, 0x80805F9EU, 8, rows) || bank >= rows.count
         || !tables::read(std::span<const std::byte>{banks_},
                          rows.dataOffset + bank * 8 + 4,
-                         output.containerTag))
+                         output.containerTag)) {
         return {};
+    }
     return output;
 }
 
@@ -93,10 +99,13 @@ bool PresentationReader::item(std::uint16_t index, std::uint32_t hash, Display& 
     std::uint32_t cls{};
     if (!array(strings_, tables::kItemStringsIndexRowClass, 24, rows)
         || !tables::index_row(strings_, rows, index, row) || row.definitionHash != hash
-        || !read(row.targetTag, 64 * 1024, blob_, cls) || cls != 0x80805CE1U)
+        || !read(row.targetTag, 64 * 1024, blob_, cls) || cls != 0x80805CE1U) {
         return false;
+    }
     const std::span<const std::byte> bytes{blob_};
-    if (!tables::read(bytes, 0x80, output.iconIndex)) return false;
+    if (!tables::read(bytes, 0x80, output.iconIndex)) {
+        return false;
+    }
     output.name = reference(bytes, 132);
     output.description = reference(bytes, 152);
     output.itemType = reference(bytes, 144);
@@ -109,10 +118,13 @@ bool PresentationReader::objective(std::uint16_t index,
     output = {};
     tables::Array rows{};
     std::uint32_t actual{};
-    if (!array(objectives_, 0x808059F0U, 64, rows) || index >= rows.count) return false;
-    const auto at = rows.dataOffset + index * 64;
-    if (!tables::read(std::span<const std::byte>{objectives_}, at, actual) || actual != hash)
+    if (!array(objectives_, 0x808059F0U, 64, rows) || index >= rows.count) {
         return false;
+    }
+    const auto at = rows.dataOffset + index * 64;
+    if (!tables::read(std::span<const std::byte>{objectives_}, at, actual) || actual != hash) {
+        return false;
+    }
     output = reference(objectives_, at + 24);
     return true;
 }
@@ -141,22 +153,23 @@ bool PresentationReader::icon(std::uint16_t index, Icon& output) noexcept {
         || !tables::index_row(icons_, rows, index, row) || !read(row.targetTag, 128, blob_, cls)
         || cls != 0x80804A53U || blob_.size() != 128
         || !tables::read(std::span<const std::byte>{blob_}, 0x14, tag)
-        || !read(tag, 132, blob_, cls) || cls != 0x80804A69U || blob_.size() != 132)
+        || !read(tag, 132, blob_, cls) || cls != 0x80804A69U || blob_.size() != 132) {
         return false;
+    }
     // Only the simple texture set is supported; animated and conditional images stay absent.
     // A sequence's first frame is the base icon, and the later frames are item states the
     // module does not track.
     const std::span<const std::byte> set{blob_};
-    std::uint32_t kind{}, resourceClass{}, outerClass{}, innerClass{};
+    std::uint32_t kind{}, resourceClass{};
     tables::Array outer{}, inner{};
     if (!tables::read(set, 8, kind) || kind != 0 || !tables::read(set, 28, resourceClass)
         || resourceClass != 0x80804A67U || !tables::find_array_at(set, 32, outer)
-        || outer.count == 0 || (outerClass = outer.elementClass) != 0x80804A6CU
+        || outer.count == 0 || outer.elementClass != 0x80804A6CU
         || !tables::find_array_at(set, outer.dataOffset, inner) || inner.count == 0
-        || (innerClass = inner.elementClass) != 0x80804A6FU
-        || !tables::read(set, inner.dataOffset, tag) || !read(tag, 40, blob_, cls)
-        || blob_.size() != 40)
+        || inner.elementClass != 0x80804A6FU || !tables::read(set, inner.dataOffset, tag)
+        || !read(tag, 40, blob_, cls) || blob_.size() != 40) {
         return false;
+    }
     const std::span<const std::byte> header{blob_};
     std::uint32_t size{}, format{}, large{};
     std::uint16_t marker{}, depth{}, layers{};

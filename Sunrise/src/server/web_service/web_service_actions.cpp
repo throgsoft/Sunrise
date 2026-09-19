@@ -16,7 +16,6 @@
 #include "../../state/build_data/items/item_catalog.h"
 #include "../../state/build_data/runtime.h"
 #include "../../state/investment/store_internal.h"
-#include "../../state/runtime/bounty_redemption_runtime.h"
 #include "../../state/runtime/profile_discard.h"
 #include "../../state/runtime/runtime.h"
 #include "internal_actions.h"
@@ -333,11 +332,15 @@ void dismantle_item(const middleware::web_service::Message& message, Outcome& ou
                               request.value,
                               static_cast<int>(request.selector),
                               staged ? request.value - mutation->discardedQuantity : -1);
-            if (!staged) clear_mutation(outcome);
+            if (!staged) {
+                clear_mutation(outcome);
+            }
             return;
         }
         auto* mutation = emplace_mutation<state::PendingProfileItemAcquisition>(outcome);
-        if (mutation == nullptr) return;
+        if (mutation == nullptr) {
+            return;
+        }
         const bool staged =
             resolved
             && definition.definitionIndex == static_cast<std::uint16_t>(request.definitionIndex)
@@ -352,7 +355,9 @@ void dismantle_item(const middleware::web_service::Message& message, Outcome& ou
                           request.value,
                           static_cast<int>(request.selector),
                           staged ? mutation->acquiredQuantity : -1);
-        if (!staged) clear_mutation(outcome);
+        if (!staged) {
+            clear_mutation(outcome);
+        }
         return;
     }
     if (!opcode402::supported_character_action(request)) {
@@ -381,8 +386,7 @@ void dismantle_item(const middleware::web_service::Message& message, Outcome& ou
     if (detail.objectiveCount != 0) {
         auto* reward = emplace_mutation<state::PendingRecordRewardGrant>(outcome);
         if (!reward
-            || !state::runtime::detail::bounty::prepare_redemption_grant(
-                instanceSoid, request.value, *reward)) {
+            || !state::prepare_bounty_redemption_grant(instanceSoid, request.value, *reward)) {
             clear_mutation(outcome);
             report_item_dismantle(message,
                                   "pursuit_redemption",

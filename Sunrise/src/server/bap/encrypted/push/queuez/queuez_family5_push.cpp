@@ -60,8 +60,9 @@ bool append_family5_override_notification(Scratch& scratch,
         objects,
     };
     if (!queuez_frame::append(
-            scratch, family, family5::kObjectCapacity, 0, key, nonce, response, written))
+            scratch, family, family5::kObjectCapacity, 0, key, nonce, response, written)) {
         return false;
+    }
     publishedMoteMask = investment.moteOwnershipMask;
     return true;
 }

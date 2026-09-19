@@ -37,21 +37,32 @@ bool pickup_space(const CharacterState& character,
     std::size_t occupied = 0;
     const auto count = [&](std::uint32_t hash) {
         build_data::items::Definition item{};
-        if (!build_data::find_item_definition_hash(hash, item)) return false;
+        if (!build_data::find_item_definition_hash(hash, item)) {
+            return false;
+        }
         occupied += item.bucketId == bucket.bucketId;
         return true;
     };
-    for (std::size_t i = 0; i < character.stacks.count; ++i)
-        if (!count(character.stacks.values[i].definitionHash)) return false;
+    for (std::size_t i = 0; i < character.stacks.count; ++i) {
+        if (!count(character.stacks.values[i].definitionHash)) {
+            return false;
+        }
+    }
     for (std::size_t i = 0; i < character.inventory.count; ++i) {
         const auto& item = character.inventory.values[i];
         if (item.placement == account::inventory::ItemPlacement::inventory
-            && !count(item.definitionHash))
+            && !count(item.definitionHash)) {
             return false;
+        }
     }
-    for (const auto& item : character.equipment.slots)
-        if (item && !count(item->definitionHash)) return false;
-    if (occupied > bucket.slotCount) return false;
+    for (const auto& item : character.equipment.slots) {
+        if (item && !count(item->definitionHash)) {
+            return false;
+        }
+    }
+    if (occupied > bucket.slotCount) {
+        return false;
+    }
     available = (std::min)(static_cast<std::size_t>(bucket.slotCount) - occupied,
                            character.stacks.values.size() - character.stacks.count);
     return true;
@@ -74,16 +85,23 @@ bool insert_pickups(CharacterState& character,
     buckets::Descriptor bucket{};
     if (quantity <= 0 || !pickup_bucket(hash, bucket) || character.nextInventorySerial == 0
         || quantity >= (std::numeric_limits<std::int32_t>::max)()
-                           - static_cast<std::int64_t>(character.nextInventorySerial))
+                           - static_cast<std::int64_t>(character.nextInventorySerial)) {
         return false;
+    }
     std::size_t available{};
-    if (!pickup_space(character, bucket, available)) return false;
+    if (!pickup_space(character, bucket, available)) {
+        return false;
+    }
     if (evictWhenFull && static_cast<std::size_t>(quantity) > available) {
         (void)evict_oldest_stacks(
             character, bucket, static_cast<std::size_t>(quantity) - available);
-        if (!pickup_space(character, bucket, available)) return false;
+        if (!pickup_space(character, bucket, available)) {
+            return false;
+        }
     }
-    if (static_cast<std::size_t>(quantity) > available) return false;
+    if (static_cast<std::size_t>(quantity) > available) {
+        return false;
+    }
     for (std::int32_t i = 0; i < quantity; ++i) {
         const auto slot = character.stacks.count++;
         lastSerial = static_cast<std::int32_t>(character.nextInventorySerial++);
@@ -99,8 +117,9 @@ bool same_pickups(const CharacterState& expected, const CharacterState& after) n
             const auto& row = character.stacks.values[i++];
             const auto ingredient = identity::ingredient(row.definitionHash);
             if (ingredient < identity::kIngredientCount
-                && row.definitionHash == identity::kIngredients[ingredient].pickupHash)
+                && row.definitionHash == identity::kIngredients[ingredient].pickupHash) {
                 return &row;
+            }
         }
         return nullptr;
     };
@@ -108,10 +127,13 @@ bool same_pickups(const CharacterState& expected, const CharacterState& after) n
     for (;;) {
         const auto* left = next(expected, a);
         const auto* right = next(after, b);
-        if (!left || !right) return left == right;
+        if (!left || !right) {
+            return left == right;
+        }
         if (left->definitionHash != right->definitionHash || left->quantity != right->quantity
-            || left->mutationSerial != right->mutationSerial)
+            || left->mutationSerial != right->mutationSerial) {
             return false;
+        }
     }
 }
 } // namespace
@@ -121,20 +143,26 @@ MaterialReward stage_reward(CharacterState& character,
                             PendingRecordRewardGrant& mutation,
                             PreparedRecordReward& result) noexcept {
     build_data::items::Definition item{};
-    if (!build_data::find_item_definition_index(request.itemDefinitionIndex, item))
+    if (!build_data::find_item_definition_index(request.itemDefinitionIndex, item)) {
         return MaterialReward::refused;
+    }
     const auto index = identity::ingredient(item.definitionHash);
-    if (index == identity::kIngredientCount) return MaterialReward::none;
+    if (index == identity::kIngredientCount) {
+        return MaterialReward::none;
+    }
     if (!mutation.beforeDawning) {
         State before{};
-        if (!read(before)) return MaterialReward::refused;
+        if (!read(before)) {
+            return MaterialReward::refused;
+        }
         mutation.beforeDawning = before;
         mutation.afterDawning = before;
     }
     std::int32_t credited{};
     if (!mutation.afterDawning
-        || !credit(*mutation.afterDawning, item.definitionHash, request.quantity, credited))
+        || !credit(*mutation.afterDawning, item.definitionHash, request.quantity, credited)) {
         return MaterialReward::refused;
+    }
     result = {};
     result.definitionHash = identity::kIngredients[index].pickupHash;
     result.stateIndex = index;
@@ -145,8 +173,9 @@ MaterialReward stage_reward(CharacterState& character,
     // the delivery bucket can take so these are too, and leave the rest to the durable queue so
     // a full bucket can never refuse the redemption itself.
     buckets::Descriptor bucket{};
-    if (credited > 0 && !pickup_bucket(result.definitionHash, bucket))
+    if (credited > 0 && !pickup_bucket(result.definitionHash, bucket)) {
         return MaterialReward::refused;
+    }
     if (credited > 0) {
         // The bucket admits a full payout by evicting what it already published, so placement is
         // bounded by the bucket rather than by what happens to be free. A placement that cannot
@@ -165,22 +194,28 @@ MaterialReward stage_reward(CharacterState& character,
 
 bool validate_rewards(const PendingRecordRewardGrant& mutation) noexcept {
     if (mutation.rewardCount > mutation.rewards.size()
-        || mutation.beforeDawning.has_value() != mutation.afterDawning.has_value())
+        || mutation.beforeDawning.has_value() != mutation.afterDawning.has_value()) {
         return false;
+    }
     State expected{};
-    if (mutation.beforeDawning && (!read(expected) || expected != *mutation.beforeDawning))
+    if (mutation.beforeDawning && (!read(expected) || expected != *mutation.beforeDawning)) {
         return false;
+    }
     bool material = false;
     auto expectedCharacter = std::unique_ptr<CharacterState>{
         mutation.beforeDawning ? new (std::nothrow) CharacterState(mutation.beforeCharacter)
                                : nullptr};
-    if (mutation.beforeDawning && !expectedCharacter) return false;
+    if (mutation.beforeDawning && !expectedCharacter) {
+        return false;
+    }
     for (std::size_t i = 0; i < mutation.rewardCount; ++i) {
         const auto& reward = mutation.rewards[i];
         const auto index = identity::ingredient(reward.definitionHash);
         if (reward.kind != RecordRewardKind::accountMaterial) {
             // Ingredient acquisition must include its authoritative balance effect.
-            if (index != identity::kIngredientCount) return false;
+            if (index != identity::kIngredientCount) {
+                return false;
+            }
             continue;
         }
         material = true;
@@ -188,16 +223,20 @@ bool validate_rewards(const PendingRecordRewardGrant& mutation) noexcept {
             || reward.stateIndex != index || reward.instanceSoid != 0 || reward.inventoryRow != 0
             || reward.definitionHash != identity::kIngredients[index].pickupHash
             || reward.appendedProfileResident || reward.quantity < 0 || reward.placedReceipts < 0
-            || reward.placedReceipts > reward.quantity)
+            || reward.placedReceipts > reward.quantity) {
             return false;
+        }
         std::int32_t credited{};
         // A full counter is an accepted zero-credit reward; no pickup is announced for it.
         if (!credit(expected, reward.definitionHash, (std::max)(1, reward.quantity), credited)
-            || credited != reward.quantity || expected.ingredients[index] != reward.afterQuantity)
+            || credited != reward.quantity || expected.ingredients[index] != reward.afterQuantity) {
             return false;
+        }
         // A reward that placed receipts must name them, and the after-image has to be exactly
         // the before-image with those rows inserted.
-        if ((reward.placedReceipts == 0) != (reward.mutationSerial == 0)) return false;
+        if ((reward.placedReceipts == 0) != (reward.mutationSerial == 0)) {
+            return false;
+        }
         if (reward.placedReceipts != 0) {
             std::int32_t lastSerial{};
             if (!expectedCharacter
@@ -206,8 +245,9 @@ bool validate_rewards(const PendingRecordRewardGrant& mutation) noexcept {
                                    reward.placedReceipts,
                                    true,
                                    lastSerial)
-                || lastSerial - reward.placedReceipts + 1 != reward.mutationSerial)
+                || lastSerial - reward.placedReceipts + 1 != reward.mutationSerial) {
                 return false;
+            }
         }
     }
     return material == mutation.beforeDawning.has_value()
@@ -217,9 +257,15 @@ bool validate_rewards(const PendingRecordRewardGrant& mutation) noexcept {
 }
 
 bool write_rewards(const PendingRecordRewardGrant& mutation) noexcept {
-    if (!validate_rewards(mutation)) return false;
-    if (!mutation.beforeDawning) return true;
-    if (!write(*mutation.beforeDawning, *mutation.afterDawning)) return false;
+    if (!validate_rewards(mutation)) {
+        return false;
+    }
+    if (!mutation.beforeDawning) {
+        return true;
+    }
+    if (!write(*mutation.beforeDawning, *mutation.afterDawning)) {
+        return false;
+    }
     investment::store::Statement queued(
         "INSERT INTO dawning_pickup_queue(character_soid,definition_hash,quantity) VALUES(?,?,?)");
     for (std::size_t i = 0; i < mutation.rewardCount; ++i) {
@@ -227,8 +273,9 @@ bool write_rewards(const PendingRecordRewardGrant& mutation) noexcept {
         // Only what the bucket could not take waits in the queue; the rest is already placed.
         const auto deferred = reward.quantity - reward.placedReceipts;
         if (reward.kind == RecordRewardKind::accountMaterial && deferred > 0
-            && !queued.write(mutation.characterSoid, reward.definitionHash, deferred))
+            && !queued.write(mutation.characterSoid, reward.definitionHash, deferred)) {
             return false;
+        }
     }
     return true;
 }
@@ -239,12 +286,18 @@ bool stage_queued_pickups(std::uint64_t characterSoid, std::size_t& acquired) no
     store::Transaction transaction;
     auto current = std::unique_ptr<AccountState>{new (std::nothrow) AccountState};
     if (!transaction.ready() || !current || !store::read_account(*current)
-        || !account::valid(*current))
+        || !account::valid(*current)) {
         return false;
+    }
     CharacterState* character = nullptr;
-    for (std::size_t i = 0; i < current->characterCount; ++i)
-        if (current->characters[i].soid == characterSoid) character = &current->characters[i];
-    if (!character || !character->selected) return false;
+    for (std::size_t i = 0; i < current->characterCount; ++i) {
+        if (current->characters[i].soid == characterSoid) {
+            character = &current->characters[i];
+        }
+    }
+    if (!character || !character->selected) {
+        return false;
+    }
     // The rows this pass replaces were named by the frame that published them, so they are
     // dropped in the same transaction that inserts their successors. One revision carries both,
     // which is what the bucket's first in, first out policy describes.
@@ -260,9 +313,8 @@ bool stage_queued_pickups(std::uint64_t characterSoid, std::size_t& acquired) no
         character->stacks.values[retained++] = row;
     }
     if (delivered != 0) {
-        std::fill(character->stacks.values.begin() + retained,
-                  character->stacks.values.end(),
-                  account::inventory::CharacterStack{});
+        const auto removed = std::span(character->stacks.values).subspan(retained);
+        std::fill(removed.begin(), removed.end(), account::inventory::CharacterStack{});
         character->stacks.count = retained;
     }
     std::size_t capacity = character->stacks.values.size() - character->stacks.count;
@@ -273,36 +325,53 @@ bool stage_queued_pickups(std::uint64_t characterSoid, std::size_t& acquired) no
         {
             store::Statement row("SELECT id,definition_hash,quantity FROM dawning_pickup_queue "
                                  "WHERE character_soid=? ORDER BY id LIMIT 1");
-            if (!row.parameters(characterSoid)) return false;
-            const auto status = row.step();
-            if (status == SQLITE_DONE) break;
-            if (status != SQLITE_ROW || !row.columns(id, hash, quantity) || quantity <= 0)
+            if (!row.parameters(characterSoid)) {
                 return false;
+            }
+            const auto status = row.step();
+            if (status == SQLITE_DONE) {
+                break;
+            }
+            if (status != SQLITE_ROW || !row.columns(id, hash, quantity) || quantity <= 0) {
+                return false;
+            }
         }
         buckets::Descriptor bucket{};
-        if (!pickup_bucket(hash, bucket)) return false;
+        if (!pickup_bucket(hash, bucket)) {
+            return false;
+        }
         std::size_t available{};
-        if (!pickup_space(*character, bucket, available)) return false;
+        if (!pickup_space(*character, bucket, available)) {
+            return false;
+        }
         capacity = acquired + available;
-        if (available == 0) break;
+        if (available == 0) {
+            break;
+        }
         const auto count = (std::min)(quantity, static_cast<std::int32_t>(capacity - acquired));
         std::int32_t serial{};
-        if (!insert_pickups(*character, hash, count, false, serial)) return false;
+        if (!insert_pickups(*character, hash, count, false, serial)) {
+            return false;
+        }
         if (count == quantity) {
             store::Statement erase(
                 "DELETE FROM dawning_pickup_queue WHERE id=? AND character_soid=?");
-            if (!erase.write(id, characterSoid) || sqlite3_changes(store::g_database) != 1)
+            if (!erase.write(id, characterSoid) || sqlite3_changes(store::g_database) != 1) {
                 return false;
+            }
         } else {
             store::Statement reduce(
                 "UPDATE dawning_pickup_queue SET quantity=? WHERE id=? AND character_soid=?");
             if (!reduce.write(quantity - count, id, characterSoid)
-                || sqlite3_changes(store::g_database) != 1)
+                || sqlite3_changes(store::g_database) != 1) {
                 return false;
+            }
         }
         acquired += count;
     }
-    if (acquired == 0 && delivered == 0) return transaction.commit();
+    if (acquired == 0 && delivered == 0) {
+        return transaction.commit();
+    }
     return account::valid(*current) && store::write_account(*current) && transaction.commit();
 }
 

@@ -7,6 +7,7 @@
 #include <span>
 
 #include "../../core/runtime/wall_clock.h"
+#include "../../middleware/datagen/family4/loadout/loadout_item_resolver.h"
 #include "../account/pursuit_hold.h"
 #include "../build_data/items/quest_initialization.h"
 #include "../build_data/runtime.h"
@@ -24,8 +25,11 @@ namespace inventory = account::inventory;
 namespace store = investment::store;
 
 CharacterState* selected(AccountState& account) noexcept {
-    for (std::size_t i = 0; i < account.characterCount; ++i)
-        if (account.characters[i].selected) return &account.characters[i];
+    for (std::size_t i = 0; i < account.characterCount; ++i) {
+        if (account.characters[i].selected) {
+            return &account.characters[i];
+        }
+    }
     return nullptr;
 }
 
@@ -39,12 +43,15 @@ bool resolve(std::uint16_t index,
 
 bool objectives(const data::items::details::Definition& detail,
                 std::array<std::int32_t, inventory::kItemObjectiveLaneCount>& thresholds) noexcept {
-    if (detail.objectiveCount == 0 || detail.objectiveCount > thresholds.size()) return false;
+    if (detail.objectiveCount == 0 || detail.objectiveCount > thresholds.size()) {
+        return false;
+    }
     for (std::size_t i = 0; i < detail.objectiveCount; ++i) {
         data::objectives::Definition objective{};
         if (!data::find_objective_definition(detail.objectiveIndices[i], objective)
-            || objective.completionValue <= 0)
+            || objective.completionValue <= 0) {
             return false;
+        }
         thresholds[i] = objective.completionValue;
     }
     return true;
@@ -55,12 +62,16 @@ bool objectives(const data::items::details::Definition& detail,
 const char* editable(const inventory::Item& held,
                      std::uint16_t index,
                      const data::items::details::Definition& detail) noexcept {
-    if (held.objectiveDefinitionIndex != index && held.objectiveDefinitionIndex != 0xFFFFU)
+    if (held.objectiveDefinitionIndex != index && held.objectiveDefinitionIndex != 0xFFFFU) {
         return "held objective definition differs from installed item";
+    }
     const auto expiry = held.objectiveValues[inventory::kItemExpiryLane];
-    if (detail.lifetimeSeconds > 0 && expiry == 0) return "held timed pursuit has no saved expiry";
-    if (expiry != 0 && expiry <= core::runtime::investment_clock_seconds())
+    if (detail.lifetimeSeconds > 0 && expiry == 0) {
+        return "held timed pursuit has no saved expiry";
+    }
+    if (expiry != 0 && expiry <= core::runtime::investment_clock_seconds()) {
         return "held pursuit has expired";
+    }
     return nullptr;
 }
 
@@ -72,37 +83,56 @@ Result edit(std::uint16_t index,
             bool bountiesOnly = false,
             std::uint64_t instanceSoid = 0) noexcept {
     std::unique_ptr<AccountState> account(new (std::nothrow) AccountState);
-    if (!account) return {false, 0, "allocation failed"};
+    if (!account) {
+        return {false, 0, "allocation failed"};
+    }
     store::Transaction transaction;
-    if (!transaction.ready() || !store::read_account(*account) || !account::valid(*account))
+    if (!transaction.ready() || !store::read_account(*account) || !account::valid(*account)) {
         return {false, 0, "investment database unavailable"};
+    }
     auto* character = selected(*account);
-    if (!character) return {false, 0, "no selected character"};
+    if (!character) {
+        return {false, 0, "no selected character"};
+    }
     data::items::Definition target{};
-    if (!completeAll && !data::find_item_definition_index(index, target))
+    if (!completeAll && !data::find_item_definition_index(index, target)) {
         return {false, 0, "installed item identity unavailable"};
+    }
     std::size_t matched = 0, changed = 0, skipped = 0;
     for (std::size_t i = 0; i < character->inventory.count; ++i) {
         auto& held = character->inventory.values[i];
-        if (instanceSoid != 0 && held.instanceSoid != instanceSoid) continue;
-        if (!completeAll && held.definitionHash != target.definitionHash) continue;
+        if (instanceSoid != 0 && held.instanceSoid != instanceSoid) {
+            continue;
+        }
+        if (!completeAll && held.definitionHash != target.definitionHash) {
+            continue;
+        }
         data::items::Definition item{};
         data::items::details::Definition detail{};
         if (!data::find_item_definition_hash(held.definitionHash, item)
-            || !resolve(item.definitionIndex, item, detail))
+            || !resolve(item.definitionIndex, item, detail)) {
             return {false, 0, "held item metadata unavailable; no changes committed"};
-        if (!completeAll && item.definitionIndex != index) continue;
-        if (completeAll && detail.objectiveCount == 0) continue;
+        }
+        if (!completeAll && item.definitionIndex != index) {
+            continue;
+        }
+        if (completeAll && detail.objectiveCount == 0) {
+            continue;
+        }
         if (bountiesOnly
             && (detail.bucketId != data::items::kPursuitBucketId || detail.lifetimeSeconds <= 0
-                || detail.maxStackSize > 1))
+                || detail.maxStackSize > 1)) {
             continue;
+        }
         std::array<std::int32_t, inventory::kItemObjectiveLaneCount> thresholds{};
-        if (!objectives(detail, thresholds) || lane > detail.objectiveCount)
+        if (!objectives(detail, thresholds) || lane > detail.objectiveCount) {
             return {false, 0, "objective metadata or lane unavailable; no changes committed"};
+        }
         bool itemProgress = true;
         for (std::size_t ordinal = 0; ordinal < detail.objectiveCount; ++ordinal) {
-            if (lane != 0 && lane != ordinal + inventory::kItemObjectiveLaneBase) continue;
+            if (lane != 0 && lane != ordinal + inventory::kItemObjectiveLaneBase) {
+                continue;
+            }
             data::objectives::Definition objective{};
             itemProgress =
                 itemProgress
@@ -110,33 +140,43 @@ Result edit(std::uint16_t index,
                 && objective.itemProgress;
         }
         if (!itemProgress) {
-            if (!completeAll)
+            if (!completeAll) {
                 return {
                     false, 0, "objective uses a shared or unsupported source, not an item lane"};
+            }
             ++skipped;
             continue;
         }
-        if (const auto* reason = editable(held, item.definitionIndex, detail))
+        if (const auto* reason = editable(held, item.definitionIndex, detail)) {
             return {false, 0, reason};
+        }
         ++matched;
         auto after = held.objectiveValues;
         for (std::size_t ordinal = 0; ordinal < detail.objectiveCount; ++ordinal) {
             const auto targetLane = ordinal + inventory::kItemObjectiveLaneBase;
-            if (lane == 0 || lane == targetLane)
+            if (lane == 0 || lane == targetLane) {
                 after[targetLane] = completeAll || completeTarget ? thresholds[ordinal] : value;
+            }
         }
-        if (after == held.objectiveValues && held.objectiveDefinitionIndex == item.definitionIndex)
+        if (after == held.objectiveValues
+            && held.objectiveDefinitionIndex == item.definitionIndex) {
             continue;
+        }
         // Only the objectives changed, so the row keeps the serial that holds its grid cell.
         // Reissuing it would move a bounty the moment it completed.
         held.objectiveValues = after;
         held.objectiveDefinitionIndex = item.definitionIndex;
         ++changed;
     }
-    if (matched == 0 && skipped == 0)
+    if (matched == 0 && skipped == 0) {
         return {false, 0, "no matching held pursuit on selected character"};
-    if (changed != 0 && !store::write_account(*account)) return {false, 0, "account write refused"};
-    if (!transaction.commit()) return {false, 0, "transaction commit failed"};
+    }
+    if (changed != 0 && !store::write_account(*account)) {
+        return {false, 0, "account write refused"};
+    }
+    if (!transaction.commit()) {
+        return {false, 0, "transaction commit failed"};
+    }
     return {true,
             changed,
             skipped != 0   ? "item objectives committed; shared/unsupported pursuits skipped"
@@ -147,12 +187,14 @@ enum class DropScope { item, pursuits, bounties, engrams, weapons, armor };
 
 bool matches_gear(const data::items::details::Definition& detail, DropScope scope) noexcept {
     if (detail.instancedDefinitionState != data::items::details::InstancedDefinitionState::instanced
-        || !detail.equipmentSlot.has_value() || *detail.equipmentSlot < 0)
+        || !detail.equipmentSlot.has_value() || *detail.equipmentSlot < 0) {
         return false;
+    }
     std::size_t semanticIndex = inventory::kEquipmentSlotCount;
     if (!runtime::detail::semantic_equipment_slot(static_cast<std::uint8_t>(*detail.equipmentSlot),
-                                                  semanticIndex))
+                                                  semanticIndex)) {
         return false;
+    }
     using Slot = inventory::EquipmentSlot;
     switch (static_cast<Slot>(semanticIndex)) {
     case Slot::kinetic:
@@ -172,15 +214,21 @@ bool matches_gear(const data::items::details::Definition& detail, DropScope scop
 
 Result drop(std::uint16_t index, DropScope scope) noexcept {
     data::items::Definition requested{};
-    if (scope == DropScope::item && !data::find_item_definition_index(index, requested))
+    if (scope == DropScope::item && !data::find_item_definition_index(index, requested)) {
         return {false, 0, "installed item identity unavailable"};
+    }
     std::unique_ptr<AccountState> snapshot(new (std::nothrow) AccountState);
-    if (!snapshot) return {false, 0, "allocation failed"};
+    if (!snapshot) {
+        return {false, 0, "allocation failed"};
+    }
     store::Transaction transaction;
-    if (!transaction.ready() || !store::read_account(*snapshot) || !account::valid(*snapshot))
+    if (!transaction.ready() || !store::read_account(*snapshot) || !account::valid(*snapshot)) {
         return {false, 0, "investment database unavailable"};
+    }
     auto* character = selected(*snapshot);
-    if (!character) return {false, 0, "no selected character"};
+    if (!character) {
+        return {false, 0, "no selected character"};
+    }
     std::size_t kept = 0, removed = 0;
     const auto beforeCount = character->inventory.count;
     for (std::size_t i = 0; i < beforeCount; ++i) {
@@ -190,11 +238,12 @@ Result drop(std::uint16_t index, DropScope scope) noexcept {
             data::items::Definition item{};
             data::items::details::Definition detail{};
             if (!data::find_item_definition_hash(held.definitionHash, item)
-                || !resolve(item.definitionIndex, item, detail))
+                || !resolve(item.definitionIndex, item, detail)) {
                 return {false,
                         0,
                         "held metadata unavailable; use item.drop for a known identity; no changes "
                         "committed"};
+            }
             remove = detail.objectiveCount != 0 && !detail.equipmentSlot.has_value();
             if (scope == DropScope::weapons || scope == DropScope::armor) {
                 remove = item.definitionHash == held.definitionHash
@@ -202,17 +251,22 @@ Result drop(std::uint16_t index, DropScope scope) noexcept {
                          && matches_gear(detail, scope);
                 if (remove) {
                     data::inventory::buckets::Descriptor bucket{};
-                    if (!data::find_inventory_bucket_descriptor(detail.bucketId, bucket))
+                    if (!data::find_inventory_bucket_descriptor(detail.bucketId, bucket)) {
                         return {false, 0, "held gear bucket unavailable; no changes committed"};
+                    }
                     remove = bucket.bucketId == detail.bucketId
                              && bucket.arraySelector
                                     == data::inventory::buckets::ArraySelector::character
                              && bucket.equipmentSlot == *detail.equipmentSlot;
                 }
                 // Inventory is unequipped storage; also exclude any equipped identity explicitly.
-                for (std::size_t c = 0; remove && c < snapshot->characterCount; ++c)
-                    for (const auto& equipped : snapshot->characters[c].equipment.slots)
-                        if (equipped && equipped->instanceSoid == held.instanceSoid) remove = false;
+                for (std::size_t c = 0; remove && c < snapshot->characterCount; ++c) {
+                    for (const auto& equipped : snapshot->characters[c].equipment.slots) {
+                        if (equipped && equipped->instanceSoid == held.instanceSoid) {
+                            remove = false;
+                        }
+                    }
+                }
             }
             if (scope == DropScope::engrams) {
                 // Installed Engrams bucket (hash 375726501). Packages in Consumables are not
@@ -220,8 +274,9 @@ Result drop(std::uint16_t index, DropScope scope) noexcept {
                 remove = detail.bucketId == 31 && !detail.equipmentSlot.has_value();
                 if (remove) {
                     data::inventory::buckets::Descriptor bucket{};
-                    if (!data::find_inventory_bucket_descriptor(detail.bucketId, bucket))
+                    if (!data::find_inventory_bucket_descriptor(detail.bucketId, bucket)) {
                         return {false, 0, "held engram bucket unavailable; no changes committed"};
+                    }
                     remove =
                         bucket.arraySelector == data::inventory::buckets::ArraySelector::character;
                 }
@@ -234,30 +289,35 @@ Result drop(std::uint16_t index, DropScope scope) noexcept {
                          && detail.maxStackSize <= 1;
                 if (remove) {
                     data::inventory::buckets::Descriptor bucket{};
-                    if (!data::find_inventory_bucket_descriptor(detail.bucketId, bucket))
+                    if (!data::find_inventory_bucket_descriptor(detail.bucketId, bucket)) {
                         return {false, 0, "held bounty bucket unavailable; no changes committed"};
+                    }
                     remove =
                         bucket.arraySelector == data::inventory::buckets::ArraySelector::character;
                 }
             }
         }
-        if (remove)
+        if (remove) {
             ++removed;
-        else
+        } else {
             character->inventory.values[kept++] = held;
+        }
     }
-    if (removed == 0)
+    if (removed == 0) {
         return {true,
                 0,
                 scope == DropScope::bounties  ? "no held bounties"
                 : scope == DropScope::engrams ? "no held engrams"
                                               : "no matching unequipped residents"};
+    }
     // Compact authored storage without inventing new identities or resetting survivor progress.
-    for (std::size_t i = kept; i < beforeCount; ++i)
+    for (std::size_t i = kept; i < beforeCount; ++i) {
         character->inventory.values[i] = {};
+    }
     character->inventory.count = kept;
-    if (!store::write_account(*snapshot) || !transaction.commit())
+    if (!store::write_account(*snapshot) || !transaction.commit()) {
         return {false, 0, "removal transaction failed; no changes committed"};
+    }
     return {true,
             removed,
             scope == DropScope::bounties ? "bounties removed; quests preserved; no rewards granted"
@@ -268,32 +328,62 @@ Result drop(std::uint16_t index, DropScope scope) noexcept {
 
 } // namespace
 
+bool resident_in_bucket(std::uint8_t bucketId,
+                        std::uint8_t homeBucketId,
+                        inventory::ItemPlacement placement) noexcept {
+    data::inventory::buckets::Descriptor postmaster{};
+    const bool lostItems =
+        middleware::datagen::family4::loadout::resolve_postmaster_bucket(postmaster);
+    if (placement == inventory::ItemPlacement::postmaster) {
+        return lostItems && bucketId == postmaster.bucketId;
+    }
+    return homeBucketId == bucketId && (!lostItems || bucketId != postmaster.bucketId);
+}
+
 Result grant_item(std::uint16_t index, std::int32_t quantity, std::uint32_t expectedHash) noexcept {
     data::items::Definition item{};
     data::items::details::Definition detail{};
-    if (quantity < 1) return {false, 0, "quantity must be positive"};
-    if (!resolve(index, item, detail) || (expectedHash != 0 && item.definitionHash != expectedHash))
+    if (quantity < 1) {
+        return {false, 0, "quantity must be positive"};
+    }
+    if (!resolve(index, item, detail)
+        || (expectedHash != 0 && item.definitionHash != expectedHash)) {
         return {false, 0, "installed item identity or detail unavailable or changed"};
+    }
     const bool instanced = detail.instancedDefinitionState
                            == data::items::details::InstancedDefinitionState::instanced;
-    if (!instanced && quantity > (std::max)(1, detail.maxStackSize))
+    if (!instanced && quantity > (std::max)(1, detail.maxStackSize)) {
         return {false, 0, "quantity exceeds the installed stack size"};
+    }
     std::unique_ptr<AccountState> account(new (std::nothrow) AccountState);
     std::unique_ptr<PendingRecordRewardGrant> pending(new (std::nothrow) PendingRecordRewardGrant);
-    if (!account || !pending) return {false, 0, "allocation failed"};
+    if (!account || !pending) {
+        return {false, 0, "allocation failed"};
+    }
     store::Transaction transaction;
-    if (!transaction.ready() || !store::read_account(*account) || !account::valid(*account))
+    if (!transaction.ready() || !store::read_account(*account) || !account::valid(*account)) {
         return {false, 0, "investment database unavailable"};
+    }
     const auto* character = selected(*account);
-    if (!character) return {false, 0, "no selected character"};
+    if (!character) {
+        return {false, 0, "no selected character"};
+    }
     if (detail.objectiveCount != 0) {
         std::array<std::int32_t, inventory::kItemObjectiveLaneCount> thresholds{};
-        if (!objectives(detail, thresholds)) return {false, 0, "objective thresholds unavailable"};
-        if (quantity != 1) return {false, 0, "pursuits require quantity one"};
+        if (!objectives(detail, thresholds)) {
+            return {false, 0, "objective thresholds unavailable"};
+        }
+        if (quantity != 1) {
+            return {false, 0, "pursuits require quantity one"};
+        }
         for (std::size_t i = 0; i < character->inventory.count; ++i) {
             const auto& held = character->inventory.values[i];
-            if (held.definitionHash != item.definitionHash) continue;
-            if (const auto* reason = editable(held, index, detail)) return {false, 0, reason};
+            if (held.definitionHash != item.definitionHash) {
+                continue;
+            }
+            if (const auto* reason = editable(held, index, detail)) {
+                return {false, 0, reason};
+            }
             return {true, 0, "already held; expiry and progress preserved"};
         }
     }
@@ -308,13 +398,18 @@ Result grant_item(std::uint16_t index, std::int32_t quantity, std::uint32_t expe
         std::array<DirectRecordReward, kRecordRewardGrantCapacity> rewards{};
         std::fill_n(rewards.begin(), count, DirectRecordReward{index, instanced ? 1 : quantity});
         if (!prepare_record_reward_grant(
-                std::span(rewards).first(count), kUnclaimedRecordIndex, *pending))
+                std::span(rewards).first(count), kUnclaimedRecordIndex, *pending)) {
             return {false, 0, "reward policy refused support, ownership, capacity or quantity"};
-        if (!commit_record_reward(*pending)) return {false, 0, "grant commit failed; rolled back"};
+        }
+        if (!commit_record_reward(*pending)) {
+            return {false, 0, "grant commit failed; rolled back"};
+        }
         granted += count;
         remaining -= static_cast<std::int32_t>(count);
     }
-    if (!transaction.commit()) return {false, 0, "transaction commit failed; rolled back"};
+    if (!transaction.commit()) {
+        return {false, 0, "transaction commit failed; rolled back"};
+    }
     return {true, granted, "granted through the record reward policy"};
 }
 
@@ -326,8 +421,9 @@ Result set_objective_lane(std::uint64_t instanceSoid,
                           std::uint16_t index,
                           std::int32_t value,
                           std::uint8_t lane) noexcept {
-    if (instanceSoid == 0 || value < 0 || lane == 0 || lane > inventory::kItemObjectiveLaneCount)
+    if (instanceSoid == 0 || value < 0 || lane == 0 || lane > inventory::kItemObjectiveLaneCount) {
         return {false, 0, "invalid bounty instance, value or lane"};
+    }
     return edit(index, value, lane, false, false, true, instanceSoid);
 }
 
@@ -341,10 +437,16 @@ namespace {
 
 /** @return True when any character has this resident equipped. */
 [[nodiscard]] bool equipped_anywhere(const AccountState& account, std::uint64_t soid) noexcept {
-    if (soid == 0) return false;
-    for (std::size_t c = 0; c < account.characterCount; ++c)
-        for (const auto& slot : account.characters[c].equipment.slots)
-            if (slot && slot->instanceSoid == soid) return true;
+    if (soid == 0) {
+        return false;
+    }
+    for (std::size_t c = 0; c < account.characterCount; ++c) {
+        for (const auto& slot : account.characters[c].equipment.slots) {
+            if (slot && slot->instanceSoid == soid) {
+                return true;
+            }
+        }
+    }
     return false;
 }
 
@@ -355,20 +457,29 @@ Result set_held_quantity(std::uint64_t instanceSoid,
                          std::int32_t quantity) noexcept {
     data::items::Definition item{};
     data::items::details::Definition detail{};
-    if (quantity < 0) return {false, 0, "quantity must not be negative"};
-    if (!resolve(definitionIndex, item, detail))
+    if (quantity < 0) {
+        return {false, 0, "quantity must not be negative"};
+    }
+    if (!resolve(definitionIndex, item, detail)) {
         return {false, 0, "installed item identity or detail unavailable"};
+    }
     data::inventory::buckets::Descriptor bucket{};
     if (!data::find_inventory_bucket_descriptor(item.bucketId, bucket)
-        || bucket.bucketId != item.bucketId)
+        || bucket.bucketId != item.bucketId) {
         return {false, 0, "installed bucket unavailable"};
+    }
     const auto limit = (std::max)(1, detail.maxStackSize);
-    if (quantity > limit) return {false, 0, "quantity exceeds the installed stack size"};
+    if (quantity > limit) {
+        return {false, 0, "quantity exceeds the installed stack size"};
+    }
     std::unique_ptr<AccountState> snapshot(new (std::nothrow) AccountState);
-    if (!snapshot) return {false, 0, "allocation failed"};
+    if (!snapshot) {
+        return {false, 0, "allocation failed"};
+    }
     store::Transaction transaction;
-    if (!transaction.ready() || !store::read_account(*snapshot) || !account::valid(*snapshot))
+    if (!transaction.ready() || !store::read_account(*snapshot) || !account::valid(*snapshot)) {
         return {false, 0, "investment database unavailable"};
+    }
     const auto apply = [&](std::int32_t& held) noexcept {
         held = quantity;
         return true;
@@ -377,11 +488,13 @@ Result set_held_quantity(std::uint64_t instanceSoid,
     if (bucket.arraySelector == data::inventory::buckets::ArraySelector::profile) {
         for (std::size_t i = 0; i < snapshot->profileItemCount; ++i) {
             auto& row = snapshot->profileItems[i];
-            if (row.definitionHash != item.definitionHash || row.instanceSoid != instanceSoid)
+            if (row.definitionHash != item.definitionHash || row.instanceSoid != instanceSoid) {
                 continue;
+            }
             if (quantity == 0) {
-                for (std::size_t j = i + 1; j < snapshot->profileItemCount; ++j)
+                for (std::size_t j = i + 1; j < snapshot->profileItemCount; ++j) {
                     snapshot->profileItems[j - 1] = snapshot->profileItems[j];
+                }
                 snapshot->profileItems[--snapshot->profileItemCount] = {};
             } else {
                 (void)apply(row.quantity);
@@ -391,16 +504,21 @@ Result set_held_quantity(std::uint64_t instanceSoid,
         }
     } else {
         auto* character = selected(*snapshot);
-        if (!character) return {false, 0, "no selected character"};
+        if (!character) {
+            return {false, 0, "no selected character"};
+        }
         for (std::size_t i = 0; i < character->inventory.count && changed == 0; ++i) {
             auto& row = character->inventory.values[i];
-            if (row.definitionHash != item.definitionHash || row.instanceSoid != instanceSoid)
+            if (row.definitionHash != item.definitionHash || row.instanceSoid != instanceSoid) {
                 continue;
-            if (equipped_anywhere(*snapshot, row.instanceSoid))
+            }
+            if (equipped_anywhere(*snapshot, row.instanceSoid)) {
                 return {false, 0, "equipped residents are not edited here"};
+            }
             if (quantity == 0) {
-                for (std::size_t j = i + 1; j < character->inventory.count; ++j)
+                for (std::size_t j = i + 1; j < character->inventory.count; ++j) {
                     character->inventory.values[j - 1] = character->inventory.values[j];
+                }
                 character->inventory.values[--character->inventory.count] = {};
             } else {
                 (void)apply(row.quantity);
@@ -409,10 +527,13 @@ Result set_held_quantity(std::uint64_t instanceSoid,
         }
         for (std::size_t i = 0; i < character->stacks.count && changed == 0; ++i) {
             auto& row = character->stacks.values[i];
-            if (row.definitionHash != item.definitionHash) continue;
+            if (row.definitionHash != item.definitionHash) {
+                continue;
+            }
             if (quantity == 0) {
-                for (std::size_t j = i + 1; j < character->stacks.count; ++j)
+                for (std::size_t j = i + 1; j < character->stacks.count; ++j) {
                     character->stacks.values[j - 1] = character->stacks.values[j];
+                }
                 character->stacks.values[--character->stacks.count] = {};
             } else {
                 (void)apply(row.quantity);
@@ -420,21 +541,28 @@ Result set_held_quantity(std::uint64_t instanceSoid,
             ++changed;
         }
     }
-    if (changed == 0) return {true, 0, "no held row with that identity"};
-    if (!account::valid(*snapshot) || !store::write_account(*snapshot) || !transaction.commit())
+    if (changed == 0) {
+        return {true, 0, "no held row with that identity"};
+    }
+    if (!account::valid(*snapshot) || !store::write_account(*snapshot) || !transaction.commit()) {
         return {false, 0, "edit transaction failed; no changes committed"};
+    }
     return {true, changed, quantity == 0 ? "row removed" : "quantity set"};
 }
 
 Result drop_bucket(std::uint8_t bucketId) noexcept {
     data::inventory::buckets::Descriptor bucket{};
-    if (!data::find_inventory_bucket_descriptor(bucketId, bucket) || bucket.bucketId != bucketId)
+    if (!data::find_inventory_bucket_descriptor(bucketId, bucket) || bucket.bucketId != bucketId) {
         return {false, 0, "installed bucket unavailable"};
+    }
     std::unique_ptr<AccountState> snapshot(new (std::nothrow) AccountState);
-    if (!snapshot) return {false, 0, "allocation failed"};
+    if (!snapshot) {
+        return {false, 0, "allocation failed"};
+    }
     store::Transaction transaction;
-    if (!transaction.ready() || !store::read_account(*snapshot) || !account::valid(*snapshot))
+    if (!transaction.ready() || !store::read_account(*snapshot) || !account::valid(*snapshot)) {
         return {false, 0, "investment database unavailable"};
+    }
     std::size_t removed = 0;
     if (bucket.arraySelector == data::inventory::buckets::ArraySelector::profile) {
         auto& rows = snapshot->profileItems;
@@ -447,25 +575,31 @@ Result drop_bucket(std::uint8_t bucketId) noexcept {
             }
             rows[kept++] = row;
         }
-        for (std::size_t i = kept; i < snapshot->profileItemCount; ++i)
+        for (std::size_t i = kept; i < snapshot->profileItemCount; ++i) {
             rows[i] = {};
+        }
         snapshot->profileItemCount = kept;
     } else {
         auto* character = selected(*snapshot);
-        if (!character) return {false, 0, "no selected character"};
+        if (!character) {
+            return {false, 0, "no selected character"};
+        }
         std::size_t kept = 0;
         const auto before = character->inventory.count;
         for (std::size_t i = 0; i < before; ++i) {
             const auto held = character->inventory.values[i];
-            if (in_bucket(held.definitionHash, bucketId)
+            data::items::Definition identity{};
+            if (data::find_item_definition_hash(held.definitionHash, identity)
+                && resident_in_bucket(bucketId, identity.bucketId, held.placement)
                 && !equipped_anywhere(*snapshot, held.instanceSoid)) {
                 ++removed;
                 continue;
             }
             character->inventory.values[kept++] = held;
         }
-        for (std::size_t i = kept; i < before; ++i)
+        for (std::size_t i = kept; i < before; ++i) {
             character->inventory.values[i] = {};
+        }
         character->inventory.count = kept;
         std::size_t keptStacks = 0;
         const auto beforeStacks = character->stacks.count;
@@ -477,13 +611,17 @@ Result drop_bucket(std::uint8_t bucketId) noexcept {
             }
             character->stacks.values[keptStacks++] = row;
         }
-        for (std::size_t i = keptStacks; i < beforeStacks; ++i)
+        for (std::size_t i = keptStacks; i < beforeStacks; ++i) {
             character->stacks.values[i] = {};
+        }
         character->stacks.count = keptStacks;
     }
-    if (removed == 0) return {true, 0, "bucket already empty"};
-    if (!account::valid(*snapshot) || !store::write_account(*snapshot) || !transaction.commit())
+    if (removed == 0) {
+        return {true, 0, "bucket already empty"};
+    }
+    if (!account::valid(*snapshot) || !store::write_account(*snapshot) || !transaction.commit()) {
         return {false, 0, "removal transaction failed; no changes committed"};
+    }
     return {true, removed, "bucket emptied; no rewards, claims or refunds"};
 }
 
@@ -506,28 +644,36 @@ Result drop_season_pass() noexcept {
                                             pass::kHudProgressionDefinitionIndex};
     std::array<data::season_pass::Reward, data::season_pass::kRewardCapacity> rewards{};
     std::size_t rewardCount = 0;
-    if (!data::season_pass::snapshot(rewards, rewardCount) || rewardCount == 0)
+    if (!data::season_pass::snapshot(rewards, rewardCount) || rewardCount == 0) {
         return {false, 0, "installed season pass rewards unavailable; no changes committed"};
+    }
 
     std::array<std::uint16_t, data::progressions::kDefinitionCapacity> accountSlots{};
     std::size_t slotCount = 0;
-    if (!data::find_progression_slots(data::progressions::Scope::account, accountSlots, slotCount))
+    if (!data::find_progression_slots(
+            data::progressions::Scope::account, accountSlots, slotCount)) {
         return {false, 0, "installed account progression mapping unavailable"};
+    }
+    const auto slots = std::span(accountSlots).first(slotCount);
     std::size_t passRankCount = 0;
     for (const auto index : progressionIndices) {
         std::array<data::progressions::Step, data::progressions::kStepPerDefinitionCapacity>
             steps{};
         std::size_t stepCount = 0;
-        if (std::find(accountSlots.begin(), accountSlots.begin() + slotCount, index)
-                == accountSlots.begin() + slotCount
-            || !data::find_progression_steps(index, steps, stepCount) || stepCount == 0)
+        if (std::find(slots.begin(), slots.end(), index) == slots.end()
+            || !data::find_progression_steps(index, steps, stepCount) || stepCount == 0) {
             return {false, 0, "installed season pass progression unavailable"};
-        for (std::size_t step = 0; step < stepCount; ++step)
+        }
+        for (std::size_t step = 0; step < stepCount; ++step) {
             if (steps[step].cost < 0
                 || (index == pass::kProgressionDefinitionIndex
-                    && (step == 0 ? steps[step].cost != 0 : steps[step].cost == 0)))
+                    && (step == 0 ? steps[step].cost != 0 : steps[step].cost == 0))) {
                 return {false, 0, "installed season pass rank mapping unavailable"};
-        if (index == pass::kProgressionDefinitionIndex) passRankCount = stepCount;
+            }
+        }
+        if (index == pass::kProgressionDefinitionIndex) {
+            passRankCount = stepCount;
+        }
     }
     // These are reward-row claims, not item/collectible ownership. Class wrappers have their
     // own rows in this same catalog; expanding a wrapper only grants inventory residents.
@@ -538,18 +684,24 @@ Result drop_season_pass() noexcept {
             || reward.claimFlagIndex >= unlocks::kAccountFlagCapacity || reward.quantity == 0
             || reward.requiredRank > passRankCount
             || !data::find_item_definition_index(reward.itemIndex, item) || reward.itemHash == 0
-            || item.definitionHash != reward.itemHash)
+            || item.definitionHash != reward.itemHash) {
             return {false, 0, "season pass reward identity or claim mapping unavailable"};
+        }
     }
 
     std::unique_ptr<unlocks::Table> banks(new (std::nothrow) unlocks::Table);
-    if (!banks) return {false, 0, "allocation failed"};
+    if (!banks) {
+        return {false, 0, "allocation failed"};
+    }
     store::Transaction transaction;
-    if (!transaction.ready() || !store::read_unlocks(*banks))
+    if (!transaction.ready() || !store::read_unlocks(*banks)) {
         return {false, 0, "investment unlock banks unavailable; no changes committed"};
-    for (std::size_t row = 0; row < rewardCount; ++row)
-        if (banks->accountFlags[rewards[row].claimFlagIndex] > 3)
+    }
+    for (std::size_t row = 0; row < rewardCount; ++row) {
+        if (banks->accountFlags[rewards[row].claimFlagIndex] > 3) {
             return {false, 0, "invalid native season pass claim value; no changes committed"};
+        }
+    }
 
     // Finish preflight before changing even the call-local after-image. Only these cells differ,
     // so write_unlocks persists only their sparse SQLite rows, under this outer transaction.
@@ -561,14 +713,17 @@ Result drop_season_pass() noexcept {
             ++changed; // Shared claim indices count once.
         }
     }
-    for (const auto index : progressionIndices)
-        for (auto& lane : banks->accountProgressions[index])
+    for (const auto index : progressionIndices) {
+        for (auto& lane : banks->accountProgressions[index]) {
             if (lane != 0) {
                 lane = 0;
                 ++changed;
             }
-    if ((changed != 0 && !store::write_unlocks(*banks)) || !transaction.commit())
+        }
+    }
+    if ((changed != 0 && !store::write_unlocks(*banks)) || !transaction.commit()) {
         return {false, 0, "season pass reset transaction failed; no changes committed"};
+    }
     return {true,
             changed,
             changed == 0 ? "season pass already reset (zero XP, native rank 1)"

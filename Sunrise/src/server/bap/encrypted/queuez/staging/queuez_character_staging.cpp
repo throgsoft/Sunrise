@@ -577,12 +577,17 @@ bool stage_record_reward_grant(const SessionState& before,
         for (std::size_t index = 0; index < before.family4ResidentCount; ++index) {
             const auto& resident = before.family4Residents[index];
             if (resident.objectSoid == releasedInstanceSoid) {
-                if (resident.definitionId != itemDefinitionId) return false;
+                if (resident.definitionId != itemDefinitionId) {
+                    return false;
+                }
                 ++matches;
-            } else
+            } else {
                 grant.after.family4Residents[kept++] = resident;
+            }
         }
-        if (matches != 1) return false;
+        if (matches != 1) {
+            return false;
+        }
         grant.after.family4Residents[kept] = {};
         grant.after.family4ResidentCount =
             static_cast<decltype(grant.after.family4ResidentCount)>(kept);

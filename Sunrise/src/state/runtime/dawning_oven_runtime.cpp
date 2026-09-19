@@ -22,7 +22,9 @@ struct Recipe {
 };
 
 bool resolve_recipe(std::size_t index, bool discounted, Recipe& result) noexcept {
-    if (index >= identity::kRecipes.size()) return false;
+    if (index >= identity::kRecipes.size()) {
+        return false;
+    }
     Recipe recipe{};
     const auto& mapping = identity::kRecipes[index];
     const auto hash = discounted ? mapping.masterworkedPlugHash : mapping.plugHash;
@@ -33,42 +35,52 @@ bool resolve_recipe(std::size_t index, bool discounted, Recipe& result) noexcept
         || !build_data::find_material_requirement_set(
             recipe.plug.insertionMaterialRequirementSetIndex, recipe.costs)
         || recipe.costs.requirementSetIndex != recipe.plug.insertionMaterialRequirementSetIndex
-        || recipe.costs.requirementCount != 3)
+        || recipe.costs.requirementCount != 3) {
         return false;
+    }
     for (std::size_t i = 0; i < recipe.costs.requirementCount; ++i) {
         const auto& cost = recipe.costs.requirements[i];
         items::Definition material{};
         if (!cost.deleteOnAction || cost.omitFromRequirements || cost.quantity == 0
-            || !build_data::find_item_definition_index(cost.itemDefinitionIndex, material))
+            || !build_data::find_item_definition_index(cost.itemDefinitionIndex, material)) {
             return false;
+        }
         if (material.definitionHash == identity::kEssenceHash) {
             if (recipe.essence.quantity != 0
                 || cost.condition != materials::kUnconditionalRequirement
                 || cost.quantity
-                       > static_cast<std::uint32_t>((std::numeric_limits<std::int32_t>::max)()))
+                       > static_cast<std::uint32_t>((std::numeric_limits<std::int32_t>::max)())) {
                 return false;
+            }
             recipe.essence = cost;
             continue;
         }
         const auto ingredient = identity::ingredient(material.definitionHash);
         if (!ingredient_installed(ingredient) || cost.quantity != 1
-            || material.definitionHash != identity::kIngredients[ingredient].plugHash)
+            || material.definitionHash != identity::kIngredients[ingredient].plugHash) {
             return false;
+        }
         // The native selector is the actual debit, even when the displayed material differs.
         // These twenty retained kind-1 value definitions map to account rows 204..223.
-        if (cost.condition < 512 || cost.condition >= 512 + identity::kIngredientCount)
+        if (cost.condition < 512 || cost.condition >= 512 + identity::kIngredientCount) {
             return false;
+        }
         const auto balance = static_cast<std::size_t>(cost.condition - 512);
-        if ((ingredient < 6) != (balance < 6) || !ingredient_installed(balance)) return false;
+        if ((ingredient < 6) != (balance < 6) || !ingredient_installed(balance)) {
+            return false;
+        }
         auto& destination = ingredient < 6 ? recipe.first : recipe.second;
         auto& debit = ingredient < 6 ? recipe.firstCost : recipe.secondCost;
-        if (destination != identity::kIngredientCount) return false;
+        if (destination != identity::kIngredientCount) {
+            return false;
+        }
         destination = ingredient;
         debit = balance;
     }
     if (recipe.first >= 6 || recipe.second < 6 || recipe.second >= identity::kIngredientCount
-        || recipe.essence.quantity == 0)
+        || recipe.essence.quantity == 0) {
         return false;
+    }
     result = recipe;
     return true;
 }
@@ -98,11 +110,14 @@ bool stage(const AccountState& snapshot,
     mutation = {};
     if (!account::valid(snapshot) || !valid_profile_inventory(snapshot)
         || characterIndex >= snapshot.characterCount || socketLane < 2 || socketLane > 4
-        || !snapshot.characters[characterIndex].selected)
+        || !snapshot.characters[characterIndex].selected) {
         return false;
+    }
     const auto& character = snapshot.characters[characterIndex];
     CharacterItemLocation location{};
-    if (!find_character_item_location(character, targetInstanceSoid, location)) return false;
+    if (!find_character_item_location(character, targetInstanceSoid, location)) {
+        return false;
+    }
     const auto* target = character_item_at(character, location);
     items::Definition oven{}, requested{};
     items::details::Definition detail{};
@@ -115,43 +130,54 @@ bool stage(const AccountState& snapshot,
         || detail.ordinarySocketState != items::details::OrdinarySocketState::present
         || !build_data::find_item_definition_index(plugDefinitionIndex, requested)
         || !build_data::is_socket_plug_allowed(
-            oven.definitionIndex, socketLane, plugDefinitionIndex))
+            oven.definitionIndex, socketLane, plugDefinitionIndex)) {
         return false;
+    }
     auto sockets = target->sockets;
     account::inventory::Sockets defaults{};
     defaults.policy = account::inventory::SocketPolicy::authored;
     defaults.plugCount = detail.ordinarySocketCount;
     for (std::size_t lane = 0; lane < defaults.plugCount; ++lane) {
         items::Definition plug{};
-        if (!build_data::find_item_definition_index(detail.initialPlugIndices[lane], plug))
+        if (!build_data::find_item_definition_index(detail.initialPlugIndices[lane], plug)) {
             return false;
+        }
         defaults.plugs[lane] = plug.definitionHash;
     }
-    if (sockets.policy == account::inventory::SocketPolicy::nativeDefaults) sockets = defaults;
+    if (sockets.policy == account::inventory::SocketPolicy::nativeDefaults) {
+        sockets = defaults;
+    }
     if (sockets.policy != account::inventory::SocketPolicy::authored || sockets.plugCount != 5
-        || !account::inventory::valid(sockets))
+        || !account::inventory::valid(sockets)) {
         return false;
+    }
     State before{};
-    if (!read(before)) return false;
+    if (!read(before)) {
+        return false;
+    }
     auto after = before;
     after.initialized = true;
     AccountState candidate = snapshot;
     materials::Definition costs{};
     const bool discounted = sockets.plugs[4] == identity::kMasterworkHash;
-    if (!discounted && sockets.plugs[4] != defaults.plugs[4]) return false;
+    if (!discounted && sockets.plugs[4] != defaults.plugs[4]) {
+        return false;
+    }
 
     if (socketLane == 4) {
         if (requested.definitionHash != identity::kMasterworkHash || discounted
             || !std::all_of(before.recipes.begin(), before.recipes.end(), [](auto flag) {
                    return flag == unlocks::kFlagSet;
-               }))
+               })) {
             return false;
+        }
         if (requested.insertionMaterialRequirementSetIndex != materials::kUnavailableSetIndex
             && (!build_data::find_material_requirement_set(
                     requested.insertionMaterialRequirementSetIndex, costs)
                 || costs.requirementSetIndex != requested.insertionMaterialRequirementSetIndex
-                || costs.requirementCount != 0))
+                || costs.requirementCount != 0)) {
             return false;
+        }
         sockets.plugs[4] = identity::kMasterworkHash;
     } else {
         std::size_t chosen = identity::kRecipes.size();
@@ -160,35 +186,45 @@ bool stage(const AccountState& snapshot,
             for (std::size_t i = 0; i < identity::kRecipes.size(); ++i) {
                 const auto& row = identity::kRecipes[i];
                 if (requested.definitionHash
-                    == (discounted ? row.masterworkedPlugHash : row.plugHash))
+                    == (discounted ? row.masterworkedPlugHash : row.plugHash)) {
                     chosen = i;
+                }
             }
             if (chosen == identity::kRecipes.size() || before.recipes[chosen] != unlocks::kFlagSet
-                || !resolve_recipe(chosen, discounted, recipe))
+                || !resolve_recipe(chosen, discounted, recipe)) {
                 return false;
+            }
             if (discounted) {
                 Recipe ordinary{};
                 if (!resolve_recipe(chosen, false, ordinary) || ordinary.first != recipe.first
                     || ordinary.second != recipe.second || ordinary.firstCost != recipe.firstCost
                     || ordinary.secondCost != recipe.secondCost
-                    || ordinary.essence.quantity <= recipe.essence.quantity)
+                    || ordinary.essence.quantity <= recipe.essence.quantity) {
                     return false;
+                }
             }
         } else {
-            if (requested.definitionHash != identity::kCombineHash || discounted) return false;
+            if (requested.definitionHash != identity::kCombineHash || discounted) {
+                return false;
+            }
             const auto first = identity::ingredient(sockets.plugs[0].value_or(0));
             const auto second = identity::ingredient(sockets.plugs[1].value_or(0));
             if (first >= 6 || second < 6 || second >= identity::kIngredientCount
                 || sockets.plugs[0] != identity::kIngredients[first].plugHash
                 || sockets.plugs[1] != identity::kIngredients[second].plugHash
-                || !ingredient_installed(first) || !ingredient_installed(second))
+                || !ingredient_installed(first) || !ingredient_installed(second)) {
                 return false;
+            }
             // Resolve the complete installed menu before declaring a pair unmatched (burnt).
             for (std::size_t i = 0; i < identity::kRecipes.size(); ++i) {
                 Recipe option{};
-                if (!resolve_recipe(i, false, option)) return false;
+                if (!resolve_recipe(i, false, option)) {
+                    return false;
+                }
                 if (option.first == first && option.second == second) {
-                    if (chosen != identity::kRecipes.size()) return false;
+                    if (chosen != identity::kRecipes.size()) {
+                        return false;
+                    }
                     chosen = i;
                     recipe = option;
                 }
@@ -202,8 +238,9 @@ bool stage(const AccountState& snapshot,
                         requested.insertionMaterialRequirementSetIndex, recipe.costs)
                     || recipe.costs.requirementSetIndex
                            != requested.insertionMaterialRequirementSetIndex
-                    || recipe.costs.requirementCount != 1)
+                    || recipe.costs.requirementCount != 1) {
                     return false;
+                }
                 recipe.essence = recipe.costs.requirements[0];
                 items::Definition essence{};
                 if (!build_data::find_item_definition_index(recipe.essence.itemDefinitionIndex,
@@ -211,12 +248,14 @@ bool stage(const AccountState& snapshot,
                     || essence.definitionHash != identity::kEssenceHash
                     || recipe.essence.quantity == 0 || !recipe.essence.deleteOnAction
                     || recipe.essence.omitFromRequirements
-                    || recipe.essence.condition != materials::kUnconditionalRequirement)
+                    || recipe.essence.condition != materials::kUnconditionalRequirement) {
                     return false;
+                }
             }
         }
-        if (after.ingredients[recipe.firstCost] < 1 || after.ingredients[recipe.secondCost] < 1)
+        if (after.ingredients[recipe.firstCost] < 1 || after.ingredients[recipe.secondCost] < 1) {
             return false;
+        }
         costs = recipe.costs;
         materials::Definition charge = costs;
         charge.requirementCount = 1;
@@ -230,33 +269,49 @@ bool stage(const AccountState& snapshot,
         bool charged = false;
         if (!profile_stack(identity::kEssenceHash, essence, essenceDetail)
             || !profile_stack(cookieHash, cookie, cookieDetail)
-            || !apply_action_materials(snapshot, charge, candidate, charged) || !charged)
+            || !apply_action_materials(snapshot, charge, candidate, charged) || !charged) {
             return false;
+        }
         PendingProfileItemAcquisition grant{};
-        if (!finalize_profile_item_acquisition(
-                candidate, candidate, cookieHash, cookieDetail, false, 1, {.direct = true}, grant))
+        if (!finalize_profile_item_acquisition(candidate,
+                                               candidate,
+                                               cookieHash,
+                                               cookieDetail,
+                                               false,
+                                               1,
+                                               {.direct = true},
+                                               grant)) {
             return false;
+        }
         // The Essence debit may compact a pre-existing cookie row, or remove the greatest
         // serial. Grant against that compacted view but keep acquisition ordering above
         // every row the client saw before payment.
         std::int32_t greatest = 0;
-        for (std::size_t i = 0; i < snapshot.profileItemCount; ++i)
+        for (std::size_t i = 0; i < snapshot.profileItemCount; ++i) {
             greatest = (std::max)(greatest, snapshot.profileItems[i].mutationSerial);
+        }
         auto& baked = grant.afterItems[grant.profileIndex];
         if (baked.mutationSerial <= greatest) {
-            if (greatest == (std::numeric_limits<std::int32_t>::max)()) return false;
+            if (greatest == (std::numeric_limits<std::int32_t>::max)()) {
+                return false;
+            }
             baked.mutationSerial = greatest + 1;
         }
         candidate.profileItems = grant.afterItems;
         candidate.profileItemCount = grant.afterItemCount;
         --after.ingredients[recipe.firstCost];
         --after.ingredients[recipe.secondCost];
-        if (chosen != identity::kRecipes.size()) after.recipes[chosen] = unlocks::kFlagSet;
-        for (std::size_t lane = 0; lane < 4; ++lane)
+        if (chosen != identity::kRecipes.size()) {
+            after.recipes[chosen] = unlocks::kFlagSet;
+        }
+        for (std::size_t lane = 0; lane < 4; ++lane) {
             sockets.plugs[lane] = defaults.plugs[lane];
+        }
     }
     auto* changed = character_item_at(candidate.characters[characterIndex], location);
-    if (!changed) return false;
+    if (!changed) {
+        return false;
+    }
     changed->sockets = sockets;
     middleware::datagen::family4::loadout::ResolvedLoadout beforeLoadout{}, afterLoadout{};
     ResolvedPosition beforePosition{}, afterPosition{};
@@ -265,11 +320,13 @@ bool stage(const AccountState& snapshot,
         || !middleware::datagen::family4::loadout::resolve(candidate, characterIndex, afterLoadout)
         || !find_resolved_position(beforeLoadout, targetInstanceSoid, beforePosition)
         || !find_resolved_position(afterLoadout, targetInstanceSoid, afterPosition)
-        || !same_position(beforePosition, afterPosition))
+        || !same_position(beforePosition, afterPosition)) {
         return false;
+    }
     items::Definition result{};
-    if (!build_data::find_item_definition_hash(sockets.plugs[socketLane].value_or(0), result))
+    if (!build_data::find_item_definition_hash(sockets.plugs[socketLane].value_or(0), result)) {
         return false;
+    }
     mutation.beforeCharacter = character;
     mutation.afterCharacter = candidate.characters[characterIndex];
     mutation.beforeProfileItems = snapshot.profileItems;

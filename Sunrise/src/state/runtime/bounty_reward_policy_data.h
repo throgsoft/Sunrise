@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <cstdint>
 
+#include "../account/inventory/material_identity.h"
 #include "../progression/season_pass_reward_catalog.h"
 
 namespace sunrise::state::runtime::detail::bounty_policy {
@@ -131,10 +132,10 @@ inline constexpr std::array<std::uint32_t, 2> kBlackArmoryArmorBounties{
 };
 
 /** Enhancement Cores are the exact multi-stack exception observed in the target inventory. */
-inline constexpr std::uint32_t kEnhancementCoreHash = 3853748946U;
+using account::inventory::kEnhancementCoreHash;
 
 /** Exact profile-wallet row whose bounty overflow saturates instead of blocking redemption. */
-inline constexpr std::uint32_t kGlimmerHash = 3159615086U;
+using account::inventory::kGlimmerHash;
 
 /**
  * Standard and focused Arrivals Umbral Engrams from the target manifest.

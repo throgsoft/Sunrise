@@ -80,13 +80,18 @@ bool Statement::text(int column, std::string_view& value) const noexcept {
 }
 
 namespace {
+/** Latest migration this build can read, including databases it created on a previous launch. */
+constexpr int kSchemaVersion = 8;
+
 /**
  * Widens the inventory row bound from one flat budget to the span the character buckets
  * actually address. Rebuilds only the constrained parent table; sockets and objective
  * identities remain intact.
  */
 bool migrate_bucket_row_span() noexcept {
-    if (!execute("PRAGMA foreign_keys=OFF")) return false;
+    if (!execute("PRAGMA foreign_keys=OFF")) {
+        return false;
+    }
     const bool migrated = []() noexcept {
         Transaction transaction;
         if (!transaction.ready() || !execute(R"sql(
@@ -131,7 +136,9 @@ PRAGMA user_version=7;
 bool migrate_postmaster_storage() noexcept {
     // SQLite cannot change foreign_keys inside a savepoint. The open-time mutex is held and
     // no account readers exist yet; restore enforcement after the savepoint ends on either path.
-    if (!execute("PRAGMA foreign_keys=OFF")) return false;
+    if (!execute("PRAGMA foreign_keys=OFF")) {
+        return false;
+    }
     const bool migrated = []() noexcept {
         Transaction transaction;
         if (!transaction.ready() || !execute(R"sql(
@@ -213,10 +220,7 @@ bool open(std::string_view path,
                 && execute(preferenceSchema.c_str()) && execute(preferenceDefaults.c_str())
                 && transaction.commit();
     } else if (ready) {
-        // Version 2 adds account preferences and per-item seen state. A database stamped above
-        // the supported maximum was written by a build carrying tables this one does not know,
-        // so it is refused rather than reused; the caller reports the store as unavailable.
-        constexpr int kSchemaVersion = 6;
+        // Refuse newer schemas before reading tables whose layout this build does not know.
         constexpr int kApplicationId = 1397902921;
         int application = 0;
         Statement query("PRAGMA application_id");
@@ -298,7 +302,31 @@ bool open(std::string_view path,
             ready = migrate_bucket_row_span();
             currentVersion = 7;
         }
-        if (ready && currentVersion != 7) ready = false;
+        if (ready && currentVersion == 7) {
+            // Reward kind 2 is a non-instanced character stack. Preserve pending row IDs so a
+            // saved reward keeps its ordering and acknowledgement identity across the upgrade.
+            Transaction transaction;
+            ready = transaction.ready() && execute(R"sql(
+CREATE TABLE pending_rewards_stack_migration (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    character_slot INTEGER NOT NULL CHECK (character_slot BETWEEN 0 AND 2),
+    kind INTEGER NOT NULL CHECK (kind IN (0, 1, 2)),
+    definition_hash INTEGER NOT NULL CHECK (definition_hash BETWEEN 1 AND 4294967295),
+    quantity INTEGER NOT NULL CHECK (quantity > 0)
+) STRICT;
+INSERT INTO pending_rewards_stack_migration SELECT * FROM pending_rewards;
+UPDATE sqlite_sequence SET seq = MAX(seq, COALESCE(
+    (SELECT seq FROM sqlite_sequence WHERE name = 'pending_rewards'), 0))
+WHERE name = 'pending_rewards_stack_migration';
+DROP TABLE pending_rewards;
+ALTER TABLE pending_rewards_stack_migration RENAME TO pending_rewards;
+PRAGMA user_version=8;
+)sql") && transaction.commit();
+            currentVersion = 8;
+        }
+        if (ready && currentVersion != kSchemaVersion) {
+            ready = false;
+        }
     }
     if (!ready) {
         shutdown();

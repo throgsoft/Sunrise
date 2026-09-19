@@ -217,8 +217,9 @@ bool encode(const items::details::Definition& value, ItemDetailRecord& record) n
     if (!acquired_mapping_valid(value.acquiredFlagSlot, value.acquiredAccountFlag)) {
         return false;
     }
-    if (value.objectiveCount > value.objectiveIndices.size() || value.lifetimeSeconds < 0)
+    if (value.objectiveCount > value.objectiveIndices.size() || value.lifetimeSeconds < 0) {
         return false;
+    }
     if (value.instancedDefinitionState != items::details::InstancedDefinitionState::stackable
         && value.instancedDefinitionState != items::details::InstancedDefinitionState::instanced) {
         return false;
@@ -233,11 +234,14 @@ bool encode(const items::details::Definition& value, ItemDetailRecord& record) n
     record.acquiredFlagSlot = value.acquiredFlagSlot;
     record.acquiredAccountFlag = value.acquiredAccountFlag;
     record.objectiveCount = value.objectiveCount;
-    if (value.rewardCount > value.rewards.size()) return false;
+    if (value.rewardCount > value.rewards.size()) {
+        return false;
+    }
     record.rewardCount = value.rewardCount;
-    for (std::size_t i = 0; i < record.rewards.size(); ++i)
+    for (std::size_t i = 0; i < record.rewards.size(); ++i) {
         record.rewards[i] = {
             value.rewards[i].itemIndex, value.rewards[i].companionIndex, value.rewards[i].quantity};
+    }
     record.objectiveIndices = value.objectiveIndices;
     record.lifetimeSeconds = value.lifetimeSeconds;
     record.ordinarySocketState = static_cast<std::uint8_t>(value.ordinarySocketState);
@@ -268,13 +272,15 @@ bool encode(const items::details::Definition& value, ItemDetailRecord& record) n
 /** Turns the equipment-slot unset value back into a runtime optional. */
 bool decode(const ItemDetailRecord& record, items::details::Definition& value) noexcept {
     if (record.acquireEffectKnown > 1
-        || (!record.acquireEffectKnown && record.acquireEffectIndex != 0))
+        || (!record.acquireEffectKnown && record.acquireEffectIndex != 0)) {
         return false;
+    }
     if (!acquired_mapping_valid(record.acquiredFlagSlot, record.acquiredAccountFlag)) {
         return false;
     }
-    if (record.objectiveCount > record.objectiveIndices.size() || record.lifetimeSeconds < 0)
+    if (record.objectiveCount > record.objectiveIndices.size() || record.lifetimeSeconds < 0) {
         return false;
+    }
     value = {};
     if (record.instancedDefinition
         > static_cast<std::uint8_t>(items::details::InstancedDefinitionState::instanced)) {
@@ -285,16 +291,21 @@ bool decode(const ItemDetailRecord& record, items::details::Definition& value) n
     value.maxStackSize = record.maxStackSize;
     value.instancedDefinitionState =
         static_cast<items::details::InstancedDefinitionState>(record.instancedDefinition);
-    if (record.acquireEffectKnown) value.acquireEffectIndex = record.acquireEffectIndex;
+    if (record.acquireEffectKnown) {
+        value.acquireEffectIndex = record.acquireEffectIndex;
+    }
     value.acquiredFlagSlot = record.acquiredFlagSlot;
     value.acquiredAccountFlag = record.acquiredAccountFlag;
     value.objectiveCount = record.objectiveCount;
-    if (record.rewardCount > record.rewards.size()) return false;
+    if (record.rewardCount > record.rewards.size()) {
+        return false;
+    }
     value.rewardCount = record.rewardCount;
-    for (std::size_t i = 0; i < value.rewards.size(); ++i)
+    for (std::size_t i = 0; i < value.rewards.size(); ++i) {
         value.rewards[i] = {record.rewards[i].itemIndex,
                             record.rewards[i].companionIndex,
                             record.rewards[i].quantity};
+    }
     value.objectiveIndices = record.objectiveIndices;
     value.lifetimeSeconds = record.lifetimeSeconds;
     if (record.equipmentSlot != kAbsentEquipmentSlot) {

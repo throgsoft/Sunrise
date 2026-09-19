@@ -232,6 +232,8 @@ inline constexpr std::size_t kGearsetItemStride = 2;
 inline constexpr std::size_t kCollectibleAcquiredExpressionField = 112;
 /** Investment root slot of the unlock flag slot table, which is keyed by slot. */
 inline constexpr std::size_t kUnlockFlagSlotTableSlot = 112;
+/** Investment root slot of the unlock value slot table, paired with its mapping table. */
+inline constexpr std::size_t kUnlockValueSlotTableSlot = 114;
 /** One flag slot row, and the bank row it feeds inside the object its kind names. */
 inline constexpr std::size_t kUnlockSlotRowStride = 8;
 inline constexpr std::size_t kUnlockSlotBankIndexOffset = 6;

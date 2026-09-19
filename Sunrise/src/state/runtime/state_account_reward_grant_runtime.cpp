@@ -4,11 +4,15 @@
  */
 #include <Windows.h>
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
 #include <limits>
+#include <memory>
+#include <new>
 
+#include "../../core/logging/log.h"
 #include "../../middleware/datagen/family4/loadout/loadout_resolver.h"
 #include "../build_data/runtime.h"
 #include "../investment/store_internal.h"
@@ -19,6 +23,7 @@
 #include "dawning_reward_runtime.h"
 #include "fifo_bucket_eviction.h"
 #include "profile_stack_credit.h"
+#include "record_reward_placement.h"
 #include "runtime.h"
 #include "state_account_transaction_helpers.h"
 #include "storage/internal.h"
@@ -96,7 +101,9 @@ namespace {
     // reward's own item and the total may not exceed what the row promised.
     std::int64_t credited = 0;
     for (std::size_t index = 0; index < resources->rewardCount; ++index) {
-        if (resources->rewards[index].definitionHash != reward.itemHash) return false;
+        if (resources->rewards[index].definitionHash != reward.itemHash) {
+            return false;
+        }
         credited += resources->rewards[index].quantity;
     }
     return credited > 0 && credited <= static_cast<std::int64_t>(reward.quantity);
@@ -116,7 +123,9 @@ bool commit_season_pass_reward(PendingSeasonPassReward& mutation) noexcept {
 
     const bool ready = [&]() noexcept {
         investment::store::Transaction transaction;
-        if (!transaction.ready()) return false;
+        if (!transaction.ready()) {
+            return false;
+        }
         AccountState after{};
         bool staged = false;
         if (const auto* item = std::get_if<PendingItemAcquisition>(&mutation.grant)) {
@@ -150,8 +159,9 @@ namespace {
 [[nodiscard]] bool materialize_record_reward(const AccountState& current,
                                              const PendingRecordRewardGrant& mutation,
                                              AccountState& after) noexcept {
-    if (mutation.pursuitRedemption)
+    if (mutation.pursuitRedemption) {
         return bounty::materialize_redemption_grant(current, mutation, after);
+    }
     if (!dawning::validate_rewards(mutation) || !mutation.prepared || mutation.rewardCount == 0
         || mutation.rewardCount > mutation.rewards.size() || mutation.accountSoid == 0
         || mutation.characterSoid == 0 || mutation.characterIndex >= current.characterCount
@@ -182,7 +192,9 @@ namespace {
 
     for (std::size_t index = 0; index < mutation.rewardCount; ++index) {
         const PreparedRecordReward& reward = mutation.rewards[index];
-        if (reward.kind == RecordRewardKind::accountMaterial) continue;
+        if (reward.kind == RecordRewardKind::accountMaterial) {
+            continue;
+        }
         build_data::items::Definition item{};
         item_details::Definition detail{};
         inventory_buckets::Descriptor bucket{};
@@ -259,12 +271,14 @@ namespace {
 } // namespace
 
 /** Prepares every reward over one cumulative account view. */
-bool runtime::detail::stage_record_reward_grant(const AccountState& account,
-                                                std::span<const DirectRecordReward> rewards,
-                                                std::uint16_t claimedRecordIndex,
-                                                PendingRecordRewardGrant& mutation) noexcept {
+bool runtime::detail::stage_reward_placement(const AccountState& account,
+                                             std::span<const DirectRecordReward> rewards,
+                                             std::uint16_t claimedRecordIndex,
+                                             RewardPlacementContext context,
+                                             PendingRecordRewardGrant& mutation) noexcept {
     mutation = {};
-    if (rewards.empty() || rewards.size() > mutation.rewards.size()) {
+    const bool bountyRedemption = context.policy == RewardPlacementPolicy::bountyRedemption;
+    if ((!bountyRedemption && rewards.empty()) || rewards.size() > mutation.rewards.size()) {
         return false;
     }
     const std::size_t characterIndex = selected_character_index(account);
@@ -273,32 +287,44 @@ bool runtime::detail::stage_record_reward_grant(const AccountState& account,
         return false;
     }
 
-    AccountState working = account;
+    auto workingStorage = std::unique_ptr<AccountState>{new (std::nothrow) AccountState(account)};
+    if (!workingStorage) {
+        return false;
+    }
+    auto& working = *workingStorage;
     std::size_t rewardCount = 0;
     for (std::size_t index = 0; index < rewards.size(); ++index) {
         const DirectRecordReward& requested = rewards[index];
+        if (requested.quantity <= 0) {
+            return false;
+        }
         PreparedRecordReward material{};
         const auto materialResult = dawning::stage_reward(
             working.characters[characterIndex], requested, mutation, material);
-        if (materialResult == dawning::MaterialReward::refused) return false;
+        if (materialResult == dawning::MaterialReward::refused) {
+            return false;
+        }
         if (materialResult == dawning::MaterialReward::staged) {
-            if (rewardCount >= mutation.rewards.size()) return false;
+            if (rewardCount >= mutation.rewards.size()) {
+                return false;
+            }
             mutation.rewards[rewardCount++] = material;
             continue;
         }
         build_data::items::Definition item{};
         item_details::Definition detail{};
         inventory_buckets::Descriptor bucket{};
-        if (requested.quantity <= 0
-            || !build_data::find_item_definition_index(requested.itemDefinitionIndex, item)
+        if (!build_data::find_item_definition_index(requested.itemDefinitionIndex, item)
             || !build_data::find_configured_item_detail(requested.itemDefinitionIndex, detail)
             || detail.definitionIndex != item.definitionIndex
             || detail.definitionHash != item.definitionHash || detail.bucketId != item.bucketId
+            || (bountyRedemption && detail.maxStackSize <= 0)
             || !build_data::find_inventory_bucket_descriptor(item.bucketId, bucket)) {
             return false;
         }
         if (detail.instancedDefinitionState == item_details::InstancedDefinitionState::stackable) {
-            for (std::size_t prior = 0; prior < index; ++prior) {
+            const auto checkedCount = bountyRedemption ? rewardCount : index;
+            for (std::size_t prior = 0; prior < checkedCount; ++prior) {
                 if (mutation.rewards[prior].definitionHash == item.definitionHash) {
                     return false;
                 }
@@ -322,17 +348,53 @@ bool runtime::detail::stage_record_reward_grant(const AccountState& account,
                                                credited)) {
                 return false;
             }
+            if (bountyRedemption && credited != requested.quantity) {
+                core::log::writef(
+                    core::log::Channel::state,
+                    core::log::Level::info,
+                    "ev=bounty_reward stage=capacity item=%u requested=%d credited=%d "
+                    "postmaster_queued=0",
+                    static_cast<unsigned>(item.definitionIndex),
+                    requested.quantity,
+                    credited);
+            }
             continue;
         } else if (bucket.arraySelector == inventory_buckets::ArraySelector::character
                    && detail.instancedDefinitionState
                           == item_details::InstancedDefinitionState::instanced) {
-            if (requested.quantity != 1) {
+            if (requested.quantity != 1
+                || (bountyRedemption && rewardCount == mutation.rewards.size())) {
                 return false;
             }
             PendingItemAcquisition staged{};
             if (!finalize_item_acquisition(
                     working, working, item.definitionHash, false, {.direct = true}, staged)) {
                 return false;
+            }
+            if (bountyRedemption) {
+                auto& resident = staged.afterCharacter.inventory.values[staged.inventoryIndex];
+                if (resident.instanceSoid <= context.reservedSourceSoid) {
+                    if (context.reservedSourceSoid == (std::numeric_limits<std::uint64_t>::max)()) {
+                        return false;
+                    }
+                    auto soid = context.reservedSourceSoid + 1;
+                    while (account_owns_soid(working, soid)) {
+                        if (soid == (std::numeric_limits<std::uint64_t>::max)()) {
+                            return false;
+                        }
+                        ++soid;
+                    }
+                    resident.instanceSoid = staged.acquiredInstanceSoid = soid;
+                }
+                if (detail.objectiveCount != 0 && detail.lifetimeSeconds > 0
+                    && context.grantTime > 0) {
+                    if (context.grantTime
+                        > (std::numeric_limits<std::int32_t>::max)() - detail.lifetimeSeconds) {
+                        return false;
+                    }
+                    resident.objectiveValues[authored_inventory::kItemExpiryLane] =
+                        static_cast<std::int32_t>(context.grantTime + detail.lifetimeSeconds);
+                }
             }
             working.characters[characterIndex] = staged.afterCharacter;
             prepared.instanceSoid = staged.acquiredInstanceSoid;
@@ -347,13 +409,14 @@ bool runtime::detail::stage_record_reward_grant(const AccountState& account,
                           == item_details::InstancedDefinitionState::stackable
                    && !detail.equipmentSlot.has_value()) {
             CharacterState& character = working.characters[characterIndex];
-            if (character.nextInventorySerial
-                >= static_cast<std::uint32_t>((std::numeric_limits<std::int32_t>::max)())) {
+            if (!bountyRedemption
+                && character.nextInventorySerial
+                       >= static_cast<std::uint32_t>((std::numeric_limits<std::int32_t>::max)())) {
                 return false;
             }
-            // The installed policy names this bucket first in, first out, so a full one admits
-            // the arrival by dropping its oldest row rather than refusing.
-            {
+            // Ordinary grants publish the arrival in this revision and may evict published FIFO
+            // rows. Redemption retains its earlier saturation policy without evicting a row.
+            if (!bountyRedemption) {
                 std::size_t occupied = 0;
                 bool matched = false;
                 for (std::size_t candidate = 0; candidate < character.stacks.count; ++candidate) {
@@ -373,20 +436,34 @@ bool runtime::detail::stage_record_reward_grant(const AccountState& account,
             std::size_t bucketStacks = 0;
             for (std::size_t candidate = 0; candidate < character.stacks.count; ++candidate) {
                 const auto& row = character.stacks.values[candidate];
-                build_data::items::Definition held{};
-                if (!build_data::find_item_definition_hash(row.definitionHash, held)) return false;
-                bucketStacks += held.bucketId == item.bucketId;
-                if (row.definitionHash == item.definitionHash) stackIndex = candidate;
+                if (!bountyRedemption) {
+                    build_data::items::Definition held{};
+                    if (!build_data::find_item_definition_hash(row.definitionHash, held)) {
+                        return false;
+                    }
+                    bucketStacks += held.bucketId == item.bucketId;
+                }
+                if (row.definitionHash == item.definitionHash
+                    && (!bountyRedemption || stackIndex == character.stacks.count)) {
+                    stackIndex = candidate;
+                }
             }
             const bool appended = stackIndex == character.stacks.count;
             const std::int32_t held = appended ? 0 : character.stacks.values[stackIndex].quantity;
-            if (held < 0 || held > detail.maxStackSize) return false;
+            if (held < 0 || held > detail.maxStackSize) {
+                return false;
+            }
             // The same saturation the earned reward path uses: credit what the stack can hold
             // rather than refusing the payout, and keep a bucket inside its own slot range.
             const std::int32_t credited =
                 (std::min)(requested.quantity, detail.maxStackSize - held);
+            if (credited == 0 && bountyRedemption) {
+                continue;
+            }
             if (credited <= 0 || (appended && stackIndex >= character.stacks.values.size())
-                || (appended && bucketStacks >= bucket.slotCount)) {
+                || (!bountyRedemption && appended && bucketStacks >= bucket.slotCount)
+                || character.nextInventorySerial
+                       >= static_cast<std::uint32_t>((std::numeric_limits<std::int32_t>::max)())) {
                 return false;
             }
             auto& stack = character.stacks.values[stackIndex];
@@ -404,7 +481,9 @@ bool runtime::detail::stage_record_reward_grant(const AccountState& account,
         } else {
             return false;
         }
-        if (rewardCount >= mutation.rewards.size()) return false;
+        if (rewardCount >= mutation.rewards.size()) {
+            return false;
+        }
         mutation.rewards[rewardCount++] = prepared;
     }
 
@@ -420,6 +499,17 @@ bool runtime::detail::stage_record_reward_grant(const AccountState& account,
                 || working.characters[characterIndex].stacks.count
                        > account.characters[characterIndex].stacks.count)) {
         return false;
+    }
+    if (bountyRedemption) {
+        for (std::size_t i = 0; i < rewardCount; ++i) {
+            auto& reward = mutation.rewards[i];
+            if (reward.kind == RecordRewardKind::characterInstance) {
+                std::uint8_t slot{};
+                if (!find_unequipped_row(loadout, reward.instanceSoid, reward.inventoryRow, slot)) {
+                    return false;
+                }
+            }
+        }
     }
     mutation.beforeCharacter = account.characters[characterIndex];
     mutation.afterCharacter = working.characters[characterIndex];
@@ -439,7 +529,7 @@ bool runtime::detail::stage_record_reward_grant(const AccountState& account,
 bool prepare_record_reward_grant(std::span<const DirectRecordReward> rewards,
                                  std::uint16_t claimedRecordIndex,
                                  PendingRecordRewardGrant& mutation) noexcept {
-    return stage_record_reward_grant(account_snapshot(), rewards, claimedRecordIndex, mutation);
+    return stage_reward_placement(account_snapshot(), rewards, claimedRecordIndex, {}, mutation);
 }
 
 bool preview_record_reward_grant(const PendingRecordRewardGrant& mutation,
@@ -451,15 +541,20 @@ bool preview_record_reward_grant(const PendingRecordRewardGrant& mutation,
 /** Commits the shared reward after-image and claim together. */
 bool commit_record_reward(PendingRecordRewardGrant& mutation) noexcept {
     const PendingConsumption consume{mutation};
-    if (mutation.pursuitRedemption) return bounty::commit_redemption_grant(mutation);
+    if (mutation.pursuitRedemption) {
+        return bounty::commit_redemption_grant(mutation);
+    }
     const bool ready = [&]() noexcept {
         investment::store::Transaction transaction;
         AccountState after{};
         // A quest handed out as a reward needs its first step seeded, exactly as the acquisition
         // path does, or it lands with no active step and the Client cannot track it.
         const auto seedQuests = [&mutation]() noexcept {
-            for (std::size_t i = 0; i < mutation.rewardCount && i < mutation.rewards.size(); ++i)
-                if (!seed_quest_initialization(mutation.rewards[i].definitionHash)) return false;
+            for (std::size_t i = 0; i < mutation.rewardCount && i < mutation.rewards.size(); ++i) {
+                if (!seed_quest_initialization(mutation.rewards[i].definitionHash)) {
+                    return false;
+                }
+            }
             return true;
         };
         return transaction.ready()

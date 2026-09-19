@@ -300,8 +300,9 @@ struct PendingRecordRewardGrant {
 /** Resident identity consumed by this transaction, if the entire source is removed. */
 [[nodiscard]] inline std::uint64_t
 released_reward_source(const PendingRecordRewardGrant& mutation) noexcept {
-    if (mutation.pursuitRedemption && mutation.pursuitRedemption->expectedQuantity == 1)
+    if (mutation.pursuitRedemption && mutation.pursuitRedemption->expectedQuantity == 1) {
         return mutation.pursuitRedemption->sourceInstanceSoid;
+    }
     return 0;
 }
 
@@ -564,17 +565,6 @@ set_selected_title(std::uint16_t recordIndex, std::uint64_t& characterSoid, bool
 [[nodiscard]] bool commit_equipment_swap(PendingEquipmentSwap& mutation) noexcept;
 
 /**
- * Prepares one installed equippable definition as a new selected-character inventory instance.
- *
- * Native-default sockets, a unique runtime SOID, and the selected character's current item level
- * are used. Full loadout resolution is the authoritative bucket-capacity check.
- *
- * @param collectibleIndex Collections row the Client pulled from.
- * @param definitionHash Installed item definition requested by the Client.
- * @param mutation Gets a checked after-image without changing account State.
- * @return True when the item and every existing loadout row resolve with one free native row.
- */
-/**
  * Writes one item's authored quest first step when its saved row is still unset.
  *
  * A quest with no first step has no active step, so the Client cannot track it. The acquisition
@@ -586,6 +576,15 @@ set_selected_title(std::uint16_t recordIndex, std::uint64_t& characterSoid, bool
  */
 [[nodiscard]] bool seed_quest_initialization(std::uint32_t definitionHash) noexcept;
 
+/**
+ * Prepares one installed item as a new selected-character inventory instance.
+ * Uses native-default sockets, a unique SOID, and the character's current item level.
+ * The final encoded character must fit every bucket, including synthetic quest rows.
+ * @param collectibleIndex Collections row, or kNoCollectibleIndex for an item-only grant.
+ * @param definitionHash Installed item definition requested by the Client.
+ * @param mutation Receives a checked after-image without changing account State.
+ * @return False when identity, costs, capacity, or saved state prevent the grant.
+ */
 [[nodiscard]] bool prepare_item_acquisition(std::uint16_t collectibleIndex,
                                             std::uint32_t definitionHash,
                                             PendingItemAcquisition& mutation) noexcept;
@@ -619,6 +618,15 @@ set_selected_title(std::uint16_t recordIndex, std::uint64_t& characterSoid, bool
 [[nodiscard]] bool prepare_record_reward_grant(std::span<const DirectRecordReward> rewards,
                                                std::uint16_t claimedRecordIndex,
                                                PendingRecordRewardGrant& mutation) noexcept;
+
+/** Prepares source consumption and every supported bounty reward as one checked mutation. */
+[[nodiscard]] bool prepare_bounty_redemption_grant(std::uint64_t sourceInstanceSoid,
+                                                   std::int32_t expectedQuantity,
+                                                   PendingRecordRewardGrant& grant) noexcept;
+
+/** Reward markers select a payout policy and cannot be granted as inventory residents. */
+[[nodiscard]] bool is_bounty_reward_marker(std::uint16_t itemIndex,
+                                           std::uint32_t definitionHash) noexcept;
 
 /** Builds the full account after-image while a record reward remains current. */
 [[nodiscard]] bool preview_record_reward_grant(const PendingRecordRewardGrant& mutation,

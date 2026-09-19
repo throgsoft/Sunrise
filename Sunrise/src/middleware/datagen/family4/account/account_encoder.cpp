@@ -110,8 +110,9 @@ bool encode(const state::AccountState& state,
     object.profileUnlockFlags = unlocks.profileFlags;
     object.objectiveValues = unlocks.objectiveValues;
     if (!state::account::inventory::dawning::project_chooser_readiness(state,
-                                                                       object.objectiveValues))
+                                                                       object.objectiveValues)) {
         return false;
+    }
 
     for (std::size_t index = 0; index < state.characterCount; ++index) {
         state::unlocks::Table character;
@@ -143,17 +144,21 @@ bool encode(const state::AccountState& state,
     // each definition's stack order intact; publication alone chooses their native rows.
     std::array<bool, state::account::inventory::kProfileItemCapacity> emitted{};
     for (std::size_t first = 0; first < state.profileItemCount; ++first) {
-        if (emitted[first]) continue;
+        if (emitted[first]) {
+            continue;
+        }
         for (std::size_t index = first; index < state.profileItemCount; ++index) {
             if (emitted[index]
                 || state.profileItems[index].definitionHash
-                       != state.profileItems[first].definitionHash)
+                       != state.profileItems[first].definitionHash) {
                 continue;
+            }
             if (!place_profile_item(state.profileItems[index],
                                     takenSlots,
                                     object.profileItems,
-                                    object.newItemFlags))
+                                    object.newItemFlags)) {
                 return false;
+            }
             emitted[index] = true;
         }
     }

@@ -6,12 +6,10 @@
 #include <memory>
 
 #include "../../../core/runtime/wall_clock.h"
-#include "../../../middleware/datagen/family4/loadout/loadout_item_resolver.h"
 #include "../../../server/bap/runtime.h"
 #include "../../../state/build_data/items/quest_initialization.h"
 #include "../../../state/build_data/pursuits/pursuit_progress.h"
 #include "../../../state/build_data/runtime.h"
-#include "../../../state/runtime/bounty_reward_policy.h"
 #include "../../../state/runtime/investment_edit_runtime.h"
 #include "../../../state/runtime/runtime.h"
 
@@ -21,11 +19,14 @@ namespace data = state::build_data;
 
 Feedback report(const state::investment_edit::Result& result) noexcept {
     // Every service has released SQLite before returning; publication uses the normal protocol.
-    if (result.changed) server::bap::request_account_resync();
+    if (result.changed) {
+        server::bap::request_account_resync();
+    }
     // A refusal needs its reason; a success is already visible in the panel it changed.
     Feedback output{result.accepted};
-    if (!result.accepted)
+    if (!result.accepted) {
         std::snprintf(output.text.data(), output.text.size(), "%s", result.reason);
+    }
     return output;
 }
 
@@ -36,11 +37,15 @@ Inventory inventory() noexcept {
     try {
         const std::unique_ptr<state::AccountState> account(
             new state::AccountState(state::account_snapshot()));
-        if (!state::account::valid(*account)) return output;
+        if (!state::account::valid(*account)) {
+            return output;
+        }
         for (std::size_t c = 0; c < (std::min)(account->characterCount, account->characters.size());
              ++c) {
             const auto& character = account->characters[c];
-            if (!character.selected) continue;
+            if (!character.selected) {
+                continue;
+            }
             output.character = character.soid;
             output.ready = true;
             for (std::size_t i = 0; i < character.inventory.count; ++i) {
@@ -55,8 +60,9 @@ Inventory inventory() noexcept {
                     continue;
                 }
                 if (detail.bucketId != data::items::kPursuitBucketId || detail.lifetimeSeconds <= 0
-                    || !detail.objectiveCount || detail.maxStackSize > 1)
+                    || !detail.objectiveCount || detail.maxStackSize > 1) {
                     continue;
+                }
                 Held held{item.instanceSoid,
                           item.definitionHash,
                           identity.definitionIndex,
@@ -82,7 +88,9 @@ Inventory inventory() noexcept {
             std::sort(output.bounties.begin(),
                       output.bounties.end(),
                       [](const Held& left, const Held& right) noexcept {
-                          if (left.complete != right.complete) return left.complete;
+                          if (left.complete != right.complete) {
+                              return left.complete;
+                          }
                           return left.mutationSerial != right.mutationSerial
                                      ? left.mutationSerial > right.mutationSerial
                                      : left.instance > right.instance;
@@ -96,7 +104,6 @@ Inventory inventory() noexcept {
 }
 
 GrantPolicy classify(const Entry& entry) noexcept {
-    namespace bounty = state::runtime::detail::bounty;
     namespace buckets = data::inventory::buckets;
     data::items::Definition identity{};
     data::items::details::Definition detail{};
@@ -107,12 +114,13 @@ GrantPolicy classify(const Entry& entry) noexcept {
         || !data::find_configured_item_detail(identity.definitionIndex, detail)
         || detail.definitionHash != identity.definitionHash || detail.bucketId != identity.bucketId
         || !data::find_inventory_bucket_descriptor(identity.bucketId, bucket)
-        || bucket.bucketId != identity.bucketId)
+        || bucket.bucketId != identity.bucketId) {
         return GrantPolicy::unknown;
+    }
     // A reward marker stands in for an item without ever being a resident of its own.
-    if (bounty::reward_marker(identity.definitionIndex, identity.definitionHash)
-        != bounty::RewardMarker::none)
+    if (state::is_bounty_reward_marker(identity.definitionIndex, identity.definitionHash)) {
         return GrantPolicy::dummy;
+    }
     // A bucket that cannot transfer what it evicts is a delivery lane. It carries stack rows,
     // which the reward policy places and the bucket evicts in turn. An instanced row there is
     // not a resident at all: it stands for a side effect elsewhere, such as a weapon gaining a
@@ -159,24 +167,31 @@ Feedback grantable(const Entry& entry) noexcept {
     const std::array rewards{state::DirectRecordReward{entry.identity.definitionIndex, 1}};
     output.accepted =
         state::prepare_record_reward_grant(rewards, state::kUnclaimedRecordIndex, *probe);
-    if (!output.accepted) std::snprintf(output.text.data(), output.text.size(), "Unable to grant");
+    if (!output.accepted) {
+        std::snprintf(output.text.data(), output.text.size(), "Unable to grant");
+    }
     return output;
 }
 
 Feedback grant(const Entry& entry, std::int32_t quantity) noexcept {
     const auto policy = classify(entry);
-    if (policy == GrantPolicy::dummy)
+    if (policy == GrantPolicy::dummy) {
         return report({false, 0, "Reward marker; it stands for an item without being one"});
-    if (policy != GrantPolicy::legitimate)
+    }
+    if (policy != GrantPolicy::legitimate) {
         return report({false, 0, "No inventory array the reward policy can place this in"});
+    }
     // Prefer the acquisition queue: the deferred pump publishes it as a real acquisition, which
     // is what plays the flyout. It takes only what it has proven commits, so the reward policy
     // still owns everything else, including a Dawning ingredient's balance and pickup row.
-    if (server::bap::queue_item_acquisition(entry.identity.definitionIndex, quantity))
+    if (server::bap::queue_item_acquisition(entry.identity.definitionIndex, quantity)) {
         return Feedback{true};
+    }
     const auto result = state::investment_edit::grant_item(
         entry.identity.definitionIndex, quantity, entry.identity.definitionHash);
-    if (result.accepted) return report(result);
+    if (result.accepted) {
+        return report(result);
+    }
     Feedback output{};
     std::snprintf(output.text.data(), output.text.size(), "Unable to grant");
     return output;
@@ -185,7 +200,9 @@ Feedback set_lane(std::uint64_t instance,
                   std::uint16_t item,
                   std::uint8_t lane,
                   std::int32_t value) noexcept {
-    if (lane == 0 || lane > 7) return report({false, 0, "Choose objective lane 1..7"});
+    if (lane == 0 || lane > 7) {
+        return report({false, 0, "Choose objective lane 1..7"});
+    }
     return report(state::investment_edit::set_objective_lane(instance, item, value, lane));
 }
 Feedback complete_bounties() noexcept {
@@ -222,15 +239,18 @@ Pages bounty_pages() noexcept {
     static Pages cached{};
     static std::size_t scanned{};
     const auto definitions = (std::min)(data::item_definition_count(), std::size_t{65536});
-    if (definitions == scanned) return cached;
+    if (definitions == scanned) {
+        return cached;
+    }
     auto& order = installed_bounty_order();
     try {
         order.clear();
         for (std::size_t i = 0; i < definitions; ++i) {
             data::items::Definition item{};
             data::items::details::Definition detail{};
-            if (installed_bounty(static_cast<std::uint16_t>(i), item, detail))
+            if (installed_bounty(static_cast<std::uint16_t>(i), item, detail)) {
                 order.push_back(item.definitionIndex);
+            }
         }
     } catch (...) {
         order.clear();
@@ -246,10 +266,14 @@ Pages bounty_pages() noexcept {
 
 std::vector<std::uint16_t> bounty_page(std::size_t page) noexcept {
     const auto pages = bounty_pages();
-    if (page == 0 || page > pages.count) return {};
+    if (page == 0 || page > pages.count) {
+        return {};
+    }
     const auto& order = installed_bounty_order();
     const auto first = (page - 1) * kBountyPageSize;
-    if (first >= order.size()) return {};
+    if (first >= order.size()) {
+        return {};
+    }
     const auto count = (std::min)(kBountyPageSize, order.size() - first);
     try {
         return std::vector<std::uint16_t>(order.begin() + static_cast<std::ptrdiff_t>(first),
@@ -260,16 +284,15 @@ std::vector<std::uint16_t> bounty_page(std::size_t page) noexcept {
     }
 }
 
-std::size_t queue_bounty_page(std::span<const std::uint16_t> indices, Feedback& refusal) noexcept {
-    // A page is granted as one account mutation and published once. Routing it through the
-    // world reward queue instead published every item on its own, and each publication arms the
-    // acquisition presentation hold, which retains the previous overlay for another eight
-    // seconds and defers every other deferred lane behind it.
+std::size_t grant_bounty_page(std::span<const std::uint16_t> indices, Feedback& refusal) noexcept {
+    // Each grant commits separately; publish once to avoid a long acquisition presentation hold.
     refusal = {};
     std::size_t held = 0, changed = 0;
     for (const auto index : indices) {
         data::items::Definition item{};
-        if (!data::find_item_definition_index(index, item)) continue;
+        if (!data::find_item_definition_index(index, item)) {
+            continue;
+        }
         const auto result = state::investment_edit::grant_item(index, 1, item.definitionHash);
         changed += result.changed;
         if (result.accepted) {
@@ -278,7 +301,9 @@ std::size_t queue_bounty_page(std::span<const std::uint16_t> indices, Feedback& 
             std::snprintf(refusal.text.data(), refusal.text.size(), "%s", result.reason);
         }
     }
-    if (changed != 0) server::bap::request_account_resync();
+    if (changed != 0) {
+        server::bap::request_account_resync();
+    }
     return held;
 }
 
@@ -289,8 +314,9 @@ std::vector<BucketSummary> buckets() noexcept {
             data::inventory::buckets::Descriptor bucket{};
             const auto bucketId = static_cast<std::uint8_t>(id);
             if (!data::find_inventory_bucket_descriptor(bucketId, bucket)
-                || bucket.bucketId != bucketId)
+                || bucket.bucketId != bucketId) {
                 continue;
+            }
             BucketSummary summary{};
             summary.bucketId = bucketId;
             summary.arraySelector = static_cast<std::uint8_t>(bucket.arraySelector);
@@ -312,27 +338,29 @@ std::vector<BucketItem> bucket_items(std::uint8_t bucketId) noexcept {
     try {
         data::inventory::buckets::Descriptor bucket{};
         if (!data::find_inventory_bucket_descriptor(bucketId, bucket)
-            || bucket.bucketId != bucketId)
+            || bucket.bucketId != bucketId) {
             return output;
+        }
         const std::unique_ptr<state::AccountState> account(
             new state::AccountState(state::account_snapshot()));
-        if (!state::account::valid(*account)) return output;
-        // Nothing declares the Postmaster as its home: rows arrive there by placement when their
-        // own bucket is full, so it is listed by that flag rather than by declared identity.
-        data::inventory::buckets::Descriptor postmaster{};
-        const bool postmasterBucket =
-            middleware::datagen::family4::loadout::resolve_postmaster_bucket(postmaster)
-            && postmaster.bucketId == bucketId;
+        if (!state::account::valid(*account)) {
+            return output;
+        }
         const auto describe = [&](std::uint64_t instance,
                                   std::uint32_t hash,
                                   std::int32_t quantity,
-                                  std::int32_t serial) {
+                                  std::int32_t serial,
+                                  bool resident,
+                                  state::account::inventory::ItemPlacement placement) {
             data::items::Definition identity{};
             data::items::details::Definition detail{};
             if (!data::find_item_definition_hash(hash, identity)
-                || (!postmasterBucket && identity.bucketId != bucketId)
-                || !data::find_configured_item_detail(identity.definitionIndex, detail))
+                || !(resident ? state::investment_edit::resident_in_bucket(
+                                    bucketId, identity.bucketId, placement)
+                              : identity.bucketId == bucketId)
+                || !data::find_configured_item_detail(identity.definitionIndex, detail)) {
                 return;
+            }
             BucketItem row{};
             row.instance = instance;
             row.hash = hash;
@@ -340,35 +368,49 @@ std::vector<BucketItem> bucket_items(std::uint8_t bucketId) noexcept {
             row.quantity = quantity;
             row.maxStack = detail.maxStackSize;
             row.mutationSerial = serial;
-            for (std::size_t c = 0; c < account->characterCount && !row.equipped; ++c)
-                for (const auto& slot : account->characters[c].equipment.slots)
-                    if (slot && instance != 0 && slot->instanceSoid == instance)
+            for (std::size_t c = 0; c < account->characterCount && !row.equipped; ++c) {
+                for (const auto& slot : account->characters[c].equipment.slots) {
+                    if (slot && instance != 0 && slot->instanceSoid == instance) {
                         row.equipped = true;
+                    }
+                }
+            }
             output.push_back(row);
         };
         if (bucket.arraySelector == data::inventory::buckets::ArraySelector::profile) {
             for (std::size_t i = 0; i < account->profileItemCount; ++i) {
                 const auto& item = account->profileItems[i];
-                describe(
-                    item.instanceSoid, item.definitionHash, item.quantity, item.mutationSerial);
+                describe(item.instanceSoid,
+                         item.definitionHash,
+                         item.quantity,
+                         item.mutationSerial,
+                         false,
+                         state::account::inventory::ItemPlacement::inventory);
             }
             return output;
         }
         for (std::size_t c = 0; c < account->characterCount; ++c) {
             const auto& character = account->characters[c];
-            if (!character.selected) continue;
+            if (!character.selected) {
+                continue;
+            }
             for (std::size_t i = 0; i < character.inventory.count; ++i) {
                 const auto& item = character.inventory.values[i];
-                const bool stored =
-                    item.placement == state::account::inventory::ItemPlacement::postmaster;
-                if (stored != postmasterBucket) continue;
-                describe(
-                    item.instanceSoid, item.definitionHash, item.quantity, item.mutationSerial);
+                describe(item.instanceSoid,
+                         item.definitionHash,
+                         item.quantity,
+                         item.mutationSerial,
+                         true,
+                         item.placement);
             }
-            if (postmasterBucket) continue;
             for (std::size_t i = 0; i < character.stacks.count; ++i) {
                 const auto& row = character.stacks.values[i];
-                describe(0, row.definitionHash, row.quantity, row.mutationSerial);
+                describe(0,
+                         row.definitionHash,
+                         row.quantity,
+                         row.mutationSerial,
+                         false,
+                         state::account::inventory::ItemPlacement::inventory);
             }
         }
     } catch (...) {

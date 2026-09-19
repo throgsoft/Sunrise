@@ -19,8 +19,10 @@ character_encoding_preflight(const AccountState& candidate,
                              const middleware::datagen::family4::loadout::ResolvedLoadout& resolved,
                              bool requireCollectibleSpace = true) noexcept {
     namespace character = middleware::datagen::family4::character;
-    if (characterIndex >= candidate.characterCount || characterIndex >= candidate.characters.size())
+    if (characterIndex >= candidate.characterCount
+        || characterIndex >= candidate.characters.size()) {
         return false;
+    }
     struct Scratch {
         equipment::light::Evaluation light{};
         std::array<std::byte, character::layout::kObjectSize> bytes{};

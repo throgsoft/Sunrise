@@ -256,27 +256,31 @@ bool publish_artifact_character_banks(CharacterArtifactWrite& write) noexcept {
             investment::store::Bank::accountProgressions, pass::kProgressionDefinitionIndex, ladder)
         || !investment::store::read_unlock(
             investment::store::Bank::accountProgressions, pass::kHudProgressionDefinitionIndex, hud)
-        || ladder < 0 || hud < 0)
+        || ladder < 0 || hud < 0) {
         return false;
+    }
     // A ladder written above the cap by an older build must not block every later grant; the
     // publication path clamps to the same bound, so reading it back clamped is the stored value.
     ladder = (std::min)(ladder, kMaximumPassExperience);
     const auto overflow = ladder == kMaximumPassExperience ? hud : 0;
-    if (overflow > (std::numeric_limits<std::int32_t>::max)() - ladder) return false;
+    if (overflow > (std::numeric_limits<std::int32_t>::max)() - ladder) {
+        return false;
+    }
     experience = ladder + overflow;
     return true;
 }
 
 /** Pass and artifact XP normally grow together, but a pass-only reset must stay independent. */
-bool publish_experience_lanes(std::int32_t artifactExperience, std::int32_t experience) noexcept {
+bool publish_experience_lanes(std::int32_t artifactExperience,
+                              std::int32_t passExperience) noexcept {
     return unlocks::set_account_progression(kArtifactPowerProgressionIndex, artifactExperience)
            && unlocks::set_account_progression(kArtifactUnlockProgressionIndex, artifactExperience)
            && unlocks::set_account_progression(pass::kProgressionDefinitionIndex,
-                                               (std::min)(experience, kMaximumPassExperience))
+                                               (std::min)(passExperience, kMaximumPassExperience))
            && unlocks::set_account_progression(pass::kHudProgressionDefinitionIndex,
-                                               experience < kMaximumPassExperience
-                                                   ? experience % kExperiencePerRank
-                                                   : experience - kMaximumPassExperience);
+                                               passExperience < kMaximumPassExperience
+                                                   ? passExperience % kExperiencePerRank
+                                                   : passExperience - kMaximumPassExperience);
 }
 
 } // namespace
@@ -297,12 +301,12 @@ bool seed_seasonal_progression() noexcept {
     investment::store::g_mutex.lock();
     investment::store::Transaction transaction;
     Family5State family;
-    std::int32_t experience = 0, passExperience = 0;
+    std::int32_t artifactExperience = 0, passExperience = 0;
     if (!transaction.ready() || !investment::store::read_family5(family)
         || !investment::store::read_unlock(investment::store::Bank::accountProgressions,
                                            kArtifactPowerProgressionIndex,
-                                           experience)
-        || experience < 0 || !read_pass_experience(passExperience)) {
+                                           artifactExperience)
+        || artifactExperience < 0 || !read_pass_experience(passExperience)) {
         investment::store::g_mutex.unlock();
         return false;
     }
@@ -329,8 +333,8 @@ bool seed_seasonal_progression() noexcept {
         }
     }
     const std::uint32_t mask = artifact_mask(rows, count);
-    const bool published = publish_experience_lanes(experience, passExperience)
-                           && publish_artifact_locked(family, mask, experience)
+    const bool published = publish_experience_lanes(artifactExperience, passExperience)
+                           && publish_artifact_locked(family, mask, artifactExperience)
                            && investment::store::write_family5(family) && transaction.commit();
     investment::store::g_mutex.unlock();
     return published;

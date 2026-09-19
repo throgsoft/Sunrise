@@ -24,7 +24,9 @@ void claim_postmaster_item(const middleware::web_service::Message& message,
                                            static_cast<std::uint16_t>(request.definitionIndex),
                                            request.quantity,
                                            *mutation);
-    if (!prepared) clear_mutation(outcome);
+    if (!prepared) {
+        clear_mutation(outcome);
+    }
     core::log::writef(core::log::Channel::server,
                       prepared ? core::log::Level::info : core::log::Level::warn,
                       "ev=postmaster stage=prepare result=%s vendor=%d bucket=%d item=%d "

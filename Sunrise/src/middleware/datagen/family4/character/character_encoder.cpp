@@ -98,8 +98,11 @@ constexpr std::int32_t kOccupiedRowWatermark = 1;
         // Repeated single-use acquisitions occupy distinct FIFO entries. Other character
         // stacks retain their definition-unique contract until their multi-stack path exists.
         if ((bucket.policyFlags & state::build_data::inventory::buckets::kFifo) == 0) {
-            for (std::size_t prior = 0; prior < index; ++prior)
-                if (state.stacks.values[prior].definitionHash == stack.definitionHash) return false;
+            for (std::size_t prior = 0; prior < index; ++prior) {
+                if (state.stacks.values[prior].definitionHash == stack.definitionHash) {
+                    return false;
+                }
+            }
         }
         std::size_t rowIndex = bucket.firstSlot;
         while (rowIndex < end
@@ -165,7 +168,9 @@ constexpr std::int32_t kOccupiedRowWatermark = 1;
             ++nextRow;
         }
         if (nextRow >= rowLimit) {
-            if (requireSpace) return false;
+            if (requireSpace) {
+                return false;
+            }
             // Older grants checked only instanced rows. Do not make their saved inventory
             // unreadable because a synthesized prerequisite has no remaining display slot.
             ++deferred;

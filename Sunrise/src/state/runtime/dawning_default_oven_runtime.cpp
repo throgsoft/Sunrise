@@ -35,8 +35,9 @@ ensure_default_item(std::uint32_t definitionHash,
     build_data::inventory::buckets::Descriptor bucket{};
     if (!build_data::item_definitions_ready() || !build_data::configured_item_details_ready()
         || !build_data::inventory_bucket_descriptors_ready()
-        || !build_data::socket_entry_lists_ready())
+        || !build_data::socket_entry_lists_ready()) {
         return {Status::notReady, false};
+    }
     if (!build_data::find_item_definition_hash(definitionHash, definition)
         || !build_data::find_configured_item_detail(definition.definitionIndex, detail)
         || !build_data::find_inventory_bucket_descriptor(definition.bucketId, bucket)
@@ -48,14 +49,20 @@ ensure_default_item(std::uint32_t definitionHash,
         || detail.maxStackSize != 1 || detail.ordinarySocketCount != socketCount
         || detail.ordinarySocketState != items::details::OrdinarySocketState::present
         || detail.instancedDefinitionState != items::details::InstancedDefinitionState::instanced
-        || detail.equipmentSlot.has_value())
+        || detail.equipmentSlot.has_value()) {
         return {Status::refused, false};
+    }
     auto snapshot = std::unique_ptr<AccountState>{new (std::nothrow) AccountState};
-    if (!snapshot) return {Status::refused, false};
-    store::Transaction transaction;
-    if (!transaction.ready() || !store::read_account(*snapshot) || !account::valid(*snapshot))
+    if (!snapshot) {
         return {Status::refused, false};
-    if (snapshot->characterCount == 0) return {Status::notReady, false};
+    }
+    store::Transaction transaction;
+    if (!transaction.ready() || !store::read_account(*snapshot) || !account::valid(*snapshot)) {
+        return {Status::refused, false};
+    }
+    if (snapshot->characterCount == 0) {
+        return {Status::notReady, false};
+    }
     const auto originallySelected = selected_character_index(*snapshot);
     bool changed = false;
     // The initial Family-4 snapshot precedes character selection. Seed every character here,
@@ -69,43 +76,64 @@ ensure_default_item(std::uint32_t definitionHash,
                                           "%s-%016llx",
                                           markerPrefix,
                                           static_cast<unsigned long long>(character.soid));
-        if (length <= 0 || static_cast<std::size_t>(length) >= key.size())
+        if (length <= 0 || static_cast<std::size_t>(length) >= key.size()) {
             return {Status::refused, false};
+        }
         const std::string_view marker(key.data(), static_cast<std::size_t>(length));
-        if (store::bootstrap_completed(marker)) continue;
+        if (store::bootstrap_completed(marker)) {
+            continue;
+        }
         bool held = false;
         auto heldTier = GambitPrimeSynthesizerTier::none;
         const auto matches = [&](std::uint32_t hash) noexcept {
             if (definitionHash == kWeakSynthesizerHash) {
                 for (std::size_t tier = 0; tier < kSynthesizerHashes.size(); ++tier) {
                     const auto value = static_cast<GambitPrimeSynthesizerTier>(tier + 1);
-                    if (hash == kSynthesizerHashes[tier] && value > heldTier) heldTier = value;
+                    if (hash == kSynthesizerHashes[tier] && value > heldTier) {
+                        heldTier = value;
+                    }
                 }
             }
-            if (hash == definitionHash) return true;
-            for (const auto alternative : alternatives)
-                if (hash == alternative) return true;
+            if (hash == definitionHash) {
+                return true;
+            }
+            for (const auto alternative : alternatives) {
+                if (hash == alternative) {
+                    return true;
+                }
+            }
             return false;
         };
-        for (std::size_t i = 0; i < character.inventory.count; ++i)
-            if (matches(character.inventory.values[i].definitionHash)) held = true;
-        for (const auto& item : character.equipment.slots)
-            if (item && matches(item->definitionHash)) held = true;
+        for (std::size_t i = 0; i < character.inventory.count; ++i) {
+            if (matches(character.inventory.values[i].definitionHash)) {
+                held = true;
+            }
+        }
+        for (const auto& item : character.equipment.slots) {
+            if (item && matches(item->definitionHash)) {
+                held = true;
+            }
+        }
         if (!held) {
             auto pending =
                 std::unique_ptr<PendingItemAcquisition>{new (std::nothrow) PendingItemAcquisition};
             // Select only in this private staging view, so the common acquisition validator can
             // resolve the target character. Never publish a synthetic character selection.
-            for (std::size_t i = 0; i < snapshot->characterCount; ++i)
+            for (std::size_t i = 0; i < snapshot->characterCount; ++i) {
                 snapshot->characters[i].selected = i == characterIndex;
+            }
             if (!pending
                 || !finalize_item_acquisition(
-                    *snapshot, *snapshot, definitionHash, false, {.direct = true}, *pending))
+                    *snapshot, *snapshot, definitionHash, false, {.direct = true}, *pending)) {
                 return {Status::refused, false};
+            }
             character = pending->afterCharacter;
-            if (definitionHash == kWeakSynthesizerHash) heldTier = GambitPrimeSynthesizerTier::weak;
-            for (std::size_t i = 0; i < snapshot->characterCount; ++i)
+            if (definitionHash == kWeakSynthesizerHash) {
+                heldTier = GambitPrimeSynthesizerTier::weak;
+            }
+            for (std::size_t i = 0; i < snapshot->characterCount; ++i) {
                 snapshot->characters[i].selected = i == originallySelected;
+            }
             changed = true;
         }
         // Prime's existing reward selector needs a starting tier. Derive a missing selector
@@ -115,10 +143,13 @@ ensure_default_item(std::uint32_t definitionHash,
             character.gambitPrimeSynthesizerTier = heldTier;
             changed = true;
         }
-        if (!store::complete_bootstrap(marker)) return {Status::refused, false};
+        if (!store::complete_bootstrap(marker)) {
+            return {Status::refused, false};
+        }
     }
-    if ((changed && !store::write_account(*snapshot)) || !transaction.commit())
+    if ((changed && !store::write_account(*snapshot)) || !transaction.commit()) {
         return {Status::refused, false};
+    }
     return {Status::ready, changed};
 }
 } // namespace
@@ -134,10 +165,12 @@ DefaultInventoryBootstrapResult ensure_default_activity_containers() noexcept {
         kWeakSynthesizerHash, "default-weak-synthesizer-v1", 5, kSynthesizerHashes);
     const auto chalice = ensure_default_item(kChaliceHash, "default-chalice-of-opulence-v1", 8);
     auto status = Status::ready;
-    if (synthesizer.status == Status::notReady || chalice.status == Status::notReady)
+    if (synthesizer.status == Status::notReady || chalice.status == Status::notReady) {
         status = Status::notReady;
-    if (synthesizer.status == Status::refused || chalice.status == Status::refused)
+    }
+    if (synthesizer.status == Status::refused || chalice.status == Status::refused) {
         status = Status::refused;
+    }
     return {status, synthesizer.changed || chalice.changed};
 }
 

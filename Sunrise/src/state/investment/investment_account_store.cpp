@@ -95,8 +95,9 @@ bool write_characters(const AccountState& value) noexcept {
                          character.gambitPrimeHelmetTiers[1],
                          character.gambitPrimeHelmetTiers[2],
                          character.gambitPrimeHelmetTiers[3],
-                         character.gambitPrimeSynthesizerTier))
+                         character.gambitPrimeSynthesizerTier)) {
             return false;
+        }
     }
     Statement rewards("INSERT INTO dismantle_rewards VALUES (?,?,?,?,?,?)");
     for (std::size_t index = 0; index < value.dismantleRewardCount; ++index) {

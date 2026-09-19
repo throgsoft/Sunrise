@@ -3,6 +3,10 @@
 #include <cstddef>
 #include <cstdint>
 
+namespace sunrise::state::account::inventory {
+enum class ItemPlacement : std::uint8_t;
+}
+
 namespace sunrise::state::investment_edit {
 
 struct Result {
@@ -10,6 +14,11 @@ struct Result {
     std::size_t changed{};
     const char* reason{"unavailable"};
 };
+
+/** Resident bucket membership uses saved placement; overflow lives only in Lost Items. */
+[[nodiscard]] bool resident_in_bucket(std::uint8_t bucketId,
+                                      std::uint8_t homeBucketId,
+                                      account::inventory::ItemPlacement placement) noexcept;
 
 /** Grants one installed item through the record reward policy, which owns bucket placement,
  * Postmaster overflow and stacking. A Dawning ingredient stages its authoritative balance and
@@ -31,14 +40,9 @@ grant_item(std::uint16_t index, std::int32_t quantity, std::uint32_t expectedHas
 /** Completes the selected character's held, resolved, unexpired bounties; preserves quests. */
 [[nodiscard]] Result complete_bounties() noexcept;
 
-/** Removes held bounties classified by installed metadata; preserves quests, stacks and rewards. */
-/**
- * Removes everything the selected character or the account holds in one installed bucket.
- * Equipped residents are never removed. The bucket is named by installed metadata, so no
- * category is enumerated here.
- * @param bucketId Installed inventory bucket to empty.
- * @return Rows removed, or a reason nothing was committed.
- */
+/** Empties one installed character or profile bucket, preserving equipment.
+ * Lost Items follows
+ * saved placement; other rows use their definition's bucket. */
 [[nodiscard]] Result drop_bucket(std::uint8_t bucketId) noexcept;
 
 /**
@@ -52,6 +56,7 @@ grant_item(std::uint16_t index, std::int32_t quantity, std::uint32_t expectedHas
                                        std::uint16_t definitionIndex,
                                        std::int32_t quantity) noexcept;
 
+/** Removes installed bounties without granting rewards; preserves quests and stacks. */
 [[nodiscard]] Result drop_bounties() noexcept;
 /** Removes the selected character's held Engrams bucket residents without decrypting them. */
 [[nodiscard]] Result drop_engrams() noexcept;

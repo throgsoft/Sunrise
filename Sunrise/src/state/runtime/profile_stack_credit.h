@@ -8,8 +8,8 @@
 #include <span>
 
 #include "../account/account_state.h"
+#include "../account/inventory/material_identity.h"
 #include "../build_data/runtime.h"
-#include "bounty_reward_policy_data.h"
 #include "bounty_stack_reward_plan.h"
 #include "runtime.h"
 
@@ -54,20 +54,26 @@ credit_profile_stacks(AccountState& working,
     for (std::size_t i = 0; i < working.profileItemCount; ++i) {
         const auto& row = working.profileItems[i];
         build_data::items::Definition held{};
-        if (!build_data::find_item_definition_hash(row.definitionHash, held)) return false;
+        if (!build_data::find_item_definition_hash(row.definitionHash, held)) {
+            return false;
+        }
         used += held.bucketId == definition.bucketId;
         serial = (std::max)(serial, row.mutationSerial);
         if (row.definitionHash == definition.definitionHash) {
-            if (row.instanceSoid != 0) return false;
+            if (row.instanceSoid != 0) {
+                return false;
+            }
             matching[matchingCount++] = {i, row.quantity};
         }
     }
-    if (used > bucket.slotCount) return false;
+    if (used > bucket.slotCount) {
+        return false;
+    }
     const auto free = (std::min)(working.profileItems.size() - working.profileItemCount,
                                  static_cast<std::size_t>(bucket.slotCount) - used);
     std::array<StackCredit, kRecordRewardGrantCapacity> credits{};
     std::size_t count{};
-    const bool multiStack = definition.definitionHash == bounty_policy::kEnhancementCoreHash;
+    const bool multiStack = definition.definitionHash == account::inventory::kEnhancementCoreHash;
     if (!plan_stack_reward(std::span(matching).first(matchingCount),
                            requested,
                            detail.maxStackSize,

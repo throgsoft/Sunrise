@@ -184,8 +184,9 @@ bool write_item(Statement& items,
                           item.objectiveValues[4],
                           item.objectiveValues[5],
                           item.objectiveValues[6],
-                          item.objectiveValues[7]))
+                          item.objectiveValues[7])) {
         return false;
+    }
     return true;
 }
 

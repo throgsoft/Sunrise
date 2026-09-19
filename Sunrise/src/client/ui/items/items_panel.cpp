@@ -51,8 +51,8 @@ constexpr std::array<const char*, 5> kClearDescriptions{
     "Remove unequipped helmet, gauntlets, chest, legs and class armor from the selected character.",
     "Remove held bounties without rewards. Quests are preserved.",
     "Remove held engrams from the selected character without decrypting them.",
-    "Reset account season pass XP and mapped reward claims for all classes. Already granted items "
-    "remain."};
+    ("Reset account season pass XP and mapped reward claims for all classes. Already granted items "
+     "remain.")};
 
 void select_held(const service::Held& held) {
     g_heldSelection = held.instance;
@@ -69,9 +69,14 @@ void refresh() {
         g_clearCategory = -1;
     }
     for (const auto& held : g_inventory.bounties) {
-        if (held.instance != g_heldSelection) continue;
-        for (std::size_t lane = 0; lane < g_laneValues.size(); ++lane)
-            if (!g_laneEdited[lane]) g_laneValues[lane] = held.values[lane + 1];
+        if (held.instance != g_heldSelection) {
+            continue;
+        }
+        for (std::size_t lane = 0; lane < g_laneValues.size(); ++lane) {
+            if (!g_laneEdited[lane]) {
+                g_laneValues[lane] = held.values[lane + 1];
+            }
+        }
         return;
     }
     g_heldSelection = 0;
@@ -103,9 +108,9 @@ const char* name(const Entry& entry) noexcept {
 }
 void icon(const Entry& entry, float side) {
     const auto texture = icons::get(entry.iconIndex);
-    if (texture != ImTextureID_Invalid)
+    if (texture != ImTextureID_Invalid) {
         ImGui::Image(ImTextureRef(texture), {side, side});
-    else {
+    } else {
         ImGui::BeginGroup();
         ImGui::TextDisabled("Icon unavailable");
         ImGui::Dummy({side, (std::max)(0.0f, side - ImGui::GetTextLineHeightWithSpacing())});
@@ -119,24 +124,33 @@ void objectives(const Entry& entry) {
                     i + 1,
                     static_cast<unsigned>(objective.index),
                     objective.hash);
-        if (!objective.description.empty()) ImGui::TextWrapped("%s", objective.description.c_str());
-        if (objective.resolved)
+        if (!objective.description.empty()) {
+            ImGui::TextWrapped("%s", objective.description.c_str());
+        }
+        if (objective.resolved) {
             ImGui::TextDisabled("Completion: %d%s",
                                 objective.completion,
                                 objective.itemProgress ? "" : " (shared / unsupported source)");
-        else
+        } else {
             ImGui::TextDisabled("Objective metadata unavailable.");
+        }
     }
 }
 bool matches(std::string_view haystack, std::string_view query) noexcept {
     while (!query.empty()) {
         const auto first = query.find_first_not_of(" \t");
-        if (first == std::string_view::npos) return true;
+        if (first == std::string_view::npos) {
+            return true;
+        }
         query.remove_prefix(first);
         const auto end = query.find_first_of(" \t");
         const auto word = query.substr(0, end);
-        if (haystack.find(word) == std::string_view::npos) return false;
-        if (end == std::string_view::npos) return true;
+        if (haystack.find(word) == std::string_view::npos) {
+            return false;
+        }
+        if (end == std::string_view::npos) {
+            return true;
+        }
         query.remove_prefix(end);
     }
     return true;
@@ -147,12 +161,16 @@ int compare_text(std::string_view left, std::string_view right) noexcept {
     for (std::size_t i = 0, count = (std::min)(left.size(), right.size()); i < count; ++i) {
         const auto a = fold(static_cast<unsigned char>(left[i]));
         const auto b = fold(static_cast<unsigned char>(right[i]));
-        if (a != b) return a < b ? -1 : 1;
+        if (a != b) {
+            return a < b ? -1 : 1;
+        }
     }
     return left.size() == right.size() ? 0 : left.size() < right.size() ? -1 : 1;
 }
 int compare_optional_text(std::string_view left, std::string_view right) noexcept {
-    if (left.empty() != right.empty()) return left.empty() ? 1 : -1;
+    if (left.empty() != right.empty()) {
+        return left.empty() ? 1 : -1;
+    }
     return compare_text(left, right);
 }
 void prepare_filter(const std::shared_ptr<const Catalog>& data) {
@@ -163,26 +181,35 @@ void prepare_filter(const std::shared_ptr<const Catalog>& data) {
     if (g_filteredCatalog != data || query != g_appliedSearch || g_category != g_appliedCategory
         || g_sort != g_appliedSort) {
         g_filtered.clear();
-        for (std::size_t i = 0; i < data->entries.size(); ++i)
+        for (std::size_t i = 0; i < data->entries.size(); ++i) {
             if ((g_category == static_cast<int>(Category::all)
                  || static_cast<int>(data->entries[i].category) == g_category)
-                && matches(data->entries[i].search, query))
+                && matches(data->entries[i].search, query)) {
                 g_filtered.push_back(i);
+            }
+        }
         // Sort the view indices only: selected items, held instances and ID lookup stay stable.
         std::sort(g_filtered.begin(), g_filtered.end(), [&](std::size_t left, std::size_t right) {
             const auto& a = data->entries[left];
             const auto& b = data->entries[right];
             if (g_sort == static_cast<int>(Sort::type)) {
-                if (a.category != b.category) return a.category < b.category;
+                if (a.category != b.category) {
+                    return a.category < b.category;
+                }
                 const int type = compare_optional_text(a.itemType, b.itemType);
-                if (type != 0) return type < 0;
+                if (type != 0) {
+                    return type < 0;
+                }
             }
             if (g_sort != static_cast<int>(Sort::id)) {
                 const int name = compare_optional_text(a.name, b.name);
-                if (name != 0) return name < 0;
+                if (name != 0) {
+                    return name < 0;
+                }
             }
-            if (a.identity.definitionIndex != b.identity.definitionIndex)
+            if (a.identity.definitionIndex != b.identity.definitionIndex) {
                 return a.identity.definitionIndex < b.identity.definitionIndex;
+            }
             return left < right;
         });
         g_filteredCatalog = data;
@@ -196,32 +223,43 @@ void prepare_filter(const std::shared_ptr<const Catalog>& data) {
 void bounty_lanes(const Entry& entry, const service::Held& held) {
     ImGui::TextDisabled("Instance 0x%016llX", static_cast<unsigned long long>(held.instance));
     ImGui::TextDisabled("Saved expiry: %d", held.values[0]);
-    if (!held.editable) ImGui::TextWrapped("%s", held.reason);
+    if (!held.editable) {
+        ImGui::TextWrapped("%s", held.reason);
+    }
     for (std::size_t i = 0; i < entry.objectives.size() && i < g_laneValues.size(); ++i) {
         const auto& objective = entry.objectives[i];
         ImGui::PushID(static_cast<int>(i));
         ImGui::Separator();
         ImGui::Text("Lane %zu: %d / %d", i + 1, held.values[i + 1], objective.completion);
-        if (!objective.description.empty()) ImGui::TextWrapped("%s", objective.description.c_str());
+        if (!objective.description.empty()) {
+            ImGui::TextWrapped("%s", objective.description.c_str());
+        }
         ImGui::TextDisabled(
             "Objective %u / 0x%08X", static_cast<unsigned>(objective.index), objective.hash);
         ImGui::BeginDisabled(!held.editable || !objective.resolved || !objective.itemProgress);
         ImGui::SetNextItemWidth((std::min)(145.0f, ImGui::GetContentRegionAvail().x));
-        if (ImGui::InputInt("##value", &g_laneValues[i], 0, 0)) g_laneEdited[i] = true;
+        if (ImGui::InputInt("##value", &g_laneValues[i], 0, 0)) {
+            g_laneEdited[i] = true;
+        }
         ImGui::SameLine();
         ImGui::TextDisabled("/ %d", objective.completion);
-        if (ImGui::GetContentRegionAvail().x >= 230) ImGui::SameLine();
+        if (ImGui::GetContentRegionAvail().x >= 230) {
+            ImGui::SameLine();
+        }
         const bool apply = ImGui::Button("Set lane");
         ImGui::EndDisabled();
-        if (!objective.resolved)
+        if (!objective.resolved) {
             ImGui::TextDisabled("Objective metadata unavailable.");
-        else if (!objective.itemProgress)
+        } else if (!objective.itemProgress) {
             ImGui::TextDisabled("Shared / unsupported source; lane editing disabled.");
+        }
         ImGui::PopID();
         if (apply) {
             const auto result = service::set_lane(
                 held.instance, held.index, static_cast<std::uint8_t>(i + 1), g_laneValues[i]);
-            if (result.accepted) g_laneEdited[i] = false;
+            if (result.accepted) {
+                g_laneEdited[i] = false;
+            }
             // Refresh replaces the vector behind held; leave the editor immediately afterward.
             feedback(result);
             return;
@@ -239,17 +277,22 @@ void catalog_bounty(const Entry& entry) {
     std::size_t count = 0;
     for (const auto& held : g_inventory.bounties) {
         if (held.index != entry.identity.definitionIndex
-            || held.hash != entry.identity.definitionHash)
+            || held.hash != entry.identity.definitionHash) {
             continue;
+        }
         ++count;
-        if (!selected || held.instance == g_heldSelection) selected = &held;
+        if (!selected || held.instance == g_heldSelection) {
+            selected = &held;
+        }
     }
     if (!selected) {
         ImGui::TextWrapped("This character is not holding this bounty.");
         objectives(entry);
         return;
     }
-    if (selected->instance != g_heldSelection) select_held(*selected);
+    if (selected->instance != g_heldSelection) {
+        select_held(*selected);
+    }
     if (count > 1) {
         char preview[64]{};
         std::snprintf(preview,
@@ -261,8 +304,9 @@ void catalog_bounty(const Entry& entry) {
         if (ImGui::BeginCombo("##held_instance", preview)) {
             for (const auto& held : g_inventory.bounties) {
                 if (held.index != entry.identity.definitionIndex
-                    || held.hash != entry.identity.definitionHash)
+                    || held.hash != entry.identity.definitionHash) {
                     continue;
+                }
                 char label[80]{};
                 std::snprintf(label,
                               sizeof label,
@@ -273,7 +317,9 @@ void catalog_bounty(const Entry& entry) {
                     select_held(held);
                     selected = &held;
                 }
-                if (held.instance == g_heldSelection) ImGui::SetItemDefaultFocus();
+                if (held.instance == g_heldSelection) {
+                    ImGui::SetItemDefaultFocus();
+                }
             }
             ImGui::EndCombo();
         }
@@ -315,17 +361,24 @@ void catalog_grid(const Catalog& data, float requestedHeight, float requestedWid
         }
         const float width = (std::max)(1.0f, ImGui::GetContentRegionAvail().x);
         const float tileWidth =
-            (std::max)(1.0f, (width - style.ItemSpacing.x * (columns - 1)) / columns);
-        if (g_filtered.empty())
+            (std::max)(1.0f,
+                       (width - style.ItemSpacing.x * static_cast<float>(columns - 1))
+                           / static_cast<float>(columns));
+        if (g_filtered.empty()) {
             ImGui::TextWrapped("No matching items. Try a name, ID, hash or objective.");
+        }
         ImGuiListClipper clipper;
         clipper.Begin(static_cast<int>((g_filtered.size() + columns - 1) / columns), rowPitch);
-        while (clipper.Step())
+        while (clipper.Step()) {
             for (int row = clipper.DisplayStart; row < clipper.DisplayEnd; ++row) {
                 for (int column = 0; column < columns; ++column) {
                     const auto offset = static_cast<std::size_t>(row) * columns + column;
-                    if (offset >= g_filtered.size()) break;
-                    if (column) ImGui::SameLine(0, style.ItemSpacing.x);
+                    if (offset >= g_filtered.size()) {
+                        break;
+                    }
+                    if (column) {
+                        ImGui::SameLine(0, style.ItemSpacing.x);
+                    }
                     const auto position = g_filtered[offset];
                     const auto& entry = data.entries[position];
                     ImGui::PushID(static_cast<int>(position));
@@ -349,9 +402,9 @@ void catalog_grid(const Catalog& data, float requestedHeight, float requestedWid
                         const ImVec2 imageMin{top.x + (tileWidth - side) * 0.5f, top.y + padding};
                         const ImVec2 imageMax{imageMin.x + side, imageMin.y + side};
                         const auto texture = icons::get(entry.iconIndex);
-                        if (texture != ImTextureID_Invalid)
+                        if (texture != ImTextureID_Invalid) {
                             draw->AddImage(ImTextureRef(texture), imageMin, imageMax);
-                        else {
+                        } else {
                             constexpr const char* missing = "Icon\nunavailable";
                             const auto size = ImGui::CalcTextSize(missing);
                             draw->AddText({top.x + (tileWidth - size.x) * 0.5f,
@@ -372,16 +425,20 @@ void catalog_grid(const Catalog& data, float requestedHeight, float requestedWid
                                       (std::max)(1.0f, tileWidth - padding * 2),
                                       &textClip);
                         draw->PopClipRect();
-                        if (g_selected == static_cast<int>(position))
+                        if (g_selected == static_cast<int>(position)) {
                             draw->AddRect(top,
                                           bottom,
                                           ImGui::GetColorU32(ImGuiCol_CheckMark),
                                           style.FrameRounding);
+                        }
                     }
-                    if (hovered) ImGui::SetTooltip("%s", name(entry));
+                    if (hovered) {
+                        ImGui::SetTooltip("%s", name(entry));
+                    }
                     ImGui::PopID();
                 }
             }
+        }
     }
     ImGui::EndChild();
 }
@@ -401,7 +458,9 @@ void catalog_tab(const std::shared_ptr<const Catalog>& data) {
                                                          - ImGui::GetStyle().ItemInnerSpacing.x));
     ImGui::Combo(
         "Category", &g_category, kCategoryNames.data(), static_cast<int>(kCategoryNames.size()));
-    if (wideFilters) ImGui::SameLine();
+    if (wideFilters) {
+        ImGui::SameLine();
+    }
     ImGui::SetNextItemWidth(wideFilters ? 110.0f
                                         : (std::max)(1.0f,
                                                      ImGui::GetContentRegionAvail().x
@@ -415,14 +474,16 @@ void catalog_tab(const std::shared_ptr<const Catalog>& data) {
                             data->entries.size(),
                             data->classified);
     }
-    if (g_category == static_cast<int>(Category::dummies))
+    if (g_category == static_cast<int>(Category::dummies)) {
         ImGui::TextWrapped("Only identified dummies are listed here. Items this build cannot "
                            "classify remain read-only.");
-    if (!wideFilters)
+    }
+    if (!wideFilters) {
         ImGui::TextDisabled("%zu matches / %zu installed / %zu grantable",
                             g_filtered.size(),
                             data->entries.size(),
                             data->classified);
+    }
     const auto& style = ImGui::GetStyle();
     const float available = (std::max)(1.0f, ImGui::GetContentRegionAvail().x);
     // Side by side once there is room for both; the grid keeps the whole column height either way.
@@ -440,7 +501,9 @@ void catalog_tab(const std::shared_ptr<const Catalog>& data) {
         ImGui::BeginChild("##item_detail", {0, gridHeight}, ImGuiChildFlags_Borders);
     }
     selected_item(data);
-    if (sideBySide) ImGui::EndChild();
+    if (sideBySide) {
+        ImGui::EndChild();
+    }
 }
 
 void selected_item(const std::shared_ptr<const Catalog>& data) {
@@ -452,7 +515,9 @@ void selected_item(const std::shared_ptr<const Catalog>& data) {
     ImGui::SeparatorText("Selected item");
     const bool wide = ImGui::GetContentRegionAvail().x >= ImGui::GetFontSize() * 24;
     icon(entry, 72);
-    if (wide) ImGui::SameLine();
+    if (wide) {
+        ImGui::SameLine();
+    }
     ImGui::BeginGroup();
     ImGui::TextWrapped("%s", name(entry));
     ImGui::TextWrapped("ID %u | 0x%08X | bucket %u",
@@ -460,7 +525,9 @@ void selected_item(const std::shared_ptr<const Catalog>& data) {
                        entry.identity.definitionHash,
                        static_cast<unsigned>(entry.identity.bucketId));
     ImGui::TextWrapped("Category: %s", kCategoryNames[static_cast<std::size_t>(entry.category)]);
-    if (!entry.itemType.empty()) ImGui::TextWrapped("Installed type: %s", entry.itemType.c_str());
+    if (!entry.itemType.empty()) {
+        ImGui::TextWrapped("Installed type: %s", entry.itemType.c_str());
+    }
     ImGui::SetNextItemWidth(96);
     ImGui::InputInt("Quantity", &g_quantity, 0, 0);
     namespace definitions = state::build_data;
@@ -480,14 +547,17 @@ void selected_item(const std::shared_ptr<const Catalog>& data) {
     const bool allowed = g_inventory.ready && detailReady && g_probe.accepted;
     ImGui::SameLine();
     ImGui::BeginDisabled(!allowed);
-    if (ImGui::Button("Grant")) grant_feedback(service::grant(entry, g_quantity));
+    if (ImGui::Button("Grant")) {
+        grant_feedback(service::grant(entry, g_quantity));
+    }
     ImGui::EndDisabled();
     ImGui::EndGroup();
     if (!allowed) {
-        if (!g_inventory.ready)
+        if (!g_inventory.ready) {
             ImGui::TextDisabled("Select a character to grant items");
-        else
+        } else {
             ImGui::TextDisabled("Unable to grant");
+        }
     }
     // Where an item lands is derived from installed data, so the panel reports it rather than
     // leaving the bucket a number to look up elsewhere.
@@ -510,14 +580,16 @@ void selected_item(const std::shared_ptr<const Catalog>& data) {
                                 static_cast<unsigned>(entry.identity.bucketId));
         }
     }
-    if (!entry.description.empty())
+    if (!entry.description.empty()) {
         ImGui::TextWrapped("Description: %s", entry.description.c_str());
-    else
+    } else {
         ImGui::TextDisabled("Description unavailable.");
-    if (entry.bounty)
+    }
+    if (entry.bounty) {
         catalog_bounty(entry);
-    else
+    } else {
         objectives(entry);
+    }
 }
 constexpr std::size_t kHeldColumns = 4, kHeldRows = 7;
 constexpr std::size_t kHeldPerPage = kHeldColumns * kHeldRows;
@@ -528,7 +600,9 @@ std::size_t held_rows_used() noexcept {
     const auto total = g_inventory.bounties.size();
     const auto first = static_cast<std::size_t>((std::max)(g_heldPage, 1) - 1) * kHeldPerPage;
     // An empty page keeps the full grid so the container does not collapse when nothing is held.
-    if (total == 0) return kHeldRows;
+    if (total == 0) {
+        return kHeldRows;
+    }
     const auto shown = first >= total ? 0 : (std::min)(total - first, kHeldPerPage);
     const std::size_t used = (shown + kHeldColumns - 1) / kHeldColumns;
     return used == 0 ? kHeldRows : used;
@@ -543,13 +617,17 @@ void held_grid(const Catalog& data) {
     const int lastPage = (std::max)(1, static_cast<int>((total + kPerPage - 1) / kPerPage));
     g_heldPage = (std::clamp)(g_heldPage, 1, lastPage);
     ImGui::BeginDisabled(g_heldPage <= 1);
-    if (ImGui::ArrowButton("##held_previous", ImGuiDir_Left)) --g_heldPage;
+    if (ImGui::ArrowButton("##held_previous", ImGuiDir_Left)) {
+        --g_heldPage;
+    }
     ImGui::EndDisabled();
     ImGui::SameLine();
     ImGui::Text("Page %d of %d", g_heldPage, lastPage);
     ImGui::SameLine();
     ImGui::BeginDisabled(g_heldPage >= lastPage);
-    if (ImGui::ArrowButton("##held_next", ImGuiDir_Right)) ++g_heldPage;
+    if (ImGui::ArrowButton("##held_next", ImGuiDir_Right)) {
+        ++g_heldPage;
+    }
     ImGui::EndDisabled();
     ImGui::SameLine();
     ImGui::TextDisabled("%zu held", total);
@@ -559,7 +637,9 @@ void held_grid(const Catalog& data) {
     for (std::size_t row = 0; row < kRows; ++row) {
         for (std::size_t column = 0; column < kColumns; ++column) {
             const auto slot = first + row * kColumns + column;
-            if (column != 0) ImGui::SameLine();
+            if (column != 0) {
+                ImGui::SameLine();
+            }
             ImGui::PushID(static_cast<int>(row * kColumns + column));
             if (slot >= total) {
                 ImGui::Dummy({kTile, kTile});
@@ -570,23 +650,28 @@ void held_grid(const Catalog& data) {
             const auto* entry = find(data, held.index, held.hash);
             const ImVec2 origin = ImGui::GetCursorScreenPos();
             const ImVec2 corner{origin.x + kTile, origin.y + kTile};
-            if (ImGui::Selectable("##slot", g_heldSelection == held.instance, 0, {kTile, kTile}))
+            if (ImGui::Selectable("##slot", g_heldSelection == held.instance, 0, {kTile, kTile})) {
                 select_held(held);
+            }
             const auto texture = entry ? icons::get(entry->iconIndex) : ImTextureID_Invalid;
-            if (texture != ImTextureID_Invalid)
+            if (texture != ImTextureID_Invalid) {
                 draw->AddImage(ImTextureRef(texture), origin, corner);
-            else
+            } else {
                 draw->AddRect(origin, corner, ImGui::GetColorU32(ImGuiCol_TextDisabled));
+            }
             // A complete pursuit is the one worth redeeming, so it reads at a glance.
-            if (held.complete)
+            if (held.complete) {
                 draw->AddRect(origin, corner, IM_COL32(120, 220, 120, 255), 0.0f, 0, 2.0f);
-            if (g_heldSelection == held.instance)
+            }
+            if (g_heldSelection == held.instance) {
                 draw->AddRect(
                     origin, corner, ImGui::GetColorU32(ImGuiCol_NavCursor), 0.0f, 0, 2.0f);
-            if (ImGui::IsItemHovered())
+            }
+            if (ImGui::IsItemHovered()) {
                 ImGui::SetTooltip("%u  %s",
                                   static_cast<unsigned>(held.index),
                                   entry ? name(*entry) : "Metadata unavailable");
+            }
             ImGui::PopID();
         }
     }
@@ -595,7 +680,9 @@ void held_grid(const Catalog& data) {
 /** The selected held pursuit and its lanes, drawn beside the grid when the page is wide. */
 void held_detail(const Catalog& data) {
     for (const auto& held : g_inventory.bounties) {
-        if (held.instance != g_heldSelection) continue;
+        if (held.instance != g_heldSelection) {
+            continue;
+        }
         const auto* entry = find(data, held.index, held.hash);
         if (!entry) {
             ImGui::TextDisabled("Installed bounty details unavailable.");
@@ -616,14 +703,18 @@ void held_detail(const Catalog& data) {
 /** Installed page selection and the page grant, drawn beside the grid. */
 void bounty_page_controls(const service::Pages& pages, int lastPage) {
     ImGui::BeginDisabled(g_bountyPage <= 1);
-    if (ImGui::ArrowButton("##bounty_previous", ImGuiDir_Left)) --g_bountyPage;
+    if (ImGui::ArrowButton("##bounty_previous", ImGuiDir_Left)) {
+        --g_bountyPage;
+    }
     ImGui::EndDisabled();
     ImGui::SameLine();
     ImGui::SetNextItemWidth(60);
     ImGui::InputInt("##bounty_page", &g_bountyPage, 0, 0);
     ImGui::SameLine();
     ImGui::BeginDisabled(g_bountyPage >= lastPage);
-    if (ImGui::ArrowButton("##bounty_next", ImGuiDir_Right)) ++g_bountyPage;
+    if (ImGui::ArrowButton("##bounty_next", ImGuiDir_Right)) {
+        ++g_bountyPage;
+    }
     ImGui::EndDisabled();
     g_bountyPage = (std::clamp)(g_bountyPage, 1, lastPage);
     ImGui::SameLine();
@@ -634,7 +725,7 @@ void bounty_page_controls(const service::Pages& pages, int lastPage) {
         feedback(service::clear(service::Clear::bounties));
         const auto page = service::bounty_page(static_cast<std::size_t>(g_bountyPage));
         service::Feedback refusal{};
-        const auto granted = service::queue_bounty_page(page, refusal);
+        const auto granted = service::grant_bounty_page(page, refusal);
         if (granted < page.size()) {
             service::Feedback shortfall{false};
             std::snprintf(shortfall.text.data(),
@@ -660,12 +751,13 @@ void bounty_page_controls(const service::Pages& pages, int lastPage) {
     }
     ImGui::SameLine();
     ImGui::TextDisabled("(?)");
-    if (ImGui::IsItemHovered())
+    if (ImGui::IsItemHovered()) {
         ImGui::SetTooltip("%zu installed bounties, %zu per page. Discards held first. "
                           "%zu held entries have unresolved metadata.",
                           pages.bounties,
                           service::kBountyPageSize,
                           g_inventory.unresolved);
+    }
 }
 
 void bounties_tab(const Catalog& data) {
@@ -681,14 +773,16 @@ void bounties_tab(const Catalog& data) {
     // The grid claims exactly the tiles it draws; everything else belongs to the detail column.
     const float gridWidth = kHeldColumns * kHeldTile + (kHeldColumns - 1) * style.ItemSpacing.x
                             + style.WindowPadding.x * 2.0f;
-    const float gridHeight = held_rows_used() * (kHeldTile + style.ItemSpacing.y)
-                             + ImGui::GetFrameHeightWithSpacing() + style.WindowPadding.y * 2.0f;
+    const float gridHeight =
+        static_cast<float>(held_rows_used()) * (kHeldTile + style.ItemSpacing.y)
+        + ImGui::GetFrameHeightWithSpacing() + style.WindowPadding.y * 2.0f;
     const bool sideBySide = available > gridWidth + 320.0f;
     const float height =
         sideBySide ? (std::max)(gridHeight, ImGui::GetContentRegionAvail().y) : gridHeight;
     if (ImGui::BeginChild(
-            "##held_grid", {sideBySide ? gridWidth : 0.0f, gridHeight}, ImGuiChildFlags_Borders))
+            "##held_grid", {sideBySide ? gridWidth : 0.0f, gridHeight}, ImGuiChildFlags_Borders)) {
         held_grid(data);
+    }
     ImGui::EndChild();
     if (sideBySide) {
         ImGui::SameLine(0, style.ItemSpacing.x);
@@ -698,15 +792,21 @@ void bounties_tab(const Catalog& data) {
     // the vertical space.
     ImGui::Text("%zu held", g_inventory.bounties.size());
     ImGui::SameLine();
-    if (ImGui::Button("Refresh")) refresh();
+    if (ImGui::Button("Refresh")) {
+        refresh();
+    }
     ImGui::SameLine();
     ImGui::BeginDisabled(g_inventory.bounties.empty());
-    if (ImGui::Button("Complete all held")) feedback(service::complete_bounties());
+    if (ImGui::Button("Complete all held")) {
+        feedback(service::complete_bounties());
+    }
     ImGui::EndDisabled();
     bounty_page_controls(pages, lastPage);
     ImGui::Separator();
     held_detail(data);
-    if (sideBySide) ImGui::EndChild();
+    if (sideBySide) {
+        ImGui::EndChild();
+    }
 }
 int g_bucketSelected = 0;
 std::size_t g_bucketSelection = 0;
@@ -718,7 +818,9 @@ double g_bucketRefreshAt = 0.0;
 /** Reads every bucket and the selected one's contents, at the panel's ordinary refresh rate. */
 void refresh_buckets(bool force) {
     const auto now = ImGui::GetTime();
-    if (!force && now < g_bucketRefreshAt) return;
+    if (!force && now < g_bucketRefreshAt) {
+        return;
+    }
     g_bucketRefreshAt = now + 1.0;
     g_buckets = service::buckets();
     if (g_bucketSelected < 0 || g_bucketSelected >= static_cast<int>(g_buckets.size())) {
@@ -728,8 +830,9 @@ void refresh_buckets(bool force) {
     }
     g_bucketItems = service::bucket_items(g_buckets[g_bucketSelected].bucketId);
     g_bucketQuantities.assign(g_bucketItems.size(), 0);
-    for (std::size_t i = 0; i < g_bucketItems.size(); ++i)
+    for (std::size_t i = 0; i < g_bucketItems.size(); ++i) {
         g_bucketQuantities[i] = g_bucketItems[i].quantity;
+    }
 }
 
 void buckets_tab(const Catalog& data) {
@@ -756,12 +859,13 @@ void buckets_tab(const Catalog& data) {
     };
     ImGui::SetNextItemWidth(320.0f);
     if (ImGui::BeginCombo("##bucket", label(static_cast<std::size_t>(g_bucketSelected)))) {
-        for (std::size_t i = 0; i < g_buckets.size(); ++i)
+        for (std::size_t i = 0; i < g_buckets.size(); ++i) {
             if (ImGui::Selectable(label(i), g_bucketSelected == static_cast<int>(i))) {
                 g_bucketSelected = static_cast<int>(i);
                 g_bucketSelection = 0;
                 refresh_buckets(true);
             }
+        }
         ImGui::EndCombo();
     }
     const auto& bucket = g_buckets[static_cast<std::size_t>(g_bucketSelected)];
@@ -782,29 +886,38 @@ void buckets_tab(const Catalog& data) {
     const float height = (std::max)(200.0f, ImGui::GetContentRegionAvail().y);
     ImGui::BeginChild(
         "##bucket_grid", {sideBySide ? gridWidth : 0.0f, height}, ImGuiChildFlags_Borders);
-    if (g_bucketItems.empty()) ImGui::TextDisabled("Nothing held here.");
+    if (g_bucketItems.empty()) {
+        ImGui::TextDisabled("Nothing held here.");
+    }
     auto* draw = ImGui::GetWindowDrawList();
     for (std::size_t i = 0; i < g_bucketItems.size(); ++i) {
         const auto& item = g_bucketItems[i];
         const auto* entry = find(data, item.index, item.hash);
-        if (i % kColumns != 0) ImGui::SameLine();
+        if (i % kColumns != 0) {
+            ImGui::SameLine();
+        }
         ImGui::PushID(static_cast<int>(i));
         const ImVec2 origin = ImGui::GetCursorScreenPos();
         const ImVec2 corner{origin.x + kTile, origin.y + kTile};
         const bool chosen = g_bucketSelection == i + 1;
-        if (ImGui::Selectable("##cell", chosen, 0, {kTile, kTile})) g_bucketSelection = i + 1;
+        if (ImGui::Selectable("##cell", chosen, 0, {kTile, kTile})) {
+            g_bucketSelection = i + 1;
+        }
         // The icon cache holds fewer slots than the largest bucket holds rows.
         constexpr std::size_t kBucketIconBudget = 48;
         const auto texture =
             entry && i < kBucketIconBudget ? icons::get(entry->iconIndex) : ImTextureID_Invalid;
-        if (texture != ImTextureID_Invalid)
+        if (texture != ImTextureID_Invalid) {
             draw->AddImage(ImTextureRef(texture), origin, corner);
-        else
+        } else {
             draw->AddRect(origin, corner, ImGui::GetColorU32(ImGuiCol_TextDisabled));
-        if (item.equipped)
+        }
+        if (item.equipped) {
             draw->AddRect(origin, corner, IM_COL32(220, 200, 120, 255), 0.0f, 0, 2.0f);
-        if (chosen)
+        }
+        if (chosen) {
             draw->AddRect(origin, corner, ImGui::GetColorU32(ImGuiCol_NavCursor), 0.0f, 0, 2.0f);
+        }
         if (item.quantity > 1) {
             char count[16]{};
             std::snprintf(count, sizeof count, "%d", item.quantity);
@@ -812,9 +925,10 @@ void buckets_tab(const Catalog& data) {
                           IM_COL32_WHITE,
                           count);
         }
-        if (ImGui::IsItemHovered())
+        if (ImGui::IsItemHovered()) {
             ImGui::SetTooltip(
                 "%u  %s", unsigned(item.index), entry ? name(*entry) : "Metadata unavailable");
+        }
         ImGui::PopID();
     }
     ImGui::EndChild();
@@ -831,16 +945,21 @@ void buckets_tab(const Catalog& data) {
         if (entry) {
             icon(*entry, 72.0f);
             ImGui::Text("%s", name(*entry));
-            if (!entry->itemType.empty()) ImGui::TextDisabled("%s", entry->itemType.c_str());
+            if (!entry->itemType.empty()) {
+                ImGui::TextDisabled("%s", entry->itemType.c_str());
+            }
         } else {
             ImGui::Text("Item %u", unsigned(item.index));
         }
         ImGui::Separator();
         ImGui::TextDisabled("idx=%u  serial=%d", unsigned(item.index), item.mutationSerial);
-        if (item.instance != 0)
+        if (item.instance != 0) {
             ImGui::TextDisabled("instance 0x%016llX",
                                 static_cast<unsigned long long>(item.instance));
-        if (item.equipped) ImGui::TextDisabled("equipped");
+        }
+        if (item.equipped) {
+            ImGui::TextDisabled("equipped");
+        }
         ImGui::Spacing();
         ImGui::BeginDisabled(item.equipped);
         ImGui::SetNextItemWidth(160.0f);
@@ -862,7 +981,9 @@ void buckets_tab(const Catalog& data) {
         }
         ImGui::EndDisabled();
     }
-    if (sideBySide) ImGui::EndChild();
+    if (sideBySide) {
+        ImGui::EndChild();
+    }
 }
 void clear_tab() {
     ImGui::TextWrapped("Drops every held item in the chosen scope. Equipped items are kept.");
@@ -878,8 +999,12 @@ void clear_tab() {
         ImGui::PopID();
     }
     ImGui::EndDisabled();
-    if (!g_inventory.ready) ImGui::TextDisabled("Select a character to use Clear.");
-    if (g_clearCategory < 0) return;
+    if (!g_inventory.ready) {
+        ImGui::TextDisabled("Select a character to use Clear.");
+    }
+    if (g_clearCategory < 0) {
+        return;
+    }
     ImGui::Separator();
     ImGui::Text("Clear %s?", kClearNames[g_clearCategory]);
     ImGui::TextWrapped("%s", kClearDescriptions[g_clearCategory]);
@@ -891,7 +1016,9 @@ void clear_tab() {
     }
     ImGui::EndDisabled();
     ImGui::SameLine();
-    if (ImGui::Button("Cancel")) g_clearCategory = -1;
+    if (ImGui::Button("Cancel")) {
+        g_clearCategory = -1;
+    }
 }
 } // namespace
 
@@ -899,7 +1026,9 @@ void draw() noexcept {
     try {
         catalog::start();
         icons::begin_frame(client::hooks::graphics::renderer::g_resources.device);
-        if (ImGui::GetTime() >= g_refreshAt) refresh();
+        if (ImGui::GetTime() >= g_refreshAt) {
+            refresh();
+        }
         const char* note = g_grantFeedback.text[0] ? g_grantFeedback.text.data()
                            : g_feedback.text[0]    ? g_feedback.text.data()
                                                    : nullptr;
@@ -909,7 +1038,9 @@ void draw() noexcept {
             char brief[72]{};
             std::snprintf(brief, sizeof brief, "%s", note);
             ImGui::TextDisabled("%s", brief);
-            if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", note);
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip("%s", note);
+            }
         }
         const auto data = catalog::snapshot();
         if (!data) {

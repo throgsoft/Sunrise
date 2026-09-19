@@ -27,52 +27,71 @@ bool project_material_gains(const state::PendingSocketPlug& mutation,
     if (!mutation.prepared || !mutation.profileChanged
         || mutation.expectedProfileItemCount > mutation.beforeProfileItems.size()
         || mutation.afterProfileItemCount > mutation.afterProfileItems.size()
-        || object.profileItemCount != mutation.afterProfileItemCount)
+        || object.profileItemCount != mutation.afterProfileItemCount) {
         return false;
+    }
     auto& ring = object.profileInventoryChanges;
     if (ring.writeSlot != 0 || ring.nextSequence != 0
         || !std::all_of(ring.records.begin(), ring.records.end(), [](const auto& row) {
                return row.sequence == 0 && row.reserved == 0 && row.mutationSerial == 0
                       && row.kind == 0 && row.reservedKind == 0 && row.flags == 0;
-           }))
+           })) {
         return false;
+    }
     std::int32_t greatestSerial = 0;
-    for (std::size_t i = 0; i < mutation.expectedProfileItemCount; ++i)
+    for (std::size_t i = 0; i < mutation.expectedProfileItemCount; ++i) {
         greatestSerial = (std::max)(greatestSerial, mutation.beforeProfileItems[i].mutationSerial);
+    }
     std::size_t count = 0;
     for (std::size_t i = 0; i < mutation.afterProfileItemCount; ++i) {
         const auto& gain = mutation.afterProfileItems[i];
         // Evaluate each definition once; these socket exchanges do not split reward stacks.
         bool visited = false;
-        for (std::size_t j = 0; j < i; ++j)
+        for (std::size_t j = 0; j < i; ++j) {
             visited |= mutation.afterProfileItems[j].definitionHash == gain.definitionHash;
-        if (visited) continue;
+        }
+        if (visited) {
+            continue;
+        }
         std::int64_t delta = 0;
         std::size_t afterRows = 0;
-        for (std::size_t j = 0; j < mutation.expectedProfileItemCount; ++j)
-            if (mutation.beforeProfileItems[j].definitionHash == gain.definitionHash)
+        for (std::size_t j = 0; j < mutation.expectedProfileItemCount; ++j) {
+            if (mutation.beforeProfileItems[j].definitionHash == gain.definitionHash) {
                 delta -= mutation.beforeProfileItems[j].quantity;
+            }
+        }
         for (std::size_t j = 0; j < mutation.afterProfileItemCount; ++j) {
-            if (mutation.afterProfileItems[j].definitionHash != gain.definitionHash) continue;
+            if (mutation.afterProfileItems[j].definitionHash != gain.definitionHash) {
+                continue;
+            }
             delta += mutation.afterProfileItems[j].quantity;
             ++afterRows;
         }
-        if (delta <= 0) continue;
+        if (delta <= 0) {
+            continue;
+        }
         if (afterRows != 1 || gain.instanceSoid != 0 || gain.quantity <= 0
-            || gain.mutationSerial <= greatestSerial || count == ring.records.size())
+            || gain.mutationSerial <= greatestSerial || count == ring.records.size()) {
             return false;
+        }
         state::build_data::items::Definition definition{};
-        if (!state::build_data::find_item_definition_hash(gain.definitionHash, definition))
+        if (!state::build_data::find_item_definition_hash(gain.definitionHash, definition)) {
             return false;
+        }
         std::size_t matches = 0;
         for (const auto& row : object.profileItems) {
-            if (row.mutationSerial != gain.mutationSerial) continue;
+            if (row.mutationSerial != gain.mutationSerial) {
+                continue;
+            }
             if (row.definitionIndex != definition.definitionIndex || row.instanceSoid != 0
-                || row.quantity != gain.quantity)
+                || row.quantity != gain.quantity) {
                 return false;
+            }
             ++matches;
         }
-        if (matches != 1) return false;
+        if (matches != 1) {
+            return false;
+        }
         ring.records[count] = {static_cast<std::uint16_t>(count), 0, gain.mutationSerial, 1, 0, 0};
         ++count;
     }
@@ -145,8 +164,9 @@ bool prepare_socket_plug(Scratch& scratch,
         return report_failure("socket_plug_item_missing");
     }
     if (!dawning::append_changed_objectives(
-            mutation.beforeCharacter, mutation.afterCharacter, selected.loadout, changed))
+            mutation.beforeCharacter, mutation.afterCharacter, selected.loadout, changed)) {
         return report_failure("socket_plug_objective_items");
+    }
 
     const auto rawStorage = std::span(scratch.plaintext).subspan(reservation.rawWriteOffset);
     const std::size_t requiredRawSize = socketPlug.updatesAccount

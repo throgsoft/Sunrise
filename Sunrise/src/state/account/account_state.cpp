@@ -119,11 +119,13 @@ constexpr std::uint8_t kDismantleClassMaskBits =
             return false;
         }
         if (character.gambitPrimeSynthesizerTier > GambitPrimeSynthesizerTier::powerful
-            || std::any_of(
-                character.gambitPrimeHelmetTiers.begin(),
-                character.gambitPrimeHelmetTiers.end(),
-                [](GambitPrimeHelmetTier tier) { return tier > GambitPrimeHelmetTier::notorious; }))
+            || std::any_of(character.gambitPrimeHelmetTiers.begin(),
+                           character.gambitPrimeHelmetTiers.end(),
+                           [](GambitPrimeHelmetTier tier) {
+                               return tier > GambitPrimeHelmetTier::notorious;
+                           })) {
             return false;
+        }
         selected = selected || character.selected;
         for (const std::optional<inventory::Item>& item : character.equipment.slots) {
             if (item.has_value()

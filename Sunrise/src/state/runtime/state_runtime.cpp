@@ -16,6 +16,7 @@
 
 #include "../../core/logging/log.h"
 #include "../../core/settings/settings.h"
+#include "../account/inventory/material_identity.h"
 #include "../activity/defaults/activity_defaults_validation.h"
 #include "../build_data/runtime.h"
 #include "../investment/store_internal.h"
@@ -42,7 +43,7 @@ constexpr std::uint32_t kLoopbackAddress = 0x7F000001;
 /** Default one-hour lifetime for generated SignOn session tokens. */
 constexpr std::uint32_t kDefaultTokenLifetimeSeconds = 3600;
 /** Glimmer item definition, the currency an artifact reset charges. */
-constexpr std::uint32_t kGlimmerHash = 3159615086U;
+using account::inventory::kGlimmerHash;
 
 /** @return True when this item is an artifact mod a reset removes and unplugs. */
 [[nodiscard]] bool is_artifact_mod(std::uint32_t hash) noexcept {
@@ -401,18 +402,22 @@ bool investment_snapshot(InvestmentState& output, std::uint16_t previousMoteMask
     std::size_t kept = 0;
     for (std::size_t read = 0; read < oldCount; ++read) {
         const auto row = snapshot.family5.values[read];
-        if (row.slot != kSynthesizerTierValueSlot) snapshot.family5.values[kept++] = row;
+        if (row.slot != kSynthesizerTierValueSlot) {
+            snapshot.family5.values[kept++] = row;
+        }
     }
-    for (std::size_t index = kept; index < oldCount; ++index)
+    for (std::size_t index = kept; index < oldCount; ++index) {
         snapshot.family5.values[index] = {};
+    }
     snapshot.family5.valueCount = kept;
     snapshot.moteOwnershipMask = previousMoteMask;
     const bool projectedMotes =
         projectsMotes
         && synthesizer::project_mote_output_flags(*account, snapshot.family5, previousMoteMask);
-    if (projectedMotes)
+    if (projectedMotes) {
         snapshot.moteOwnershipMask = synthesizer::mote_publication_mask(
             std::span(account->profileItems).first(account->profileItemCount), previousMoteMask);
+    }
     if (projectsMotes && !projectedMotes) {
         // An optional inventory predicate must not turn WS-503 into an undecodable
         // echo. The projection is atomic; retain the valid base snapshot on failure.
@@ -425,7 +430,9 @@ bool investment_snapshot(InvestmentState& output, std::uint16_t previousMoteMask
                           snapshot.family5.flags.size());
         // Once a connection has received an override, omission cannot safely clear it.
         // Exchanges preflight this same cumulative history before spending inventory.
-        if (previousMoteMask != 0) return false;
+        if (previousMoteMask != 0) {
+            return false;
+        }
     }
     output = snapshot;
     return true;

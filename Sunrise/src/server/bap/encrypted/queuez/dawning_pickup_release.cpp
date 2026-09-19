@@ -26,40 +26,54 @@ bool append_pickups(Session& session,
     namespace snap = push::snapshot;
     namespace character = middleware::datagen::family4::character;
     auto account = std::unique_ptr<state::AccountState>{new (std::nothrow) state::AccountState};
-    if (!account || !state::investment::store::read_account(*account)) return false;
+    if (!account || !state::investment::store::read_account(*account)) {
+        return false;
+    }
     const auto selectedIndex = snap::find_character_index(*account);
     snap::Resolved resolved{};
     queuez::EquipmentSwap update{};
     if (!selectedIndex || !snap::resolve(*account, *selectedIndex, resolved)
         || account->primarySoid != session.queuez.family4RootSoid
         || !queuez::stage_equipment_swap(
-            session.queuez, account->characters[*selectedIndex].soid, update))
+            session.queuez, account->characters[*selectedIndex].soid, update)) {
         return false;
+    }
     const auto bytes = std::span(scratch.plaintext).first(character::layout::kObjectSize);
-    if (!character::encode(
-            account->characters[*selectedIndex], resolved.loadout, resolved.lightEvaluation, bytes))
+    if (!character::encode(account->characters[*selectedIndex],
+                           resolved.loadout,
+                           resolved.lightEvaluation,
+                           bytes)) {
         return false;
+    }
     auto& object = *reinterpret_cast<character::layout::Object*>(bytes.data());
     namespace identity = state::account::inventory::dawning;
     std::size_t count = 0;
     for (const auto& row : object.inventoryItems) {
         state::build_data::items::Definition item{};
-        if (row.definitionIndex == 0xFFFF) continue;
-        if (!state::build_data::find_item_definition_index(row.definitionIndex, item)) return false;
+        if (row.definitionIndex == 0xFFFF) {
+            continue;
+        }
+        if (!state::build_data::find_item_definition_index(row.definitionIndex, item)) {
+            return false;
+        }
         const auto ingredient = identity::ingredient(item.definitionHash);
         if (ingredient == identity::kIngredientCount
-            || item.definitionHash != identity::kIngredients[ingredient].pickupHash)
+            || item.definitionHash != identity::kIngredients[ingredient].pickupHash) {
             continue;
+        }
         if (row.instanceSoid != 0 || row.quantity != 1
-            || count == object.inventoryChanges.records.size())
+            || count == object.inventoryChanges.records.size()) {
             return false;
+        }
         auto& change = object.inventoryChanges.records[count];
         change.sequence = static_cast<std::uint16_t>(count++);
         change.mutationSerial = row.mutationSerial;
         change.kind = snap::kChangeKind;
         change.flags = snap::kChangeFlags;
     }
-    if (count == 0) return false;
+    if (count == 0) {
+        return false;
+    }
     object.inventoryChanges.writeSlot = object.inventoryChanges.nextSequence =
         static_cast<std::uint16_t>(count);
     snap::Prepared prepared{};
@@ -69,8 +83,9 @@ bool append_pickups(Session& session,
                              resolved.characterObjectId,
                              account->characters[*selectedIndex].soid,
                              prepared.objects[0],
-                             extent))
+                             extent)) {
         return false;
+    }
     prepared.rawClearSize = bytes.size();
     prepared.compressedClearSize = extent;
     prepared.family = {queuez::kAccountFamilyType,
@@ -79,8 +94,9 @@ bool append_pickups(Session& session,
                        0,
                        std::span(prepared.objects).first(1)};
     if (!push::queuez_frame::append_prepared_frame(
-            scratch, prepared, session.sessionKey, nonce, scratch.framed, size))
+            scratch, prepared, session.sessionKey, nonce, scratch.framed, size)) {
         return false;
+    }
     after = update.after;
     return true;
 }
@@ -93,20 +109,27 @@ bool consume_dawning_pickup_release(Session& session,
                                     bool& touchesScratch) noexcept {
     const auto now = GetTickCount64();
     if (!session.queuez.family4Active || session.queuez.family4Version == 0
-        || now < session.dawningPickupSweepDueTick)
+        || now < session.dawningPickupSweepDueTick) {
         return false;
+    }
     // One revision drops the rows it replaces and carries their successors, so no observer
     // grace separates them. The due tick is a backoff for a sweep that could not proceed.
     session.dawningPickupSweepDueTick = now + 1'000;
     state::investment::store::Transaction transaction;
     auto account = std::unique_ptr<state::AccountState>{new (std::nothrow) state::AccountState};
     if (!transaction.ready() || !account || !state::investment::store::read_account(*account)
-        || account->primarySoid != session.queuez.family4RootSoid)
+        || account->primarySoid != session.queuez.family4RootSoid) {
         return false;
+    }
     const state::CharacterState* selected = nullptr;
-    for (std::size_t i = 0; i < account->characterCount; ++i)
-        if (account->characters[i].selected) selected = &account->characters[i];
-    if (!selected) return false;
+    for (std::size_t i = 0; i < account->characterCount; ++i) {
+        if (account->characters[i].selected) {
+            selected = &account->characters[i];
+        }
+    }
+    if (!selected) {
+        return false;
+    }
     std::size_t acquired{};
     if (!state::runtime::detail::dawning::stage_queued_pickups(selected->soid, acquired)
         || acquired == 0) {
@@ -121,8 +144,9 @@ bool consume_dawning_pickup_release(Session& session,
     // Failure rolls back the rows and leaves the oven counters untouched in either case.
     const bool encoded = append_pickups(session, scratch, nonce, size, after);
     if (!encoded || size == 0 || size > response.size() || !queuez::valid(after)
-        || !transaction.commit())
+        || !transaction.commit()) {
         return false;
+    }
     std::copy_n(scratch.framed.begin(), size, response.begin());
     written = size;
     session.sendNonce = nonce;

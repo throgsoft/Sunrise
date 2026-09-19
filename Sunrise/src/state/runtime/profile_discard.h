@@ -39,18 +39,29 @@ namespace sunrise::state::item_discard {
     out = {};
     build_data::items::details::Definition detail{};
     if (!installed(hash, detail) || before.primarySoid == 0
-        || !runtime::detail::valid_profile_inventory(before))
+        || !runtime::detail::valid_profile_inventory(before)) {
         return false;
+    }
     const auto consumed = quantity(mode(hash), observed, detail.maxStackSize);
-    if (consumed == 0) return false;
+    if (consumed == 0) {
+        return false;
+    }
     auto target = before.profileItems.size();
     for (std::size_t i = 0; i < before.profileItemCount; ++i) {
         const auto& row = before.profileItems[i];
-        if (row.definitionHash != hash || row.quantity != observed) continue;
-        if (row.instanceSoid) return false;
-        if (target == before.profileItems.size()) target = i;
+        if (row.definitionHash != hash || row.quantity != observed) {
+            continue;
+        }
+        if (row.instanceSoid) {
+            return false;
+        }
+        if (target == before.profileItems.size()) {
+            target = i;
+        }
     }
-    if (target == before.profileItems.size()) return false;
+    if (target == before.profileItems.size()) {
+        return false;
+    }
     const auto remaining = observed - consumed;
     out.beforeItems = before.profileItems;
     out.afterItems = before.profileItems;
@@ -68,8 +79,9 @@ namespace sunrise::state::item_discard {
         out.acquiredMutationSerial = before.profileItems[target].mutationSerial;
         out.afterItems[target].quantity = remaining;
     } else {
-        for (std::size_t i = target + 1; i < out.afterItemCount; ++i)
+        for (std::size_t i = target + 1; i < out.afterItemCount; ++i) {
             out.afterItems[i - 1] = out.afterItems[i];
+        }
         out.afterItems[--out.afterItemCount] = {};
     }
     out.profileDiscard = true;
@@ -91,10 +103,14 @@ namespace sunrise::state::item_discard {
     if (!mutation.profileDiscard || !mutation.prepared || mutation.appended || mutation.actionSource
         || mutation.acquiredInstanceSoid || mutation.directGrant
         || mutation.materialRequirementSetHash || mutation.materialRequirementCount
-        || mutation.collectibleIndex || mutation.changeCount)
+        || mutation.collectibleIndex || mutation.changeCount) {
         return false;
-    for (const auto& change : mutation.changes)
-        if (change.mutationSerial || change.afterQuantity) return false;
+    }
+    for (const auto& change : mutation.changes) {
+        if (change.mutationSerial || change.afterQuantity) {
+            return false;
+        }
+    }
     AccountState before{};
     before.primarySoid = mutation.accountSoid;
     before.profileItems = mutation.beforeItems;
@@ -103,8 +119,9 @@ namespace sunrise::state::item_discard {
     // This view deliberately contains no settings. The public stage and materialize boundaries
     // validate the full loaded account; canonical validation owns only the captured profile.
     if (!stage_profile(
-            before, mutation.acquiredDefinitionHash, mutation.previousQuantity, expected))
+            before, mutation.acquiredDefinitionHash, mutation.previousQuantity, expected)) {
         return false;
+    }
     return mutation.profileIndex == expected.profileIndex && mutation.bucketId == expected.bucketId
            && mutation.acquiredQuantity == expected.acquiredQuantity
            && mutation.previousMutationSerial == expected.previousMutationSerial
@@ -122,8 +139,9 @@ namespace sunrise::state::item_discard {
     if (!canonical(mutation) || current.primarySoid != mutation.accountSoid
         || !account::valid(current) || !runtime::detail::valid_profile_inventory(current)
         || !runtime::detail::same_profile_inventory(
-            current, mutation.beforeItems, mutation.expectedItemCount))
+            current, mutation.beforeItems, mutation.expectedItemCount)) {
         return false;
+    }
     after = current;
     after.profileItems = mutation.afterItems;
     after.profileItemCount = mutation.afterItemCount;

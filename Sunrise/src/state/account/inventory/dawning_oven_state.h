@@ -57,14 +57,21 @@ inline constexpr std::array<IngredientIdentity, kIngredientCount> kIngredients{{
 
 [[nodiscard]] constexpr std::size_t ingredient(std::uint32_t hash) noexcept {
     for (std::size_t i = 0; i < kIngredients.size(); ++i) {
-        if (hash == kIngredients[i].pickupHash || hash == kIngredients[i].plugHash) return i;
+        if (hash == kIngredients[i].pickupHash || hash == kIngredients[i].plugHash) {
+            return i;
+        }
     }
     return kIngredients.size();
 }
 [[nodiscard]] constexpr bool cookie(std::uint32_t hash) noexcept {
-    if (hash == kBurntCookieHash) return true;
-    for (const auto& recipe : kRecipes)
-        if (hash == recipe.cookieHash) return true;
+    if (hash == kBurntCookieHash) {
+        return true;
+    }
+    for (const auto& recipe : kRecipes) {
+        if (hash == recipe.cookieHash) {
+            return true;
+        }
+    }
     return false;
 }
 

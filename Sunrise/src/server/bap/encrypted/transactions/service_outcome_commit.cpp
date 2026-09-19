@@ -347,7 +347,9 @@ bool commit(ServiceOutcome& outcome, Publication& publication, const char*& reas
     }
     if (auto* transaction = transaction_if<RecordRewardGrantTransaction>(outcome)) {
         reason = "record_reward";
-        if (transaction->pending == nullptr) return false;
+        if (transaction->pending == nullptr) {
+            return false;
+        }
         return report_commit(state::commit_record_reward(*transaction->pending),
                              "ev=record_reward stage=transaction_commit result=fail");
     }

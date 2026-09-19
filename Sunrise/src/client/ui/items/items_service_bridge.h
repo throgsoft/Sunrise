@@ -11,8 +11,6 @@
 namespace sunrise::client::ui::items::service {
 struct Feedback {
     bool accepted{};
-    /** Held pursuits expected once every queued acquisition has been published, or zero. */
-    std::size_t expected{};
     std::array<char, 384> text{};
 };
 struct Held {
@@ -93,21 +91,20 @@ inline constexpr std::size_t kBountyPageSize = 40;
 
 /**
  * Installed bounty definition indices on one page, in installed order.
- * Proving and saving one acquisition copies an account image, so a caller feeds these in over
- * several frames rather than holding the render thread for a whole page.
  * @param page One-based page over the installed bounty order.
- * @return The page's definition indices, empty when the page is outside the installed range.
+ * @return The page's definition
+ * indices, empty when the page is outside the installed range.
  */
 [[nodiscard]] std::vector<std::uint16_t> bounty_page(std::size_t page) noexcept;
 
-/** Queues one page of installed bounties for the normal acquisition publication. */
 /**
- * Grants a page as one account mutation and publishes once.
+ * Grants each bounty in the page separately and requests one account publication afterward.
+ *
  * @param indices Installed bounties to grant.
  * @param refusal Receives the first refusal State reported, or stays empty.
  * @return How many of the page the character now holds.
  */
-[[nodiscard]] std::size_t queue_bounty_page(std::span<const std::uint16_t> indices,
+[[nodiscard]] std::size_t grant_bounty_page(std::span<const std::uint16_t> indices,
                                             Feedback& refusal) noexcept;
 
 [[nodiscard]] Feedback clear(Clear category) noexcept;

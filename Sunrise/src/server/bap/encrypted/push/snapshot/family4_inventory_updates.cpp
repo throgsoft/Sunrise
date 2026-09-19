@@ -639,15 +639,17 @@ bool prepare_item_dismantle(Scratch& scratch,
         if (!stackDiscard
             && selected.loadout.items[index].instance.instanceSoid
                    == mutation.dismantledInstanceSoid) {
-            if (dismantle.releasesInstance || retainedInstance)
+            if (dismantle.releasesInstance || retainedInstance) {
                 return report_failure("dismantle_item_present");
+            }
             retainedInstance = &selected.loadout.items[index].instance;
         }
     }
     // Character stacks live entirely in the character row and never own an item resident.
     // Only a partial discard of an instanced item requires a retained instance update.
-    if (!stackDiscard && !dismantle.releasesInstance && !retainedInstance)
+    if (!stackDiscard && !dismantle.releasesInstance && !retainedInstance) {
         return report_failure("dismantle_retained_item_missing");
+    }
 
     const auto rawStorage = std::span(scratch.plaintext).subspan(reservation.rawWriteOffset);
     if (family4_datagen::character::layout::kObjectSize > rawStorage.size()) {

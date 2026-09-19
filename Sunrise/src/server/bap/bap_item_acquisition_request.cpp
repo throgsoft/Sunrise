@@ -6,6 +6,7 @@
 #include <span>
 
 #include "../../core/logging/log.h"
+#include "../../state/build_data/items/quest_initialization.h"
 #include "../../state/build_data/runtime.h"
 #include "../../state/investment/store_internal.h"
 #include "../../state/runtime/runtime.h"
@@ -15,7 +16,10 @@ namespace sunrise::server::bap {
 namespace {
 
 /** Reads which world reward queue carries this item from the bucket its definition names. */
-[[nodiscard]] bool reward_kind(std::uint16_t itemDefinitionIndex, WorldRewardKind& kind) noexcept {
+[[nodiscard]] bool reward_kind(std::uint16_t itemDefinitionIndex,
+                               WorldRewardKind& kind,
+                               std::uint32_t& definitionHash,
+                               bool& uniquePursuit) noexcept {
     namespace data = state::build_data;
     data::items::Definition item{};
     data::items::details::Definition detail{};
@@ -27,6 +31,7 @@ namespace {
         || bucket.bucketId != item.bucketId) {
         return false;
     }
+    definitionHash = item.definitionHash;
     if (bucket.arraySelector != data::inventory::buckets::ArraySelector::character) {
         kind = WorldRewardKind::profileItem;
         return true;
@@ -37,6 +42,9 @@ namespace {
         detail.instancedDefinitionState == data::items::details::InstancedDefinitionState::stackable
             ? WorldRewardKind::characterStack
             : WorldRewardKind::item;
+    uniquePursuit = kind == WorldRewardKind::item
+                    && detail.bucketId == data::items::kPursuitBucketId
+                    && !detail.equipmentSlot.has_value() && detail.maxStackSize <= 1;
     return true;
 }
 
@@ -60,10 +68,14 @@ commits(std::uint16_t itemDefinitionIndex, std::int32_t quantity, WorldRewardKin
                && state::prepare_profile_item_acquisition_for_item(
                    itemDefinitionIndex, quantity, *probe);
     }
-    if (quantity > static_cast<std::int32_t>(state::kRecordRewardGrantCapacity)) return false;
+    if (quantity > static_cast<std::int32_t>(state::kRecordRewardGrantCapacity)) {
+        return false;
+    }
     const std::unique_ptr<state::PendingRecordRewardGrant> probe(
         new (std::nothrow) state::PendingRecordRewardGrant);
-    if (!probe) return false;
+    if (!probe) {
+        return false;
+    }
     if (kind == WorldRewardKind::characterStack) {
         const std::array rows{state::DirectRecordReward{itemDefinitionIndex, quantity}};
         return state::prepare_record_reward_grant(rows, state::kUnclaimedRecordIndex, *probe);
@@ -84,10 +96,12 @@ commits(std::uint16_t itemDefinitionIndex, std::int32_t quantity, WorldRewardKin
 
 bool queue_item_acquisition(std::uint16_t itemDefinitionIndex, std::int32_t quantity) noexcept {
     WorldRewardKind kind{};
-    const char* refused = quantity < 1                                    ? "quantity"
-                          : !reward_kind(itemDefinitionIndex, kind)       ? "bucket"
-                          : !commits(itemDefinitionIndex, quantity, kind) ? "policy"
-                                                                          : nullptr;
+    std::uint32_t definitionHash{};
+    bool uniquePursuit{};
+    const char* refused = quantity < 1 ? "quantity"
+                          : !reward_kind(itemDefinitionIndex, kind, definitionHash, uniquePursuit)
+                              ? "bucket"
+                              : nullptr;
     if (refused != nullptr) {
         core::log::writef(core::log::Channel::server,
                           core::log::Level::warn,
@@ -98,15 +112,50 @@ bool queue_item_acquisition(std::uint16_t itemDefinitionIndex, std::int32_t quan
                           quantity);
         return false;
     }
-    // Arming reads the peer table and may settle the reward, so the session lock covers both.
+    // Hold both locks across the account preflight and queue insert. A pending unique pursuit
+    // then reserves its identity until the pump commits or retires it.
     const std::lock_guard lock(session_lock());
-    if (kind == WorldRewardKind::profileItem)
-        return arm_world_profile_item_acquisition(itemDefinitionIndex, quantity);
-    if (kind == WorldRewardKind::characterStack)
-        return arm_world_character_stack_acquisition(itemDefinitionIndex, quantity);
-    // One instanced copy per queued reward, so each arrives with its own acquisition.
-    for (std::int32_t copy = 0; copy < quantity; ++copy)
-        if (!arm_world_item_acquisition(itemDefinitionIndex)) return false;
+    const auto copies = kind == WorldRewardKind::item ? static_cast<std::size_t>(quantity) : 1U;
+    const auto rowQuantity = kind == WorldRewardKind::item ? 1 : quantity;
+    bool alreadyPending = false;
+    {
+        state::investment::store::Transaction transaction;
+        const char* preflightRefusal = !transaction.ready()                            ? "database"
+                                       : !commits(itemDefinitionIndex, quantity, kind) ? "policy"
+                                                                                       : nullptr;
+        if (preflightRefusal != nullptr) {
+            core::log::writef(core::log::Channel::server,
+                              core::log::Level::warn,
+                              "ev=item_acquisition stage=queue result=fail reason=%s item=%u "
+                              "quantity=%d",
+                              preflightRefusal,
+                              static_cast<unsigned>(itemDefinitionIndex),
+                              quantity);
+            return false;
+        }
+        if (!state::investment::store::enqueue_reward_copies(definitionHash,
+                                                             rowQuantity,
+                                                             static_cast<std::uint8_t>(kind),
+                                                             copies,
+                                                             uniquePursuit,
+                                                             alreadyPending)
+            || !transaction.commit()) {
+            return false;
+        }
+    }
+    // The first request still owns this pending grant; a direct fallback would duplicate it.
+    if (alreadyPending) {
+        if (!has_active_family4_peer()) {
+            settle_world_reward();
+        }
+        return true;
+    }
+    // With no Family-4 peer, the existing queue policy settles one oldest reward per copy.
+    if (!has_active_family4_peer()) {
+        for (std::size_t copy = 0; copy < copies; ++copy) {
+            settle_world_reward();
+        }
+    }
     return true;
 }
 

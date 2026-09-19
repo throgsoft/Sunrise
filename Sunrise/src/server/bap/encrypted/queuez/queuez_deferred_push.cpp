@@ -9,8 +9,8 @@
 #include "../../../../state/account/inventory/dawning_oven_state.h"
 #include "../../../../state/activity/destination/definition.h"
 #include "../../../../state/activity/runtime.h"
+#include "../../../../state/build_data/crafting/definition.h"
 #include "../../../../state/build_data/runtime.h"
-#include "../../../../state/runtime/chalice_crafting_runtime.h"
 #include "../../../../state/runtime/runtime.h"
 #include "../../../../state/runtime/synthesizer_crafting_runtime.h"
 #include "../internal.h"
@@ -35,7 +35,7 @@ namespace {
     }
     state::build_data::items::Definition definition{};
     return state::build_data::find_item_definition_hash(definitionHash, definition)
-           && state::runtime::detail::chalice::needs_item(definition.definitionIndex);
+           && state::build_data::crafting::needs_chalice_item(definition.definitionIndex);
 }
 
 /** @return The peer's retained row overlay, or empty once its presentation hold has passed. */
@@ -212,7 +212,9 @@ selected_character(const state::AccountState& account) noexcept {
     session.queuez = acquisition.after;
     // A refresh republishes every container view, so it follows a real change to what those
     // views read rather than any acquisition at all.
-    if (changesCraftingPredicates) session.family5RefreshArmed = true;
+    if (changesCraftingPredicates) {
+        session.family5RefreshArmed = true;
+    }
     bap::arm_account_resync_elsewhere(session);
     bap::arm_acquisition_presentation_hold(session);
     return true;
@@ -226,7 +228,9 @@ selected_character(const state::AccountState& account) noexcept {
                                                              std::size_t& written,
                                                              bool& touchesScratch) noexcept {
     state::investment::store::Transaction transaction;
-    if (!transaction.ready()) return false;
+    if (!transaction.ready()) {
+        return false;
+    }
     const std::unique_ptr<state::PendingRecordRewardGrant> pending(
         new (std::nothrow) state::PendingRecordRewardGrant);
     const std::array rows{state::DirectRecordReward{request.itemDefinitionIndex, request.quantity}};
@@ -244,8 +248,9 @@ selected_character(const state::AccountState& account) noexcept {
     for (std::size_t index = 0; index < pending->rewardCount; ++index) {
         const auto& reward = pending->rewards[index];
         if (reward.kind == state::RecordRewardKind::characterInstance
-            || reward.appendedProfileResident)
+            || reward.appendedProfileResident) {
             residents[residentCount++] = reward.instanceSoid;
+        }
     }
     queuez::RecordRewardGrant update{};
     if (!queuez::stage_record_reward_grant(session.queuez,
@@ -663,7 +668,7 @@ selected_character(const state::AccountState& account) noexcept {
     session.sendNonce = nextSendNonce;
     session.queuez.family5Version = version;
     session.family5RefreshArmed = false;
-    if (session.queuez.publishedMoteMask != publishedMoteMask)
+    if (session.queuez.publishedMoteMask != publishedMoteMask) {
         core::log::writef(core::log::Channel::server,
                           core::log::Level::info,
                           "ev=synthesizer_visibility stage=published version=%d "
@@ -671,6 +676,7 @@ selected_character(const state::AccountState& account) noexcept {
                           version,
                           static_cast<unsigned>(session.queuez.publishedMoteMask),
                           static_cast<unsigned>(publishedMoteMask));
+    }
     session.queuez.publishedMoteMask = publishedMoteMask;
     arm_synthesizer_family4_refresh(session.synthesizerFamily4Refresh, GetTickCount64());
     return true;

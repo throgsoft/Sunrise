@@ -578,8 +578,9 @@ bool consume(Session& session,
             if (resyncsCommittedAccount || pursuitRedemption) {
                 bap::arm_account_resync_everywhere();
             }
-            if (outcome.hasPublishedMoteMask)
+            if (outcome.hasPublishedMoteMask) {
                 session.queuez.publishedMoteMask = outcome.publishedMoteMask;
+            }
             if (changesMoteOwnership || changesCraftingState || outcome.hasSelectCharacter
                 || outcome.hasChangeCharacter) {
                 // A committed synthesis/recycle/discard needs only the evaluated predicates.

@@ -19,7 +19,9 @@ Table<Step, kStepCapacity> g_steps;
 
 bool find_hash(std::uint32_t hash, Definition& output) noexcept {
     output = {};
-    if (hash == 0) return false;
+    if (hash == 0) {
+        return false;
+    }
     const std::shared_lock guard(g_lock);
     for (const auto& row : g_definitions.rows()) {
         if (row.definitionHash == hash) {

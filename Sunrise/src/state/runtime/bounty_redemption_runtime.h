@@ -18,15 +18,10 @@ struct PendingRedemption : PursuitRedemptionContext {
                                                 AccountState& after) noexcept;
 [[nodiscard]] bool commit_redemption_grant(const PendingRecordRewardGrant& grant) noexcept;
 
-[[nodiscard]] bool stage_rewards(const AccountState& account,
-                                 std::span<const DirectRecordReward> rewards,
-                                 PendingRecordRewardGrant& mutation,
-                                 std::uint64_t reservedSourceSoid = 0,
-                                 std::int64_t grantTime = 0) noexcept;
 [[nodiscard]] bool prepare_redemption(std::uint64_t sourceInstanceSoid,
                                       std::int32_t expectedQuantity,
-                                      PendingRedemption& mutation) noexcept;
-[[nodiscard]] bool preview_redemption(const PendingRedemption& mutation,
+                                      PendingRedemption& pending) noexcept;
+[[nodiscard]] bool preview_redemption(const PendingRedemption& pending,
                                       AccountState& after) noexcept;
-[[nodiscard]] bool commit_redemption(PendingRedemption& mutation) noexcept;
+[[nodiscard]] bool commit_redemption(PendingRedemption& pending) noexcept;
 } // namespace sunrise::state::runtime::detail::bounty

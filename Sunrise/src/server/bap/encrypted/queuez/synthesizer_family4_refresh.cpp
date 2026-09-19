@@ -35,8 +35,9 @@ bool consume_synthesizer_family4_refresh(Session& session,
     if (!refresh.armed || session.family5RefreshArmed || session.accountResyncArmed
         || !session.queuez.family4Active || !queuez::valid(session.queuez)
         || GetTickCount64() < refresh.dueTick
-        || GetTickCount64() < session.acquisitionPresentationUntilTick)
+        || GetTickCount64() < session.acquisitionPresentationUntilTick) {
         return false;
+    }
     // Past the due tick every pump would otherwise retry immediately, and each retry copies a
     // whole account snapshot. A transient miss waits out another settling interval instead.
     const auto retry_later = [&refresh]() noexcept {
@@ -44,23 +45,33 @@ bool consume_synthesizer_family4_refresh(Session& session,
         return false;
     };
     const state::AccountState account = state::account_snapshot();
-    if (!state::account::valid(account) || account.primarySoid != session.queuez.family4RootSoid)
+    if (!state::account::valid(account) || account.primarySoid != session.queuez.family4RootSoid) {
         return retry_later();
+    }
     const state::CharacterState* selected = nullptr;
     for (std::size_t c = 0; c < account.characterCount; ++c) {
-        if (!account.characters[c].selected) continue;
-        if (selected) return retry_later();
+        if (!account.characters[c].selected) {
+            continue;
+        }
+        if (selected) {
+            return retry_later();
+        }
         selected = &account.characters[c];
     }
-    if (!selected) return retry_later();
+    if (!selected) {
+        return retry_later();
+    }
     const state::account::inventory::Item* target = nullptr;
     for (std::size_t i = 0; i < selected->inventory.count; ++i) {
         const auto& item = selected->inventory.values[i];
         if (item.instanceSoid <= refresh.lastInstanceSoid || item.quantity != 1
             || item.placement != state::account::inventory::ItemPlacement::inventory
-            || !socketed_container(item.definitionHash))
+            || !socketed_container(item.definitionHash)) {
             continue;
-        if (!target || item.instanceSoid < target->instanceSoid) target = &item;
+        }
+        if (!target || item.instanceSoid < target->instanceSoid) {
+            target = &item;
+        }
     }
     if (!target) {
         refresh = {};
@@ -69,8 +80,9 @@ bool consume_synthesizer_family4_refresh(Session& session,
     // Never introduce a new resident from a deferred view refresh. A resync owns that, so an
     // unmatched container disarms here rather than rescanning the account on every later pump.
     std::size_t residentMatches = 0;
-    for (std::size_t i = 0; i < session.queuez.family4ResidentCount; ++i)
+    for (std::size_t i = 0; i < session.queuez.family4ResidentCount; ++i) {
         residentMatches += session.queuez.family4Residents[i].objectSoid == target->instanceSoid;
+    }
     if (residentMatches != 1) {
         refresh = {};
         return false;
@@ -90,8 +102,9 @@ bool consume_synthesizer_family4_refresh(Session& session,
                                                             nextSendNonce,
                                                             scratch.framed,
                                                             framedSize)
-        || framedSize == 0 || framedSize > response.size())
+        || framedSize == 0 || framedSize > response.size()) {
         return false;
+    }
     std::copy_n(scratch.framed.begin(), framedSize, response.begin());
     written = framedSize;
     middleware::secure_channel::advance_nonce(nextSendNonce);

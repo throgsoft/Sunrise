@@ -29,8 +29,9 @@ bool read(State& output) noexcept {
     for (std::size_t i = 0; i < result.ingredients.size(); ++i) {
         if (!store::read_unlock(store::Bank::objectiveValues,
                                 static_cast<std::uint16_t>(identity::kFirstIngredientValue + i),
-                                result.ingredients[i]))
+                                result.ingredients[i])) {
             return false;
+        }
     }
     // Existing SQLite flags may represent earned progress. Preserve them on adoption;
     // the bootstrap marker cannot establish whether an older all-set default was earned.
@@ -40,38 +41,47 @@ bool read(State& output) noexcept {
             if (!store::read_unlock(store::Bank::accountFlags,
                                     static_cast<std::uint16_t>(identity::kFirstRecipeFlag + i),
                                     value)
-                || (value != 0 && value != unlocks::kFlagSet))
+                || (value != 0 && value != unlocks::kFlagSet)) {
                 return false;
+            }
             result.recipes[i] = static_cast<std::uint8_t>(value);
         }
     }
-    if (!valid(result)) return false;
+    if (!valid(result)) {
+        return false;
+    }
     output = result;
     return true;
 }
 
 bool write(const State& before, const State& after) noexcept {
     State current{};
-    if (!after.initialized || !valid(after) || !read(current) || current != before) return false;
+    if (!after.initialized || !valid(after) || !read(current) || current != before) {
+        return false;
+    }
     for (std::size_t i = 0; i < after.ingredients.size(); ++i) {
         if (before.ingredients[i] != after.ingredients[i]
             && !store::write_unlock(store::Bank::objectiveValues,
                                     static_cast<std::uint16_t>(identity::kFirstIngredientValue + i),
-                                    after.ingredients[i]))
+                                    after.ingredients[i])) {
             return false;
+        }
     }
     for (std::size_t i = 0; i < after.recipes.size(); ++i) {
         if (before.recipes[i] != after.recipes[i]
             && !store::write_unlock(store::Bank::accountFlags,
                                     static_cast<std::uint16_t>(identity::kFirstRecipeFlag + i),
-                                    after.recipes[i]))
+                                    after.recipes[i])) {
             return false;
+        }
     }
     return before.initialized || store::complete_bootstrap(kBootstrap);
 }
 
 bool ingredient_installed(std::size_t index) noexcept {
-    if (index >= identity::kIngredients.size()) return false;
+    if (index >= identity::kIngredients.size()) {
+        return false;
+    }
     const auto& entry = identity::kIngredients[index];
     build_data::items::Definition oven{}, plug{}, pickup{};
     return build_data::find_item_definition_hash(identity::kOvenHash, oven)
@@ -89,7 +99,9 @@ bool credit(State& state,
             std::int32_t& credited) noexcept {
     credited = 0;
     const auto index = identity::ingredient(definitionHash);
-    if (quantity <= 0 || !valid(state) || !ingredient_installed(index)) return false;
+    if (quantity <= 0 || !valid(state) || !ingredient_installed(index)) {
+        return false;
+    }
     auto& balance = state.ingredients[index];
     credited = (std::min)(quantity, (std::numeric_limits<std::int32_t>::max)() - balance);
     balance += credited;

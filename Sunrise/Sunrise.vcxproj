@@ -2232,7 +2232,6 @@
     <ClCompile Include="src\state\build_data\pursuits\pursuit_progress.cpp" />
     <ClInclude Include="src\state\build_data\pursuits\pursuit_progress.h" />
     <ClInclude Include="src\state\runtime\bounty_redemption_runtime.h" />
-    <ClCompile Include="src\state\runtime\bounty_reward_grant_runtime.cpp" />
     <ClInclude Include="src\state\runtime\bounty_reward_policy.h" />
     <ClInclude Include="src\state\runtime\bounty_reward_policy_data.h" />
     <ClInclude Include="src\state\runtime\bounty_stack_reward_plan.h" />
@@ -2296,5 +2295,12 @@
     <ClCompile Include="src\state\runtime\postmaster_runtime.cpp" />
   </ItemGroup>
   <ItemGroup>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="src\middleware\content\packages\tables\crafting_metadata_reader.cpp" />
+    <ClInclude Include="src\middleware\content\packages\tables\crafting_metadata_reader.h" />
+    <ClInclude Include="src\state\build_data\crafting\definition.h" />
+    <ClInclude Include="src\state\runtime\record_reward_placement.h" />
+    <ClInclude Include="src\state\account\inventory\material_identity.h" />
   </ItemGroup>
 </Project>

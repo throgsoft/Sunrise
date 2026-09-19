@@ -95,11 +95,6 @@ same_profile_inventory(const AccountState& account,
         right,
     std::size_t rightCount) noexcept;
 [[nodiscard]] bool valid_profile_inventory(const AccountState& account) noexcept;
-/** Pure cumulative reward after-image used by paid redemptions after their source is removed. */
-[[nodiscard]] bool stage_record_reward_grant(const AccountState& account,
-                                             std::span<const DirectRecordReward> rewards,
-                                             std::uint16_t claimedRecordIndex,
-                                             PendingRecordRewardGrant& mutation) noexcept;
 [[nodiscard]] bool
 apply_collection_materials(const AccountState& before,
                            const build_data::collectibles::Definition& collectible,

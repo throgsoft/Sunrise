@@ -629,8 +629,10 @@ bool stage_character_stack_discard(const AccountState& account,
                                    PendingItemDismantle& mutation) noexcept {
     mutation = {};
     if (expectedStackQuantity <= 0 || !account::valid(account) || !valid_profile_inventory(account)
-        || characterIndex >= account.characterCount || !account.characters[characterIndex].selected)
+        || characterIndex >= account.characterCount
+        || !account.characters[characterIndex].selected) {
         return false;
+    }
     build_data::items::Definition item{}, reverse{};
     item_details::Definition detail{};
     inventory_buckets::Descriptor bucket{};
@@ -645,8 +647,9 @@ bool stage_character_stack_discard(const AccountState& account,
         || !build_data::find_inventory_bucket_descriptor(item.bucketId, bucket)
         || bucket.bucketId != item.bucketId
         || bucket.arraySelector != inventory_buckets::ArraySelector::character
-        || bucket.equipmentSlot != inventory_buckets::kUnavailableEquipmentSlot)
+        || bucket.equipmentSlot != inventory_buckets::kUnavailableEquipmentSlot) {
         return false;
+    }
 
     const auto& before = account.characters[characterIndex];
     auto target = before.stacks.count;
@@ -656,16 +659,24 @@ bool stage_character_stack_discard(const AccountState& account,
             || stack.quantity != expectedStackQuantity) {
             continue;
         }
-        if (target == before.stacks.count) target = i;
+        if (target == before.stacks.count) {
+            target = i;
+        }
     }
-    if (target == before.stacks.count) return false;
-    for (std::size_t i = 0; i < before.inventory.count; ++i)
-        if (before.inventory.values[i].definitionHash == item.definitionHash) return false;
+    if (target == before.stacks.count) {
+        return false;
+    }
+    for (std::size_t i = 0; i < before.inventory.count; ++i) {
+        if (before.inventory.values[i].definitionHash == item.definitionHash) {
+            return false;
+        }
+    }
 
     auto after = before;
     if (expectedStackQuantity == 1) {
-        for (std::size_t i = target + 1; i < after.stacks.count; ++i)
+        for (std::size_t i = target + 1; i < after.stacks.count; ++i) {
             after.stacks.values[i - 1] = after.stacks.values[i];
+        }
         after.stacks.values[--after.stacks.count] = {};
     } else {
         // Only the quantity changed, so the row keeps the serial that holds its grid cell.
@@ -677,8 +688,9 @@ bool stage_character_stack_discard(const AccountState& account,
     if (!family4_loadout::resolve(account, characterIndex, beforeLoadout)
         || !account::valid(candidate)
         || !family4_loadout::resolve(candidate, characterIndex, afterLoadout)
-        || !character_encoding_preflight(candidate, characterIndex, afterLoadout, false))
+        || !character_encoding_preflight(candidate, characterIndex, afterLoadout, false)) {
         return false;
+    }
 
     mutation.beforeCharacter = before;
     mutation.afterCharacter = after;
@@ -711,8 +723,9 @@ bool stage_character_stack_discard(const AccountState& account,
         || (left.discardedStack
             && (left.discardedStack->definitionHash != right.discardedStack->definitionHash
                 || left.discardedStack->quantity != right.discardedStack->quantity
-                || left.discardedStack->mutationSerial != right.discardedStack->mutationSerial)))
+                || left.discardedStack->mutationSerial != right.discardedStack->mutationSerial))) {
         return false;
+    }
     if (left.prepared != right.prepared || left.accountSoid != right.accountSoid
         || left.characterSoid != right.characterSoid
         || left.dismantledInstanceSoid != right.dismantledInstanceSoid
@@ -762,8 +775,9 @@ bool stage_character_stack_discard(const AccountState& account,
                                               item.definitionIndex,
                                               mutation.requestedStackQuantity,
                                               canonical)
-            || !same_dismantle_transition(canonical, mutation))
+            || !same_dismantle_transition(canonical, mutation)) {
             return false;
+        }
         after = current;
         after.characters[mutation.characterIndex] = canonical.afterCharacter;
         return true;

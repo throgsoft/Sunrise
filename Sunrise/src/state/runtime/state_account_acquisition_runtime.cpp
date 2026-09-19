@@ -41,7 +41,9 @@ bool find_instance(const CharacterState& character,
                    std::uint64_t instanceSoid,
                    std::size_t& row) noexcept {
     for (std::size_t index = 0; index < character.inventory.count; ++index) {
-        if (character.inventory.values[index].instanceSoid != instanceSoid) continue;
+        if (character.inventory.values[index].instanceSoid != instanceSoid) {
+            continue;
+        }
         row = index;
         return true;
     }
@@ -107,8 +109,9 @@ bool find_instance(const CharacterState& character,
                                              const GrantSource& source,
                                              PendingItemAcquisition& mutation) noexcept {
     if (authored_inventory::dawning::ingredient(definitionHash)
-        != authored_inventory::dawning::kIngredientCount)
+        != authored_inventory::dawning::kIngredientCount) {
         return false;
+    }
     build_data::items::Definition grantedDefinition{};
     item_details::Definition acquiredDetail{};
     if (!build_data::find_item_definition_hash(definitionHash, grantedDefinition)
@@ -121,8 +124,9 @@ bool find_instance(const CharacterState& character,
                != item_details::InstancedDefinitionState::instanced
         || acquiredDetail.objectiveCount > authored_inventory::kItemObjectiveLaneCount
         || acquiredDetail.lifetimeSeconds < 0
-        || account::holds_pursuit(account, grantedDefinition.definitionIndex))
+        || account::holds_pursuit(account, grantedDefinition.definitionIndex)) {
         return false;
+    }
     const std::size_t characterIndex = selected_character_index(account);
     if (characterIndex >= account.characterCount) {
         return false;
@@ -154,24 +158,31 @@ bool find_instance(const CharacterState& character,
         if (acquiredDetail.lifetimeSeconds > 0
             && !core::runtime::investment_deadline(
                 acquiredDetail.lifetimeSeconds,
-                acquired.objectiveValues[authored_inventory::kItemExpiryLane]))
+                acquired.objectiveValues[authored_inventory::kItemExpiryLane])) {
             return false;
+        }
     }
     // Direct earned grants alone can overflow, and only after proving authored-bucket capacity.
     // A failed socket/detail/character validation is never a Postmaster admission signal.
     std::uint64_t evictedInstanceSoid = 0;
     if (source.direct
-        && !place_instanced_reward(chargedAccount, characterIndex, acquired, evictedInstanceSoid))
+        && !place_instanced_reward(chargedAccount, characterIndex, acquired, evictedInstanceSoid)) {
         return false;
+    }
     // The arrival takes the evicted row itself, so no surviving row changes position.
-    if (evictedInstanceSoid != 0 && !find_instance(after, evictedInstanceSoid, inventoryIndex))
+    if (evictedInstanceSoid != 0 && !find_instance(after, evictedInstanceSoid, inventoryIndex)) {
         return false;
+    }
     after.inventory.values[inventoryIndex] = acquired;
-    if (evictedInstanceSoid == 0) ++after.inventory.count;
+    if (evictedInstanceSoid == 0) {
+        ++after.inventory.count;
+    }
 
     // An account snapshot is far too large to copy onto the stack three calls deep.
     const std::unique_ptr<AccountState> candidateStorage(new (std::nothrow) AccountState);
-    if (!candidateStorage) return false;
+    if (!candidateStorage) {
+        return false;
+    }
     *candidateStorage = chargedAccount;
     AccountState& candidate = *candidateStorage;
     candidate.characters[characterIndex] = after;
@@ -225,13 +236,7 @@ bool find_instance(const CharacterState& character,
 
 } // namespace runtime::detail
 
-/**
- * Inventory and quest state must come from the same locked save view.
- * @param collectibleIndex Collections row, or kNoCollectibleIndex for an item-only grant.
- * @param definitionHash Item definition to grant.
- * @param mutation Receives a pending grant; prepared is set only on success.
- * @return False when identity, costs, capacity, or saved state prevent the grant.
- */
+/** Called inside the grant's transaction so inventory and initial quest state commit together. */
 bool seed_quest_initialization(std::uint32_t definitionHash) noexcept {
     build_data::items::Definition definition{};
     if (!build_data::find_item_definition_hash(definitionHash, definition)
@@ -239,14 +244,21 @@ bool seed_quest_initialization(std::uint32_t definitionHash) noexcept {
         return false;
     }
     const auto& quest = definition.questInitialization;
-    if (quest.scope == Quest::Scope::none) return true;
+    if (quest.scope == Quest::Scope::none) {
+        return true;
+    }
     std::int32_t current = build_data::items::kUnsetQuestValue;
-    if (!investment::store::read_unlock(quest_bank(quest), quest.row, current)) return false;
+    if (!investment::store::read_unlock(quest_bank(quest), quest.row, current)) {
+        return false;
+    }
     // Never overwrite a step already in progress; only an unset row takes the authored value.
-    if (current != build_data::items::kUnsetQuestValue) return true;
+    if (current != build_data::items::kUnsetQuestValue) {
+        return true;
+    }
     return investment::store::write_unlock(quest_bank(quest), quest.row, quest.value);
 }
 
+/** Inventory and quest state must come from the same locked save view. */
 bool prepare_item_acquisition(std::uint16_t collectibleIndex,
                               std::uint32_t definitionHash,
                               PendingItemAcquisition& mutation) noexcept {
@@ -277,7 +289,9 @@ bool prepare_item_acquisition(std::uint16_t collectibleIndex,
     }
 
     const std::unique_ptr<AccountState> chargedStorage(new (std::nothrow) AccountState);
-    if (!chargedStorage) return false;
+    if (!chargedStorage) {
+        return false;
+    }
     *chargedStorage = account;
     AccountState& chargedAccount = *chargedStorage;
     bool profileChanged = false;
@@ -378,7 +392,9 @@ bool prepare_direct_item_bundle(std::uint32_t sourceDefinitionHash,
     CharacterState after = before;
     const std::int32_t level = acquisition_level(before);
     const std::unique_ptr<AccountState> candidateStorage(new (std::nothrow) AccountState);
-    if (!candidateStorage) return false;
+    if (!candidateStorage) {
+        return false;
+    }
     *candidateStorage = account;
     AccountState& candidate = *candidateStorage;
     for (std::size_t index = 0; index < itemDefinitionIndices.size(); ++index) {
@@ -392,10 +408,13 @@ bool prepare_direct_item_bundle(std::uint32_t sourceDefinitionHash,
         std::uint64_t evicted = 0;
         std::size_t row = after.inventory.count;
         if (!place_instanced_reward(candidate, characterIndex, granted, evicted)
-            || (evicted != 0 && !find_instance(after, evicted, row)))
+            || (evicted != 0 && !find_instance(after, evicted, row))) {
             return false;
+        }
         after.inventory.values[row] = granted;
-        if (evicted == 0) ++after.inventory.count;
+        if (evicted == 0) {
+            ++after.inventory.count;
+        }
     }
 
     candidate.characters[characterIndex] = after;
@@ -545,10 +564,12 @@ valid_item_acquisition_source(const PendingItemAcquisition& mutation) noexcept {
     if (mutation.directGrant) {
         std::uint64_t evicted = 0;
         if (!place_instanced_reward(current, mutation.characterIndex, acquired, evicted)
-            || acquired.placement != expectedPlacement || evicted != mutation.evictedInstanceSoid)
+            || acquired.placement != expectedPlacement || evicted != mutation.evictedInstanceSoid) {
             return false;
-    } else if (expectedPlacement != authored_inventory::ItemPlacement::inventory)
+        }
+    } else if (expectedPlacement != authored_inventory::ItemPlacement::inventory) {
         return false;
+    }
 
     after = current;
     after.profileItems = mutation.afterProfileItems;
@@ -620,10 +641,13 @@ valid_item_acquisition_source(const PendingItemAcquisition& mutation) noexcept {
         std::uint64_t evicted = 0;
         std::size_t row = canonical.inventory.count;
         if (!place_instanced_reward(after, mutation.characterIndex, granted, evicted)
-            || (evicted != 0 && !find_instance(canonical, evicted, row)))
+            || (evicted != 0 && !find_instance(canonical, evicted, row))) {
             return false;
+        }
         canonical.inventory.values[row] = granted;
-        if (evicted == 0) ++canonical.inventory.count;
+        if (evicted == 0) {
+            ++canonical.inventory.count;
+        }
     }
     if (!same_character(canonical, mutation.afterCharacter)) {
         return false;
@@ -879,7 +903,9 @@ bool prepare_profile_item_acquisition(std::uint16_t collectibleIndex,
         return false;
     }
     const std::unique_ptr<AccountState> chargedStorage(new (std::nothrow) AccountState);
-    if (!chargedStorage) return false;
+    if (!chargedStorage) {
+        return false;
+    }
     *chargedStorage = account;
     AccountState& chargedAccount = *chargedStorage;
     bool materialsChanged = false;

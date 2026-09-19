@@ -88,21 +88,27 @@ read(std::span<const std::byte> blob, std::size_t offset, Value& value) noexcept
     constexpr std::size_t pointerOffset = 152;
     constexpr std::uint32_t rewardClass = 0x80807875U;
     std::int64_t relative = 0;
-    if (!read(definition, pointerOffset, relative)) return false;
-    if (relative == 0) return true;
+    if (!read(definition, pointerOffset, relative)) {
+        return false;
+    }
+    if (relative == 0) {
+        return true;
+    }
     // Validate before adding the signed relative offset; no negative or wrapped blob pointer.
     if (relative < -static_cast<std::int64_t>(pointerOffset)
         || relative > static_cast<std::int64_t>(definition.size())
-                          - static_cast<std::int64_t>(pointerOffset))
+                          - static_cast<std::int64_t>(pointerOffset)) {
         return false;
+    }
     const auto at = static_cast<std::size_t>(static_cast<std::int64_t>(pointerOffset) + relative);
     std::uint32_t cls = 0, count = 0, headerItem = 0;
     std::int32_t headerQuantity = 0;
     if (at < 4 || !read(definition, at - 4, cls) || cls != rewardClass
         || !read(definition, at, count) || count >= kRewardCapacity
         || !read(definition, at + 4, headerItem) || headerItem > 0xFFFFU
-        || !read(definition, at + 8, headerQuantity) || headerQuantity < 0)
+        || !read(definition, at + 8, headerQuantity) || headerQuantity < 0) {
         return false;
+    }
     row.rewards[0] = {static_cast<std::uint16_t>(headerItem), 0xFFFFU, headerQuantity};
     for (std::size_t i = 0; i < count; ++i) {
         const auto entry = at + 12 + i * 12;
@@ -110,8 +116,9 @@ read(std::span<const std::byte> blob, std::size_t offset, Value& value) noexcept
         std::int32_t quantity = 0;
         if (!read(definition, entry, companion) || companion > 0xFFFFU
             || !read(definition, entry + 4, item) || item > 0xFFFFU
-            || !read(definition, entry + 8, quantity) || quantity < 0)
+            || !read(definition, entry + 8, quantity) || quantity < 0) {
             return false;
+        }
         row.rewards[i + 1] = {
             static_cast<std::uint16_t>(item), static_cast<std::uint16_t>(companion), quantity};
     }
@@ -127,24 +134,31 @@ read(std::span<const std::byte> blob, std::size_t offset, Value& value) noexcept
     // Non-pursuit definitions reuse this descriptor for other block types (including
     // equipment). An absent decoded equipment slot does not make such a row a pursuit.
     constexpr std::uint8_t pursuitBucket = 40;
-    if (row.bucketId != pursuitBucket || row.equipmentSlot.has_value() || row.maxStackSize > 1)
+    if (row.bucketId != pursuitBucket || row.equipmentSlot.has_value() || row.maxStackSize > 1) {
         return true;
+    }
     // The fixed field points at a variable block; its position depends on preceding blocks.
     constexpr std::size_t objectivePointer = 48;
     constexpr std::uint32_t objectiveBlockClass = 0x808077EBU;
     std::int64_t relative = 0;
-    if (!read(definition, objectivePointer, relative)) return false;
-    if (relative == 0) return true;
+    if (!read(definition, objectivePointer, relative)) {
+        return false;
+    }
+    if (relative == 0) {
+        return true;
+    }
     if (relative < -static_cast<std::int64_t>(objectivePointer)
         || relative > static_cast<std::int64_t>(definition.size())
-                          - static_cast<std::int64_t>(objectivePointer))
+                          - static_cast<std::int64_t>(objectivePointer)) {
         return false;
+    }
     const auto objectiveDescriptor =
         static_cast<std::size_t>(static_cast<std::int64_t>(objectivePointer) + relative);
     std::uint32_t blockClass = 0;
     if (objectiveDescriptor < 4 || !read(definition, objectiveDescriptor - 4, blockClass)
-        || blockClass != objectiveBlockClass)
+        || blockClass != objectiveBlockClass) {
         return false;
+    }
     constexpr std::size_t lifetimeDescriptor = 192;
     constexpr std::uint32_t lifetimeClass = 0x80807D31U;
     Array objectives{};
@@ -152,24 +166,31 @@ read(std::span<const std::byte> blob, std::size_t offset, Value& value) noexcept
         // Bucket 40 is the pursuit bucket. Refuse malformed rows rather than grant empty tails.
         return false;
     }
-    if (objectives.count == 0) return true;
+    if (objectives.count == 0) {
+        return true;
+    }
     if (objectives.elementClass != kObjectiveReferenceArrayClass
-        || objectives.count > kObjectiveCapacity)
+        || objectives.count > kObjectiveCapacity) {
         return false;
+    }
     for (std::size_t i = 0; i < objectives.count; ++i) {
         if (!read(definition,
                   objectives.dataOffset + i * sizeof(std::uint16_t),
-                  row.objectiveIndices[i]))
+                  row.objectiveIndices[i])) {
             return false;
+        }
     }
     row.objectiveCount = static_cast<std::uint8_t>(objectives.count);
     Array lifetime{};
-    if (!find_optional_array_at(definition, lifetimeDescriptor, lifetime)) return false;
+    if (!find_optional_array_at(definition, lifetimeDescriptor, lifetime)) {
+        return false;
+    }
     if (lifetime.count != 0
         && (lifetime.count != 1 || lifetime.elementClass != lifetimeClass
             || !read(definition, lifetime.dataOffset + 4, row.lifetimeSeconds)
-            || row.lifetimeSeconds < 0))
+            || row.lifetimeSeconds < 0)) {
         return false;
+    }
     return true;
 }
 
@@ -442,7 +463,9 @@ bool read_definition(std::span<const std::byte> definition, Row& row) noexcept {
     // them stays in the catalog rather than being dropped from it.
     (void)read(definition, kAcquiredFlagSlotOffset, row.acquiredFlagSlot);
     std::uint16_t effect{};
-    if (read(definition, kAcquireEffectOffset, effect)) row.acquireEffectIndex = effect;
+    if (read(definition, kAcquireEffectOffset, effect)) {
+        row.acquireEffectIndex = effect;
+    }
     // Short legacy definitions simply do not declare a plug category.
     (void)read(definition, kPlugCategoryOffset, row.plugCategoryHash);
     read_plug_block(definition, row);

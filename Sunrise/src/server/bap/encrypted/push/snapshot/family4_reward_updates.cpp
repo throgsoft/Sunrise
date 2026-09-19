@@ -37,50 +37,67 @@ bool append_changed_inventory_instances(
         || afterCharacter.inventory.count > afterCharacter.inventory.values.size()
         || beforeSession.family4ResidentCount > beforeSession.family4Residents.size()
         || afterSession.family4ResidentCount > afterSession.family4Residents.size()
-        || loadout.itemCount > loadout.items.size() || output.itemCount > output.items.size())
+        || loadout.itemCount > loadout.items.size() || output.itemCount > output.items.size()) {
         return false;
+    }
     for (std::size_t i = 0; i < afterCharacter.inventory.count; ++i) {
         const auto& held = afterCharacter.inventory.values[i];
         const state::account::inventory::Item* prior = nullptr;
         for (std::size_t j = 0; j < beforeCharacter.inventory.count; ++j) {
             const auto& candidate = beforeCharacter.inventory.values[j];
-            if (candidate.instanceSoid != held.instanceSoid) continue;
-            if (prior) return false;
+            if (candidate.instanceSoid != held.instanceSoid) {
+                continue;
+            }
+            if (prior) {
+                return false;
+            }
             prior = &candidate;
         }
         if (!prior
             || (held.definitionHash == prior->definitionHash
                 && held.sockets.policy == prior->sockets.policy
                 && held.sockets.plugCount == prior->sockets.plugCount
-                && held.sockets.plugs == prior->sockets.plugs))
+                && held.sockets.plugs == prior->sockets.plugs)) {
             continue;
+        }
         const auto resident_matches = [&](const queuez::SessionState& session) noexcept {
             std::size_t matches = 0;
             for (std::size_t j = 0; j < session.family4ResidentCount; ++j) {
                 const auto& resident = session.family4Residents[j];
                 if (resident.objectSoid == held.instanceSoid
-                    && resident.definitionId == instanceDefinitionId)
+                    && resident.definitionId == instanceDefinitionId) {
                     ++matches;
+                }
             }
             return matches == 1;
         };
-        if (!resident_matches(beforeSession) || !resident_matches(afterSession)) return false;
+        if (!resident_matches(beforeSession) || !resident_matches(afterSession)) {
+            return false;
+        }
         // An objective update may already have appended this survivor's complete after-image.
         bool present = false;
-        for (std::size_t j = 0; j < output.itemCount; ++j)
+        for (std::size_t j = 0; j < output.itemCount; ++j) {
             present |= output.items[j].instance.instanceSoid == held.instanceSoid;
-        if (present) continue;
+        }
+        if (present) {
+            continue;
+        }
         bool found = false;
         for (std::size_t j = 0; j < loadout.itemCount; ++j) {
             const auto& item = loadout.items[j];
-            if (item.instance.instanceSoid != held.instanceSoid) continue;
+            if (item.instance.instanceSoid != held.instanceSoid) {
+                continue;
+            }
             if (found || item.equipped || item.mutationSerial != held.mutationSerial
-                || output.itemCount == output.items.size())
+                || output.itemCount == output.items.size()) {
                 return false;
+            }
             output.items[output.itemCount++] = {item.equipmentSlot, item.instance};
             found = true;
         }
-        if (!found) return false;
+        if (!found) {
+            return false;
+        }
     }
     return true;
 }
@@ -371,16 +388,18 @@ bool prepare_record_reward_grant(
     // Identity additions above remain in their QueueZ order. Existing bounty tails follow
     // them in the same update without incrementing appendedResidentCount.
     if (!dawning::append_changed_objectives(
-            mutation.beforeCharacter, mutation.afterCharacter, selected.loadout, residents))
+            mutation.beforeCharacter, mutation.afterCharacter, selected.loadout, residents)) {
         return report_failure("record_reward_objective_items");
+    }
     if (!append_changed_inventory_instances(mutation.beforeCharacter,
                                             mutation.afterCharacter,
                                             before,
                                             update.after,
                                             update.itemInstanceDefinitionId,
                                             selected.loadout,
-                                            residents))
+                                            residents)) {
         return report_failure("record_reward_changed_instances");
+    }
 
     const Reservation reservation = reserve_prior(scratch, prepared);
     if (reservation.rawWriteOffset > scratch.plaintext.size()
@@ -589,13 +608,14 @@ bool prepare_record_reward_grant(
         clear_after(scratch, reservation);
         return report_failure("record_reward_commit");
     }
-    if (mutation.afterDawning)
+    if (mutation.afterDawning) {
         core::log::writef(core::log::Channel::server,
                           core::log::Level::info,
                           "ev=dawning_pickup stage=queued revision=%d character_changes=%zu "
                           "source=durable_queue",
                           update.after.family4Version,
                           characterChanges);
+    }
     return true;
 }
 

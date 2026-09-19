@@ -205,8 +205,9 @@ bool build_buckets(const reader::Source& source,
         const auto noTransfer =
             std::to_integer<std::uint8_t>(blob[base + tables::kBucketNoTransferOnEvictionOffset]);
         if (firstSlot < 0 || firstSlot > 0xFFFF || slotCount <= 0 || slotCount > 0xFFFF || fifo > 1
-            || noTransfer > 1)
+            || noTransfer > 1) {
             return false;
+        }
         descriptors[index].policyFlags =
             (fifo ? buckets::kFifo : 0) | (noTransfer ? buckets::kNoTransferOnEviction : 0);
     }

@@ -45,17 +45,6 @@ enum class LootPoolId : std::uint8_t {
     unresolvedSource,
 };
 
-/** Power semantics carried by the display marker or an exact source policy. */
-enum class RewardPowerClass : std::uint8_t {
-    none,
-    legendary,
-    powerfulTier1,
-    powerfulTier2,
-    powerfulTier3,
-    pinnacle,
-    legacyPowerfulUnknown,
-};
-
 struct ScaledReward {
     /** Index the reward row names, which is a display token rather than a currency. */
     std::uint16_t displayIndex{};
@@ -295,37 +284,29 @@ template <std::size_t Size>
 
 /** Marker semantics plus the exact source allowlist selected for one bounty. */
 struct BountyRewardPolicy {
-    BountyCadence cadence{BountyCadence::unresolved};
     LootPoolId lootPool{LootPoolId::none};
-    RewardPowerClass powerClass{RewardPowerClass::none};
     std::uint32_t gearCount{};
 };
 
-/** Maps a display marker to its semantic power class without inventing a numeric level offset. */
-[[nodiscard]] inline constexpr RewardPowerClass marker_power(RewardMarker marker) noexcept {
+/** These markers select gear. Its level still follows ordinary item acquisition; marker-specific
+ * Powerful and Pinnacle level scaling is not implemented. */
+[[nodiscard]] inline constexpr bool is_gear_marker(RewardMarker marker) noexcept {
     switch (marker) {
     case RewardMarker::legendaryGear:
-        return RewardPowerClass::legendary;
     case RewardMarker::powerfulTier1:
-        return RewardPowerClass::powerfulTier1;
     case RewardMarker::powerfulTier2:
-        return RewardPowerClass::powerfulTier2;
     case RewardMarker::powerfulTier3:
-        return RewardPowerClass::powerfulTier3;
     case RewardMarker::pinnacle:
-        return RewardPowerClass::pinnacle;
     case RewardMarker::legacyPowerful:
-        return RewardPowerClass::legacyPowerfulUnknown;
     case RewardMarker::trialsEngram:
-        return RewardPowerClass::powerfulTier2;
     case RewardMarker::revelryArms:
     case RewardMarker::revelryChest:
     case RewardMarker::revelryHead:
     case RewardMarker::revelryLegs:
     case RewardMarker::revelryClassItem:
-        return RewardPowerClass::legacyPowerfulUnknown;
+        return true;
     default:
-        return RewardPowerClass::none;
+        return false;
     }
 }
 
@@ -334,12 +315,9 @@ struct BountyRewardPolicy {
  * Pool membership is evidence-derived; one uniform draw with duplicates is authored policy.
  */
 [[nodiscard]] inline BountyRewardPolicy resolve_reward_policy(std::uint32_t bountyHash,
-                                                              std::int32_t lifetimeSeconds,
                                                               RewardMarker marker) noexcept {
     BountyRewardPolicy policy{};
-    policy.cadence = resolve_cadence(bountyHash, lifetimeSeconds);
-    policy.powerClass = marker_power(marker);
-    const bool gearMarker = policy.powerClass != RewardPowerClass::none;
+    const bool gearMarker = is_gear_marker(marker);
     policy.gearCount = gearMarker ? 1U : 0U;
     if (!gearMarker) {
         if (marker == RewardMarker::legendaryRune) {
@@ -356,7 +334,6 @@ struct BountyRewardPolicy {
         } else if (marker == RewardMarker::gambitPrimeRoleHead
                    && contains(bounty_policy::kGambitPrimeRoleWeeklyBounties, bountyHash)) {
             policy.lootPool = LootPoolId::gambitPrimeRoleHelmet;
-            policy.powerClass = RewardPowerClass::legacyPowerfulUnknown;
             policy.gearCount = 1;
         } else if (marker == RewardMarker::gambitPrimeSynthesizerUpgrade
                    && contains(bounty_policy::kGambitPrimeRoleWeeklyBounties, bountyHash)) {
@@ -364,7 +341,11 @@ struct BountyRewardPolicy {
         }
         return policy;
     }
-    if (contains(bounty_policy::kHawthorneWorldBounties, bountyHash)) {
+    if (contains(bounty_policy::kHawthorneWorldBounties, bountyHash)
+        || contains(bounty_policy::kHawthorneLegacyPowerfulBounties, bountyHash)) {
+        // Hawthorne's legacy marker is generic Powerful Gear, not a Menagerie/Calus selector.
+        // World membership comes from the target S11 Legendary Engram preview; uniform selection
+        // is authored Sunrise policy.
         policy.lootPool = LootPoolId::worldLegendaryS11;
     } else if (contains(bounty_policy::kBlackArmoryArmorBounties, bountyHash)) {
         policy.lootPool = LootPoolId::blackArmoryArmor;
@@ -382,7 +363,6 @@ struct BountyRewardPolicy {
         policy.lootPool = LootPoolId::ironBannerS11;
     } else if (contains(bounty_policy::kLunasRecallWeeklyBounties, bountyHash)) {
         policy.lootPool = LootPoolId::lunasRecallWorldS11;
-        policy.powerClass = RewardPowerClass::legacyPowerfulUnknown;
     } else if (contains(bounty_policy::kInvitationsOfTheNineBounties, bountyHash)) {
         policy.lootPool = LootPoolId::invitationsWorldS11;
     } else if (contains(bounty_policy::kLastWishBounties, bountyHash)) {
@@ -391,12 +371,6 @@ struct BountyRewardPolicy {
         policy.lootPool = LootPoolId::scourgeOfThePast;
     } else if (contains(bounty_policy::kCrownBounties, bountyHash)) {
         policy.lootPool = LootPoolId::crownOfSorrow;
-    } else if (contains(bounty_policy::kHawthorneLegacyPowerfulBounties, bountyHash)) {
-        // The marker is Hawthorne's generic Powerful Gear row, not a Menagerie/Calus selector.
-        // World membership is reconstructed from the target S11 Legendary Engram preview;
-        // uniform selection remains explicitly authored Sunrise policy.
-        policy.lootPool = LootPoolId::worldLegendaryS11;
-        policy.powerClass = RewardPowerClass::legacyPowerfulUnknown;
     } else if (contains(bounty_policy::kGambitPrimeWeaponBounties, bountyHash)) {
         policy.lootPool = LootPoolId::gambitPrimeWeaponsS11;
     } else if (contains(bounty_policy::kTrialsEndGameFallbackBounties, bountyHash)) {

@@ -101,4 +101,11 @@
     <ClInclude Include="src\state\runtime\postmaster_runtime.h" />
     <ClCompile Include="src\state\runtime\postmaster_runtime.cpp" />
   </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="src\middleware\content\packages\tables\crafting_metadata_reader.cpp" />
+    <ClInclude Include="src\middleware\content\packages\tables\crafting_metadata_reader.h" />
+    <ClInclude Include="src\state\build_data\crafting\definition.h" />
+    <ClInclude Include="src\state\runtime\record_reward_placement.h" />
+    <ClInclude Include="src\state\account\inventory\material_identity.h" />
+  </ItemGroup>
 </Project>

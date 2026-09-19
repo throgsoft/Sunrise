@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <string>
 #include <string_view>
 
@@ -55,6 +56,13 @@ struct PendingReward {
 };
 [[nodiscard]] bool
 enqueue_reward(std::uint32_t definitionHash, std::int32_t quantity, std::uint8_t kind) noexcept;
+/** Atomically queues UI-requested copies; a pending unique pursuit coalesces with the request. */
+[[nodiscard]] bool enqueue_reward_copies(std::uint32_t definitionHash,
+                                         std::int32_t quantity,
+                                         std::uint8_t kind,
+                                         std::size_t copies,
+                                         bool uniquePursuit,
+                                         bool& alreadyPending) noexcept;
 [[nodiscard]] bool next_reward(PendingReward& output) noexcept;
 [[nodiscard]] bool complete_reward(std::uint64_t id) noexcept;
 

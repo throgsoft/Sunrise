@@ -3,20 +3,25 @@
 #include <array>
 #include <cstdint>
 
+#include "../account/inventory/material_identity.h"
+
 namespace sunrise::state::item_discard {
 
 /** How much of an owned stack one no-SOID opcode-402 request removes. */
 enum class Mode : std::uint8_t { one, entireStack };
 
 /** Gunsmith Materials is a wallet row the native page deletes whole rather than by unit. */
-inline constexpr std::uint32_t kGunsmithMaterialsHash = 685'157'383U;
+using account::inventory::kGunsmithMaterialsHash;
 
 inline constexpr std::array<std::uint32_t, 1> kEntireStackHashes{{kGunsmithMaterialsHash}};
 
 /** Every other installed stack deletes one unit per request, matching the character path. */
 [[nodiscard]] constexpr Mode mode(std::uint32_t hash) noexcept {
-    for (const auto entry : kEntireStackHashes)
-        if (entry == hash) return Mode::entireStack;
+    for (const auto entry : kEntireStackHashes) {
+        if (entry == hash) {
+            return Mode::entireStack;
+        }
+    }
     return Mode::one;
 }
 

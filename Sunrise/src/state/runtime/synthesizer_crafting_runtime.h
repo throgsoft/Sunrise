@@ -1,8 +1,10 @@
 #pragma once
 
+#include <array>
 #include <cstddef>
 #include <span>
 
+#include "../build_data/crafting/definition.h"
 #include "../investment/investment.h"
 #include "runtime.h"
 
@@ -12,17 +14,12 @@ struct Object;
 
 namespace sunrise::state::runtime::detail::synthesizer {
 
-/** Loads the three crafting and one recycling socket types' scalars from installed root slot 94.
- * Call on every package startup, including a detail-cache hit. Missing metadata disables
- * exchanges only; callers must not make this optional feature a boot requirement. */
-[[nodiscard]] bool configure_socket_costs(std::span<const std::byte> socketTypeTable) noexcept;
+/** Installs decoded socket costs for the three crafting tiers and recycling lane. */
+void configure_socket_costs(const build_data::crafting::SynthesizerCosts& costs) noexcept;
 
-/** Loads one of the twelve real Motes' native output flag pairs from its item definition.
- * flagSlots is the full installed root-slot-112 table. Call for every real Mote each boot.
- * This is separate from recipe costs; missing visibility metadata leaves crafting intact. */
-[[nodiscard]] bool configure_mote_output_flags(std::uint32_t itemHash,
-                                               std::span<const std::byte> itemDefinition,
-                                               std::span<const std::byte> flagSlots) noexcept;
+/** Installs all twelve validated native output flag pairs together. */
+[[nodiscard]] bool
+configure_mote_output_flags(std::span<const build_data::crafting::MoteOutput> outputs) noexcept;
 [[nodiscard]] bool mote_output_flags_ready() noexcept;
 
 /** Derives only the native Mote output flags from current profile ownership. These kind-0

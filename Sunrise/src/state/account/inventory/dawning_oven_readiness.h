@@ -16,13 +16,17 @@ inline constexpr std::size_t kChooserReadinessAccountValue = 5627;
  * no tutorial completion, ingredient balance, recipe flag or inventory resident is fabricated. */
 [[nodiscard]] inline bool project_chooser_readiness(const AccountState& account,
                                                     std::span<std::int32_t> values) noexcept {
-    if (!account::valid(account)) return false;
+    if (!account::valid(account)) {
+        return false;
+    }
     bool heldOven = false, heldTutorial = false;
     for (std::size_t c = 0; c < account.characterCount; ++c) {
         const auto& character = account.characters[c];
         for (std::size_t i = 0; i < character.inventory.count; ++i) {
             const auto& item = character.inventory.values[i];
-            if (item.instanceSoid == 0 || item.quantity <= 0) continue;
+            if (item.instanceSoid == 0 || item.quantity <= 0) {
+                continue;
+            }
             heldOven |= item.definitionHash == kOvenHash && item.quantity == 1;
             switch (item.definitionHash) {
             case 0x9282075CU:
@@ -36,7 +40,9 @@ inline constexpr std::size_t kChooserReadinessAccountValue = 5627;
             }
         }
     }
-    if (!heldOven || heldTutorial) return true;
+    if (!heldOven || heldTutorial) {
+        return true;
+    }
     // This value only opens the chooser. An oven whose installed shape this build cannot read
     // leaves it unset rather than failing the account encode and stalling the whole session.
     build_data::items::Definition oven{};
@@ -46,9 +52,12 @@ inline constexpr std::size_t kChooserReadinessAccountValue = 5627;
         || detail.definitionHash != kOvenHash || detail.definitionIndex != oven.definitionIndex
         || detail.bucketId != oven.bucketId || detail.ordinarySocketCount != 5
         || detail.ordinarySocketState != build_data::items::details::OrdinarySocketState::present
-        || values.size() <= kChooserReadinessAccountValue)
+        || values.size() <= kChooserReadinessAccountValue) {
         return true;
-    if (values[kChooserReadinessAccountValue] == 0) values[kChooserReadinessAccountValue] = -1;
+    }
+    if (values[kChooserReadinessAccountValue] == 0) {
+        values[kChooserReadinessAccountValue] = -1;
+    }
     return true;
 }
 } // namespace sunrise::state::account::inventory::dawning

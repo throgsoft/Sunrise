@@ -64,7 +64,9 @@ Table<InstalledRow, kInstalledRowCapacity> g_installedRows;
     for (std::size_t row = definition.transferRuleCount; row < definition.transferRules.size();
          ++row) {
         const auto& rule = definition.transferRules[row];
-        if (rule.sourceBucket != 0 || rule.destinationBucket != 0) return false;
+        if (rule.sourceBucket != 0 || rule.destinationBucket != 0) {
+            return false;
+        }
     }
     return array_fits(definition.installedCount,
                       definition.installedRowBase,

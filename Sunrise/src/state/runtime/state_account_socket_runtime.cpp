@@ -171,8 +171,9 @@ void report_socket_plug(std::string_view stage,
                            targetInstanceSoid,
                            socketLane,
                            plugDefinitionIndex,
-                           mutation))
+                           mutation)) {
             return true;
+        }
         return fail("chalice_exchange");
     }
     if (synthesizer::is_container(targetDefinition.definitionHash)) {
@@ -181,8 +182,9 @@ void report_socket_plug(std::string_view stage,
                                         targetInstanceSoid,
                                         socketLane,
                                         plugDefinitionIndex,
-                                        mutation))
+                                        mutation)) {
             return true;
+        }
         return fail(socketLane == 4 ? "synthesizer_recycle_exchange" : "synthesizer_exchange");
     }
     if (targetDefinition.definitionHash == account::inventory::dawning::kOvenHash

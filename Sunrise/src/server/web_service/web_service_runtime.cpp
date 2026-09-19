@@ -318,8 +318,9 @@ bool consume(std::span<const std::byte> request,
         state::InvestmentState investment{};
         if (!(state::investment_snapshot(investment, previousMoteMask)
               && middleware::web_service::messages::opcode205::encode_response(
-                  message, investment, next_family5_clock(), response, written)))
+                  message, investment, next_family5_clock(), response, written))) {
             return encode_echo(message, response, written);
+        }
         outcome.hasPublishedMoteMask = true;
         outcome.publishedMoteMask = investment.moteOwnershipMask;
         return true;

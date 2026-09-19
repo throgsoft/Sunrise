@@ -140,4 +140,3 @@ CREATE TABLE character_gambit_prime (
     sentry INTEGER NOT NULL CHECK(sentry BETWEEN 0 AND 3),
     synthesizer INTEGER NOT NULL CHECK(synthesizer BETWEEN 0 AND 3)
 ) STRICT;
-

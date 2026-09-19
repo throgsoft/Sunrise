@@ -5,6 +5,8 @@
 #include <cstdint>
 #include <span>
 
+#include "../build_data/crafting/definition.h"
+
 namespace sunrise::state {
 struct AccountState;
 struct PendingSocketPlug;
@@ -12,9 +14,9 @@ struct PendingSocketPlug;
 
 namespace sunrise::state::runtime::detail::chalice {
 
-inline constexpr std::uint32_t kChaliceHash = 1115550924U;
-inline constexpr std::uint16_t kRuneValueBase = 2371;
-inline constexpr std::uint16_t kUpgradeFlagBase = 5427;
+using build_data::crafting::kChaliceHash;
+using build_data::crafting::kRuneValueBase;
+using build_data::crafting::kUpgradeFlagBase;
 
 /** Bounded native banks guarded together with the prepared socket after-image. */
 struct State {
@@ -24,16 +26,9 @@ struct State {
     bool operator==(const State&) const = default;
 };
 
-/** Validate installed source slots against independent account-bank mapping tables. */
-[[nodiscard]] bool configure_banks(std::span<const std::byte> flagSlots,
-                                   std::span<const std::byte> valueSlots,
-                                   std::span<const std::byte> flagMaps,
-                                   std::span<const std::byte> valueMaps) noexcept;
-[[nodiscard]] bool configure_sockets(std::span<const std::byte> socketTypes) noexcept;
-[[nodiscard]] bool needs_item(std::uint16_t index) noexcept;
-/** Retains only bounded predicates and identities, never a native item blob. */
+/** Installs one fully decoded and validated package snapshot for gameplay. */
 [[nodiscard]] bool
-configure_item(std::uint16_t index, std::uint32_t hash, std::span<const std::byte> bytes) noexcept;
+configure_metadata(std::span<const build_data::crafting::ChalicePlug> plugs) noexcept;
 [[nodiscard]] bool metadata_ready() noexcept;
 
 /** The caller owns the encompassing SQLite transaction. */

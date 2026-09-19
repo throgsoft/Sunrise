@@ -13,7 +13,9 @@ std::chrono::steady_clock::time_point issuedAt{};
 
 std::int64_t current_locked() noexcept {
     const auto wall = server_clock_seconds();
-    if (!issuedClock) return wall;
+    if (!issuedClock) {
+        return wall;
+    }
     const auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
                              std::chrono::steady_clock::now() - issuedAt)
                              .count();
@@ -34,8 +36,9 @@ bool investment_deadline(std::int64_t lifetimeSeconds, std::int32_t& deadline) n
     deadline = 0;
     const auto now = investment_clock_seconds();
     const auto maximum = (std::numeric_limits<std::int32_t>::max)();
-    if (now <= 0 || now >= maximum || lifetimeSeconds <= 0 || lifetimeSeconds > maximum - now)
+    if (now <= 0 || now >= maximum || lifetimeSeconds <= 0 || lifetimeSeconds > maximum - now) {
         return false;
+    }
     deadline = static_cast<std::int32_t>(now + lifetimeSeconds);
     return true;
 }

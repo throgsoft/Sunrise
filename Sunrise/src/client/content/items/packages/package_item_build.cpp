@@ -8,6 +8,7 @@
 #include "../../../../core/filesystem/path.h"
 #include "../../../../core/logging/log.h"
 #include "../../../../middleware/content/packages/reader/reader.h"
+#include "../../../../middleware/content/packages/tables/crafting_metadata_reader.h"
 #include "../../../../middleware/content/packages/tables/definition_index_table.h"
 #include "../../../../state/build_data/activities/activity_catalog.h"
 #include "../../../../state/build_data/runtime.h"
@@ -33,7 +34,11 @@ std::atomic_bool g_chaliceMetadataAttempted{};
 /** Revalidate the bounded Chalice contract on cache hits as well as fresh extraction. */
 void configure_chalice_metadata(const reader::Source& source, Storage& storage) noexcept {
     namespace chalice = state::runtime::detail::chalice;
-    if (g_chaliceMetadataAttempted.load(std::memory_order_acquire)) return;
+    namespace crafting = middleware::content::packages::tables::crafting;
+    namespace data = state::build_data::crafting;
+    if (g_chaliceMetadataAttempted.load(std::memory_order_acquire)) {
+        return;
+    }
     std::array<std::uint32_t, kContainerCandidates> candidates{};
     std::size_t count = 0;
     bool configured = false;
@@ -44,10 +49,14 @@ void configure_chalice_metadata(const reader::Source& source, Storage& storage) 
                 || !tables::child_tag(storage.container, tables::kInvestmentRootChild, root)
                 || root == 0
                 || !reader::read_tag(source, storage.scratch, root, storage.root, rootClass)
-                || rootClass != tables::kInvestmentRootClass)
+                || rootClass != tables::kInvestmentRootClass) {
                 continue;
+            }
             std::array<std::vector<std::byte>, 4> banks{};
-            constexpr std::array<std::size_t, 4> slots{112, 114, 111, 113};
+            constexpr std::array slots{tables::kUnlockFlagSlotTableSlot,
+                                       tables::kUnlockValueSlotTableSlot,
+                                       tables::kUnlockFlagMapTableSlot,
+                                       tables::kUnlockValueMapTableSlot};
             bool readBanks = true;
             for (std::size_t bank = 0; bank < slots.size(); ++bank) {
                 if (!tables::slot_tag(storage.root, slots[bank], tag) || tag == 0
@@ -56,30 +65,40 @@ void configure_chalice_metadata(const reader::Source& source, Storage& storage) 
                     break;
                 }
             }
-            if (!readBanks || !chalice::configure_banks(banks[0], banks[1], banks[2], banks[3])
+            if (!readBanks || !crafting::read_chalice_banks(banks[0], banks[1], banks[2], banks[3])
                 || !tables::slot_tag(storage.root, tables::kSocketTypeTableSlot, tag) || tag == 0
                 || !reader::read_tag(source, storage.scratch, tag, storage.child)
-                || !chalice::configure_sockets(storage.child)
+                || !crafting::read_chalice_sockets(storage.child)
                 || !tables::slot_tag(storage.root, tables::kItemTableSlot, tag) || tag == 0
-                || !reader::read_tag(source, storage.scratch, tag, storage.itemIndexTable))
+                || !reader::read_tag(source, storage.scratch, tag, storage.itemIndexTable)) {
                 continue;
+            }
             tables::Array items{};
             if (!tables::find_array_at(storage.itemIndexTable, tables::kTableArrayDescriptor, items)
-                || items.elementClass != tables::kItemIndexTableClass || items.count <= 8019)
+                || items.elementClass != tables::kItemIndexTableClass
+                || items.count <= data::kChaliceLastIndex) {
                 continue;
+            }
+            std::array<data::ChalicePlug, data::kChalicePlugCapacity> plugs{};
             bool readItems = true;
-            for (std::uint16_t index = 7937; index <= 8019; ++index) {
-                if (!chalice::needs_item(index)) continue;
+            for (std::uint16_t index = data::kChaliceIndex; index <= data::kChaliceLastIndex;
+                 ++index) {
+                if (!data::needs_chalice_item(index)) {
+                    continue;
+                }
                 tables::IndexRow row{};
                 if (!tables::index_row(storage.itemIndexTable, items, index, row)
                     || row.targetTag == 0
                     || !reader::read_tag(source, storage.scratch, row.targetTag, storage.definition)
-                    || !chalice::configure_item(index, row.definitionHash, storage.definition)) {
+                    || !crafting::read_chalice_item(index,
+                                                    row.definitionHash,
+                                                    storage.definition,
+                                                    plugs[index - data::kChaliceIndex])) {
                     readItems = false;
                     break;
                 }
             }
-            configured = readItems && chalice::metadata_ready();
+            configured = readItems && chalice::configure_metadata(plugs);
         }
     }
     core::log::writef(core::log::Channel::state,
@@ -92,6 +111,8 @@ void configure_chalice_metadata(const reader::Source& source, Storage& storage) 
 /** Menu predicates come from real Mote definitions, not the similarly named action plugs. */
 bool configure_mote_visibility(const reader::Source& source, Storage& storage) noexcept {
     namespace synthesizer = state::runtime::detail::synthesizer;
+    namespace crafting = middleware::content::packages::tables::crafting;
+    namespace data = state::build_data::crafting;
     std::uint32_t itemTag = 0, flagTag = 0;
     tables::Array items{};
     if (!tables::slot_tag(storage.root, tables::kItemTableSlot, itemTag) || itemTag == 0
@@ -101,26 +122,36 @@ bool configure_mote_visibility(const reader::Source& source, Storage& storage) n
         || !reader::read_tag(source, storage.scratch, flagTag, storage.unlockSlotTable)
         || !tables::find_array_at(storage.itemIndexTable, tables::kTableArrayDescriptor, items)
         || items.elementClass != tables::kItemIndexTableClass
-        || items.count > state::build_data::items::kDefinitionCapacity)
+        || items.count > state::build_data::items::kDefinitionCapacity) {
         return false;
+    }
+    std::array<data::MoteOutput, 12> outputs{};
     std::size_t configured = 0;
     for (std::uint64_t index = 0; index < items.count; ++index) {
         tables::IndexRow row{};
-        if (!tables::index_row(storage.itemIndexTable, items, index, row)) return false;
-        if (!synthesizer::is_mote(row.definitionHash)) continue;
+        if (!tables::index_row(storage.itemIndexTable, items, index, row)) {
+            return false;
+        }
+        if (!synthesizer::is_mote(row.definitionHash)) {
+            continue;
+        }
+        std::array<std::uint16_t, 2> slots{};
         if (row.targetTag == 0
             || !reader::read_tag(source, storage.scratch, row.targetTag, storage.definition)
-            || !synthesizer::configure_mote_output_flags(
-                row.definitionHash, storage.definition, storage.unlockSlotTable))
+            || !crafting::read_mote_output_flags(storage.definition, storage.unlockSlotTable, slots)
+            || configured == outputs.size()) {
             return false;
-        ++configured;
+        }
+        outputs[configured++] = {.hash = row.definitionHash, .slots = slots};
     }
-    return configured == 12 && synthesizer::mote_output_flags_ready();
+    return configured == outputs.size() && synthesizer::configure_mote_output_flags(outputs);
 }
 
 /** Optional exchange metadata is read once per boot, including a build-data cache hit. */
 void configure_synthesizer_metadata(const reader::Source& source, Storage& storage) noexcept {
-    if (g_synthesizerMetadataAttempted.load(std::memory_order_acquire)) return;
+    if (g_synthesizerMetadataAttempted.load(std::memory_order_acquire)) {
+        return;
+    }
     std::array<std::uint32_t, kContainerCandidates> candidates{};
     std::size_t count = 0;
     bool configured = false;
@@ -132,13 +163,21 @@ void configure_synthesizer_metadata(const reader::Source& source, Storage& stora
                 || !tables::child_tag(storage.container, tables::kInvestmentRootChild, root)
                 || root == 0
                 || !reader::read_tag(source, storage.scratch, root, storage.root, rootClass)
-                || rootClass != tables::kInvestmentRootClass)
+                || rootClass != tables::kInvestmentRootClass) {
                 continue;
+            }
             if (!configured && tables::slot_tag(storage.root, tables::kSocketTypeTableSlot, table)
-                && table != 0 && reader::read_tag(source, storage.scratch, table, storage.child))
-                configured =
-                    state::runtime::detail::synthesizer::configure_socket_costs(storage.child);
-            if (!visibility) visibility = configure_mote_visibility(source, storage);
+                && table != 0 && reader::read_tag(source, storage.scratch, table, storage.child)) {
+                state::build_data::crafting::SynthesizerCosts costs{};
+                if (middleware::content::packages::tables::crafting::read_synthesizer_costs(
+                        storage.child, costs)) {
+                    state::runtime::detail::synthesizer::configure_socket_costs(costs);
+                    configured = true;
+                }
+            }
+            if (!visibility) {
+                visibility = configure_mote_visibility(source, storage);
+            }
         }
     }
     core::log::writef(core::log::Channel::state,

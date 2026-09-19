@@ -8,14 +8,14 @@
 #include <cstdio>
 #include <deque>
 #include <mutex>
+#include <stop_token>
 #include <thread>
 
 #include "../../../state/account/inventory/dawning_oven_state.h"
+#include "../../../state/account/inventory/material_identity.h"
 #include "../../../state/build_data/items/quest_initialization.h"
 #include "../../../state/build_data/runtime.h"
 #include "../../../state/progression/season_pass_reward_catalog.h"
-#include "../../../state/runtime/bounty_reward_policy_data.h"
-#include "../../../state/runtime/item_discard_policy.h"
 #include "../../content/items/packages/internal.h"
 #include "items_service_bridge.h"
 
@@ -54,7 +54,9 @@ void number(std::string& search, std::uint32_t value) {
 Category category(const Entry& entry) noexcept {
     // The service distinguishes real residents from same-name preview/reward markers.
     // Its dummy result must win even when a marker has a plausible item type or bucket.
-    if (entry.policy == GrantPolicy::dummy) return Category::dummies;
+    if (entry.policy == GrantPolicy::dummy) {
+        return Category::dummies;
+    }
     namespace dawning = state::account::inventory::dawning;
     namespace pass = state::progression::season_pass;
     const auto hash = entry.identity.definitionHash;
@@ -62,30 +64,35 @@ Category category(const Entry& entry) noexcept {
     // Real Dawning pickups share character bucket 37 with other kinds of items. Their exact
     // pickup identities identify materials; the bucket alone identifies neither materials nor
     // dummies.
-    const bool knownMaterial =
-        hash == state::item_discard::kGunsmithMaterialsHash
-        || hash == state::runtime::detail::bounty_policy::kEnhancementCoreHash
-        || pass::contains(pass::kDestinationResourceHashes, hash)
-        || hash == state::runtime::detail::bounty_policy::kGlimmerHash
-        || hash == dawning::kEssenceHash
-        || (ingredient < dawning::kIngredientCount
-            && hash == dawning::kIngredients[ingredient].pickupHash);
-    if (knownMaterial) return Category::materials;
-    if (entry.bounty) return Category::bounties;
+    const bool knownMaterial = hash == state::account::inventory::kGunsmithMaterialsHash
+                               || hash == state::account::inventory::kEnhancementCoreHash
+                               || pass::contains(pass::kDestinationResourceHashes, hash)
+                               || hash == state::account::inventory::kGlimmerHash
+                               || hash == dawning::kEssenceHash
+                               || (ingredient < dawning::kIngredientCount
+                                   && hash == dawning::kIngredients[ingredient].pickupHash);
+    if (knownMaterial) {
+        return Category::materials;
+    }
+    if (entry.bounty) {
+        return Category::bounties;
+    }
     // Quests share the pursuit bucket with bounties; only a bounty declares a lifetime.
     {
         data::items::details::Definition detail{};
         if (data::find_configured_item_detail(entry.identity.definitionIndex, detail)
             && detail.definitionIndex == entry.identity.definitionIndex
             && detail.bucketId == data::items::kPursuitBucketId && detail.objectiveCount > 0
-            && detail.lifetimeSeconds <= 0)
+            && detail.lifetimeSeconds <= 0) {
             return Category::quests;
+        }
     }
     namespace buckets = data::inventory::buckets;
     buckets::Descriptor bucket{};
     if (!data::find_inventory_bucket_descriptor(entry.identity.bucketId, bucket)
-        || bucket.bucketId != entry.identity.bucketId)
+        || bucket.bucketId != entry.identity.bucketId) {
         return Category::other;
+    }
     if (bucket.arraySelector == buckets::ArraySelector::character) {
         // Native equipment slots, matching State's native-to-semantic equipment mapping.
         switch (bucket.equipmentSlot) {
@@ -110,17 +117,24 @@ Category category(const Entry& entry) noexcept {
         default:
             break;
         }
-        if (bucket.bucketId == 31) return Category::engrams;
+        if (bucket.bucketId == 31) {
+            return Category::engrams;
+        }
     }
     if (bucket.arraySelector == buckets::ArraySelector::profile) {
         // Ornaments and shaders have their own structural profile buckets.
-        if (bucket.bucketId == 13 || bucket.bucketId == 14) return Category::cosmetics;
+        if (bucket.bucketId == 13 || bucket.bucketId == 14) {
+            return Category::cosmetics;
+        }
         // Materials share profile storage with consumables. The installed type label refines
         // this otherwise ambiguous display subdivision; it never changes grant authority.
         if (entry.itemType.ends_with("Material") || entry.itemType.ends_with("Materials")
-            || entry.itemType == "Currency")
+            || entry.itemType == "Currency") {
             return Category::materials;
-        if (bucket.bucketId == 28 || bucket.bucketId == 15) return Category::consumables;
+        }
+        if (bucket.bucketId == 28 || bucket.bucketId == 15) {
+            return Category::consumables;
+        }
     }
     return Category::other;
 }
@@ -129,7 +143,9 @@ void resolve(package::PresentationReader& reader,
              std::span<const package::text::Reference> refs,
              std::span<std::string*> destinations) {
     package::text::Snapshot names;
-    if (!reader.resolve(refs, names) || names.names.size() != destinations.size()) return;
+    if (!reader.resolve(refs, names) || names.names.size() != destinations.size()) {
+        return;
+    }
     for (std::size_t i = 0; i < names.names.size(); ++i) {
         const auto& name = names.names[i];
         destinations[i]->assign(name.value.data(), name.length);
@@ -137,17 +153,21 @@ void resolve(package::PresentationReader& reader,
 }
 
 std::shared_ptr<Catalog>
-build(package::PresentationReader& reader, bool packagesReady, std::stop_token stop) {
+build(package::PresentationReader& reader, bool packagesReady, const std::stop_token& stop) {
     auto output = std::make_shared<Catalog>();
     output->packagesReady = packagesReady;
     std::vector<data::items::Definition> identities(data::items::kDefinitionCapacity);
     std::size_t count{};
-    if (!data::items::snapshot(identities, count) || count == 0) return {};
+    if (!data::items::snapshot(identities, count) || count == 0) {
+        return {};
+    }
     output->entries.resize(count);
     // Resolve each objective once. Literal English strings are capped by the existing resolver.
     std::vector<Objective> objectives(data::objectives::kDefinitionCapacity);
     for (std::size_t first = 0; first < data::objective_definition_count(); first += 32) {
-        if (stop.stop_requested()) return {};
+        if (stop.stop_requested()) {
+            return {};
+        }
         std::array<package::text::Reference, 32> refs{};
         std::array<std::string*, 32> destinations{};
         const auto end =
@@ -161,21 +181,27 @@ build(package::PresentationReader& reader, bool packagesReady, std::stop_token s
             target.completion = source.completionValue;
             target.itemProgress = source.itemProgress;
             destinations[i - first] = &target.description;
-            if (packagesReady && target.resolved)
+            if (packagesReady && target.resolved) {
                 (void)reader.objective(target.index, target.hash, refs[i - first]);
+            }
         }
-        if (packagesReady && end > first)
+        if (packagesReady && end > first) {
             resolve(reader,
                     std::span(refs).first(end - first),
                     std::span(destinations).first(end - first));
-        if (end == objectives.size()) break;
+        }
+        if (end == objectives.size()) {
+            break;
+        }
     }
     // Only the published prefix of the objective vector was filled; the rest is still default
     // constructed, so bounding by the vector's size would render real indices as objective zero.
     const std::size_t publishedObjectives =
         (std::min)(objectives.size(), data::objective_definition_count());
     for (std::size_t first = 0; first < count; first += 8) {
-        if (stop.stop_requested()) return {};
+        if (stop.stop_requested()) {
+            return {};
+        }
         std::array<package::text::Reference, 32> refs{};
         std::array<std::string*, 32> destinations{};
         const auto end = (std::min)(first + 8, count);
@@ -213,17 +239,19 @@ build(package::PresentationReader& reader, bool packagesReady, std::stop_token s
                      lane < detail.objectiveCount && lane < detail.objectiveIndices.size();
                      ++lane) {
                     const auto index = detail.objectiveIndices[lane];
-                    if (index < publishedObjectives)
+                    if (index < publishedObjectives) {
                         entry.objectives.push_back(objectives[index]);
-                    else
+                    } else {
                         entry.objectives.push_back(Objective{index});
+                    }
                 }
             }
         }
-        if (packagesReady)
+        if (packagesReady) {
             resolve(reader,
                     std::span(refs).first((end - first) * 3),
                     std::span(destinations).first((end - first) * 3));
+        }
         for (auto i = first; i < end; ++i) {
             auto& entry = output->entries[i];
             entry.policy = service::classify(entry);
@@ -248,7 +276,7 @@ build(package::PresentationReader& reader, bool packagesReady, std::stop_token s
     return output;
 }
 
-void run(std::stop_token stop) noexcept {
+void run(const std::stop_token& stop) noexcept {
     try {
         auto source = std::make_unique<Source>();
         const bool available =
@@ -265,7 +293,9 @@ void run(std::stop_token stop) noexcept {
         if (needCatalog) {
             auto pending = build(*reader, readable, stop);
             const std::lock_guard lock(g_mutex);
-            if (stop.stop_requested()) return;
+            if (stop.stop_requested()) {
+                return;
+            }
             g_catalog = std::move(pending);
             g_status = g_catalog
                            ? (readable ? "Catalog ready."
@@ -276,7 +306,9 @@ void run(std::stop_token stop) noexcept {
             Request request{};
             {
                 std::unique_lock lock(g_mutex);
-                if (!g_wake.wait(lock, stop, [] { return !g_requests.empty(); })) break;
+                if (!g_wake.wait(lock, stop, [] { return !g_requests.empty(); })) {
+                    break;
+                }
                 request = g_requests.front();
                 g_requests.pop_front();
             }
@@ -284,7 +316,9 @@ void run(std::stop_token stop) noexcept {
             result.request = request.id;
             result.available = readable && reader->icon(request.index, result.icon);
             const std::lock_guard lock(g_mutex);
-            if (!stop.stop_requested()) g_results.push_back(std::move(result));
+            if (!stop.stop_requested()) {
+                g_results.push_back(std::move(result));
+            }
         }
     } catch (...) {
         const std::lock_guard lock(g_mutex);
@@ -297,7 +331,9 @@ void run(std::stop_token stop) noexcept {
 } // namespace
 
 void start() noexcept {
-    if (g_worker.joinable() || !data::item_definitions_ready()) return;
+    if (g_worker.joinable() || !data::item_definitions_ready()) {
+        return;
+    }
     try {
         {
             const std::lock_guard lock(g_mutex);
@@ -339,7 +375,9 @@ const char* status() noexcept {
 bool request_icon(std::uint64_t request, std::uint16_t index) noexcept {
     try {
         const std::lock_guard lock(g_mutex);
-        if (!g_catalog || g_outstanding >= 16 || !g_worker.joinable()) return false;
+        if (!g_catalog || g_outstanding >= 16 || !g_worker.joinable()) {
+            return false;
+        }
         g_requests.push_back({request, index});
         ++g_outstanding;
         g_wake.notify_one();
@@ -350,7 +388,9 @@ bool request_icon(std::uint64_t request, std::uint16_t index) noexcept {
 }
 bool take_icon(IconResult& output) noexcept {
     const std::lock_guard lock(g_mutex);
-    if (g_results.empty()) return false;
+    if (g_results.empty()) {
+        return false;
+    }
     output = std::move(g_results.front());
     g_results.pop_front();
     --g_outstanding;

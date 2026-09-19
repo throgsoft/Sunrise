@@ -169,8 +169,9 @@ bool stage_service_outcome(Scratch& scratch,
             || before.family4Version == (std::numeric_limits<std::int32_t>::max)()
             || update.after.family4Version != before.family4Version + 1
             || !push::append_postmaster_claim_notification(
-                scratch, update, *postmasterClaim->pending, key, nonce, response, written))
+                scratch, update, *postmasterClaim->pending, key, nonce, response, written)) {
             return false;
+        }
         middleware::secure_channel::advance_nonce(nonce);
         after = update.after;
         publication.updatesAcquisitionPresentationRows = true;

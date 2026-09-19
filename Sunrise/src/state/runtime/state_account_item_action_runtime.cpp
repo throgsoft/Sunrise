@@ -317,7 +317,9 @@ bool commit_socket_plug(PendingSocketPlug& mutation) noexcept {
                        prepared.itemIndex);
 
     investment::store::Transaction transaction;
-    if (!transaction.ready()) return fail("transaction");
+    if (!transaction.ready()) {
+        return fail("transaction");
+    }
     investment::store::g_mutex.lock();
     AccountState candidate = investment::store::account();
     if (prepared.characterIndex >= candidate.characterCount

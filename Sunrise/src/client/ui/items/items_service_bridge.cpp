@@ -6,7 +6,6 @@
 
 #include "../../../core/runtime/wall_clock.h"
 #include "../../../server/bap/runtime.h"
-#include "../../../state/build_data/collectibles/collectible_catalog.h"
 #include "../../../state/build_data/items/quest_initialization.h"
 #include "../../../state/build_data/pursuits/pursuit_progress.h"
 #include "../../../state/build_data/runtime.h"
@@ -17,53 +16,6 @@
 namespace sunrise::client::ui::items::service {
 namespace {
 namespace data = state::build_data;
-
-bool direct_runtime_reward(const data::items::Definition& identity,
-                           const data::items::details::Definition& detail) noexcept {
-    namespace pass = state::progression::season_pass;
-    namespace buckets = data::inventory::buckets;
-    namespace bounty = state::runtime::detail::bounty;
-    namespace bountyPolicy = state::runtime::detail::bounty_policy;
-    buckets::Descriptor bucket{};
-    if (detail.equipmentSlot || detail.objectiveCount || detail.maxStackSize <= 0
-        || !data::find_inventory_bucket_descriptor(identity.bucketId, bucket)
-        || bucket.bucketId != identity.bucketId)
-        return false;
-    const bool engram = identity.bucketId == buckets::kEngramBucketId
-                        && bucket.arraySelector == buckets::ArraySelector::character;
-    // Materials sit in their own profile bucket beside consumables; both hold granted resources.
-    const bool consumable = (identity.bucketId == buckets::kConsumableBucketId
-                             || identity.bucketId == buckets::kMaterialBucketId)
-                            && bucket.arraySelector == buckets::ArraySelector::profile
-                            && detail.instancedDefinitionState
-                                   == data::items::details::InstancedDefinitionState::stackable;
-    if (!engram && !consumable) return false;
-    // The bounty service already admits these concrete engrams, excluding its display wrapper.
-    if (engram
-        && detail.instancedDefinitionState
-               == data::items::details::InstancedDefinitionState::instanced
-        && bounty::contains(bountyPolicy::kArrivalsUmbralEngrams, identity.definitionHash))
-        return true;
-    if (consumable && pass::contains(pass::kDestinationResourceHashes, identity.definitionHash))
-        return true;
-    // Match the pass's direct-acquisition branch, never its bundle or auto-decrypt branches.
-    data::season_pass::Package package{};
-    if (identity.definitionHash == pass::kDestinationResourceBundleHash
-        || identity.definitionHash == pass::kLegendaryEngramHash
-        || identity.definitionHash == pass::kExoticEngramHash
-        || data::find_season_pass_package(identity.definitionHash, package))
-        return false;
-    const auto count =
-        (std::min)(data::season_pass_reward_count(), data::season_pass::kRewardCapacity);
-    for (std::size_t row = 0; row < count; ++row) {
-        data::season_pass::Reward reward{};
-        if (data::find_season_pass_reward(static_cast<std::uint16_t>(row), reward)
-            && reward.quantity > 0 && reward.itemIndex == identity.definitionIndex
-            && reward.itemHash == identity.definitionHash)
-            return true;
-    }
-    return false;
-}
 
 Feedback report(const state::investment_edit::Result& result) noexcept {
     // Every service has released SQLite before returning; publication uses the normal protocol.
@@ -129,45 +81,59 @@ Inventory inventory() noexcept {
 
 GrantPolicy classify(const Entry& entry) noexcept {
     namespace bounty = state::runtime::detail::bounty;
-    namespace dawning = state::account::inventory::dawning;
+    namespace buckets = data::inventory::buckets;
     data::items::Definition identity{};
     data::items::details::Definition detail{};
+    buckets::Descriptor bucket{};
     if (!data::find_item_definition_hash(entry.identity.definitionHash, identity)
         || identity.definitionIndex != entry.identity.definitionIndex
         || identity.bucketId != entry.identity.bucketId
         || !data::find_configured_item_detail(identity.definitionIndex, detail)
-        || detail.definitionHash != identity.definitionHash || detail.bucketId != identity.bucketId)
+        || detail.definitionHash != identity.definitionHash || detail.bucketId != identity.bucketId
+        || !data::find_inventory_bucket_descriptor(identity.bucketId, bucket)
+        || bucket.bucketId != identity.bucketId)
         return GrantPolicy::unknown;
+    // A reward marker stands in for an item without ever being a resident of its own.
     if (bounty::reward_marker(identity.definitionIndex, identity.definitionHash)
         != bounty::RewardMarker::none)
         return GrantPolicy::dummy;
-    // Positive installed relationships and existing State payout policy only. An absent dummy
-    // flag is never evidence that an arbitrary inventory definition can be minted.
-    if (data::collectibles::grants_item(identity.definitionIndex)) return GrantPolicy::legitimate;
-    if (direct_runtime_reward(identity, detail)) return GrantPolicy::legitimate;
-    // Bounties expire and quests do not, but both are pursuits and the grant seeds a quest's
-    // authored first step, so the structural shape decides rather than the localized type name.
-    if (detail.bucketId == data::items::kPursuitBucketId && detail.maxStackSize <= 1
-        && detail.objectiveCount > 0)
-        return GrantPolicy::legitimate;
-    for (const auto& reward : bounty::kScaledPursuitRewards)
-        if (reward.paidIndex == identity.definitionIndex) return GrantPolicy::legitimate;
-    const auto ingredient = dawning::ingredient(identity.definitionHash);
-    if ((ingredient < dawning::kIngredientCount
-         && identity.definitionHash == dawning::kIngredients[ingredient].pickupHash)
-        || dawning::cookie(identity.definitionHash)
-        || identity.definitionHash == dawning::kEssenceHash)
-        return GrantPolicy::legitimate;
-    return GrantPolicy::unknown;
+    // Reward policy owns support, ownership, capacity and quantity, and refuses with its own
+    // reason. This mirrors only the placements that policy implements, so a definition naming
+    // no bucket it can fill never offers a grant it cannot honour.
+    const bool stackable = detail.instancedDefinitionState
+                           == data::items::details::InstancedDefinitionState::stackable;
+    switch (bucket.arraySelector) {
+    case buckets::ArraySelector::profile:
+        return stackable ? GrantPolicy::legitimate : GrantPolicy::unknown;
+    case buckets::ArraySelector::character:
+        return !stackable || !detail.equipmentSlot.has_value() ? GrantPolicy::legitimate
+                                                               : GrantPolicy::unknown;
+    default:
+        return GrantPolicy::unknown;
+    }
 }
 
 Feedback grant(const Entry& entry, std::int32_t quantity) noexcept {
     const auto policy = classify(entry);
-    if (policy == GrantPolicy::dummy) return report({false, 0, "Dummy minting is disabled"});
+    if (policy == GrantPolicy::dummy)
+        return report({false, 0, "Reward marker; it stands for an item without being one"});
     if (policy != GrantPolicy::legitimate)
-        return report({false, 0, "No positive installed grant classification; item is read-only"});
-    return report(state::investment_edit::grant_item(
-        entry.identity.definitionIndex, quantity, entry.identity.definitionHash));
+        return report({false, 0, "No inventory array the reward policy can place this in"});
+    const auto result = state::investment_edit::grant_item(
+        entry.identity.definitionIndex, quantity, entry.identity.definitionHash);
+    if (result.accepted) return report(result);
+    // Name the bucket on refusal: an unplaceable definition and a full array read alike here.
+    data::inventory::buckets::Descriptor bucket{};
+    Feedback output{};
+    std::snprintf(output.text.data(),
+                  output.text.size(),
+                  "%s; bucket=%u array=%u",
+                  result.reason,
+                  unsigned(entry.identity.bucketId),
+                  data::find_inventory_bucket_descriptor(entry.identity.bucketId, bucket)
+                      ? unsigned(bucket.arraySelector)
+                      : 0xFFU);
+    return output;
 }
 Feedback set_lane(std::uint64_t instance,
                   std::uint16_t item,

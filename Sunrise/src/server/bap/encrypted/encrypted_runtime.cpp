@@ -29,9 +29,6 @@
 namespace sunrise::server::bap::encrypted {
 namespace {
 
-/** Delay before the Family-4 copy of an artifact change, so its Family-5 refresh lands first. */
-constexpr std::uint64_t kArtifactFamily4RefreshDelayMs = 100;
-
 /** Traces one decoded service frame and the reply it produced. */
 void report_service_traffic(const middleware::bap::RequestFrame& frame,
                             const ServiceRoute& route,
@@ -415,9 +412,8 @@ bool consume(Session& session,
             && state::runtime::detail::synthesizer::mote_ownership_changed(
                 rewardTransaction->pending->beforeProfileItems,
                 rewardTransaction->pending->afterProfileItems));
-    // The oven and chalice publish their slots from received banks, exactly as the Synthesizer
-    // does. A change to either has to rearm the same predicate refresh or the Client keeps
-    // drawing its previous derived view.
+    // Oven and Chalice inputs live in Family 4. Their socket reply already carries the changed
+    // banks; refresh the derived character view without replacing global Family-5 overrides.
     const bool changesCraftingState =
         (rewardTransaction && rewardTransaction->pending
          && rewardTransaction->pending->beforeDawning != rewardTransaction->pending->afterDawning)
@@ -581,8 +577,7 @@ bool consume(Session& session,
             if (outcome.hasPublishedMoteMask) {
                 session.queuez.publishedMoteMask = outcome.publishedMoteMask;
             }
-            if (changesMoteOwnership || changesCraftingState || outcome.hasSelectCharacter
-                || outcome.hasChangeCharacter) {
+            if (changesMoteOwnership || outcome.hasSelectCharacter || outcome.hasChangeCharacter) {
                 // A committed synthesis/recycle/discard needs only the evaluated predicates.
                 session.family5RefreshArmed = true;
             }
@@ -590,9 +585,10 @@ bool consume(Session& session,
                 // Artifact overrides live in Family 5, so they need their own refresh. A record
                 // claim does not: its Family-4 replacement rearms the client rebuild.
                 session.family5RefreshArmed = true;
-                session.artifactFamily4RefreshDueTick =
-                    GetTickCount64() + kArtifactFamily4RefreshDelayMs;
-                session.artifactFamily4RefreshArmed = true;
+            }
+            if (changesCraftingState) {
+                session.unlockCharacterRefreshDueTick =
+                    GetTickCount64() + kUnlockCharacterRefreshDelayMs;
             }
             if (outcome.hasArtifactReset) {
                 session.artifactResetRefresh = outcome.artifactReset;

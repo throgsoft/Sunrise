@@ -24,6 +24,9 @@
 
 namespace sunrise::server::bap::encrypted {
 
+/** Let the preceding unlock-bank publication land before refreshing the character view. */
+inline constexpr std::uint64_t kUnlockCharacterRefreshDelayMs = 100;
+
 /** Response-body codecs picked by the authenticated request service. */
 
 enum class BodyCodec : std::uint8_t {

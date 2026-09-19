@@ -22,9 +22,6 @@
 namespace sunrise::server::bap::encrypted {
 namespace {
 
-/** Allow the preceding predicate push to settle before refreshing its dependent views. */
-constexpr std::uint64_t kCraftingRefreshDelayMs = 100;
-
 /**
  * Whether an acquired item is one a crafting container derives its plugs from.
  * Motes feed the Synthesizer, ingredients the oven, and runes and Imperials the Chalice.
@@ -165,10 +162,9 @@ selected_character(const state::AccountState& account) noexcept {
         bap::settle_world_reward();
         return false;
     }
-    const bool changesCraftingPredicates =
-        state::runtime::detail::synthesizer::mote_ownership_changed(pending.beforeItems,
-                                                                    pending.afterItems)
-        || crafting_input(pending.acquiredDefinitionHash);
+    const bool changesMoteOwnership = state::runtime::detail::synthesizer::mote_ownership_changed(
+        pending.beforeItems, pending.afterItems);
+    const bool changesCraftingInputs = crafting_input(pending.acquiredDefinitionHash);
     touchesScratch = true;
     queuez::ProfileItemAcquisition acquisition{};
     if (!queuez::stage_profile_item_acquisition(session.queuez,
@@ -212,10 +208,11 @@ selected_character(const state::AccountState& account) noexcept {
     middleware::secure_channel::advance_nonce(nextSendNonce);
     session.sendNonce = nextSendNonce;
     session.queuez = acquisition.after;
-    // A refresh republishes every container view, so it follows a real change to what those
-    // views read rather than any acquisition at all.
-    if (changesCraftingPredicates) {
+    if (changesMoteOwnership) {
         session.family5RefreshArmed = true;
+    }
+    if (changesCraftingInputs) {
+        session.unlockCharacterRefreshDueTick = GetTickCount64() + kUnlockCharacterRefreshDelayMs;
     }
     bap::arm_account_resync_elsewhere(session);
     bap::arm_acquisition_presentation_hold(session);
@@ -620,11 +617,7 @@ selected_character(const state::AccountState& account) noexcept {
     return true;
 }
 
-/**
- * Publishes unlock predicates before scheduling the dependent account and item refresh.
- * Keep the
- * pending refresh on failure so the client cannot miss a predicate change.
- */
+/** Publishes global overrides before their character refresh; failures retain the pending work. */
 [[nodiscard]] bool consume_family5_refresh(Session& session,
                                            Scratch& scratch,
                                            std::span<std::byte> response,
@@ -675,64 +668,23 @@ selected_character(const state::AccountState& account) noexcept {
                           static_cast<unsigned>(publishedMoteMask));
     }
     session.queuez.publishedMoteMask = publishedMoteMask;
-    session.craftingRefreshDueTick = GetTickCount64() + kCraftingRefreshDelayMs;
+    session.unlockCharacterRefreshDueTick = GetTickCount64() + kUnlockCharacterRefreshDelayMs;
     return true;
 }
 
-/** Republishes the account banks and their item residents together after predicate changes. */
-[[nodiscard]] bool consume_crafting_refresh(Session& session,
-                                            Scratch& scratch,
-                                            std::span<std::byte> response,
-                                            std::size_t& written,
-                                            bool& touchesScratch) noexcept {
-    const auto now = GetTickCount64();
-    if (session.craftingRefreshDueTick == 0 || now < session.craftingRefreshDueTick
-        || session.family5RefreshArmed || session.accountResyncArmed
-        || now < session.acquisitionPresentationUntilTick || !session.queuez.family4Active) {
-        return false;
-    }
-    // Retry failures at the settling interval without consuming the pending refresh.
-    session.craftingRefreshDueTick = now + kCraftingRefreshDelayMs;
-    auto nextSendNonce = session.sendNonce;
-    queuez::SessionState after{};
-    std::size_t framedSize = 0;
-    touchesScratch = true;
-    if (!push::append_account_resync_notification(scratch,
-                                                  session.queuez,
-                                                  active_acquisition_presentation_rows(session),
-                                                  session.sessionKey,
-                                                  nextSendNonce,
-                                                  scratch.framed,
-                                                  framedSize,
-                                                  after)
-        || framedSize == 0 || framedSize > response.size()) {
-        return false;
-    }
-    std::copy_n(scratch.framed.begin(), framedSize, response.begin());
-    written = framedSize;
-    session.sendNonce = nextSendNonce;
-    session.queuez = after;
-    session.craftingRefreshDueTick = 0;
-    core::log::writef(core::log::Channel::server,
-                      core::log::Level::info,
-                      "ev=crafting_visibility stage=account_refresh result=published "
-                      "family4_version=%d family5_version=%d residents=%zu",
-                      after.family4Version,
-                      after.family5Version,
-                      after.family4ResidentCount);
-    return true;
-}
-
-/** Re-publishes only the selected character after an artifact purchase. */
-[[nodiscard]] bool consume_artifact_family4_refresh(Session& session,
+/** Refreshes derived unlock state through the same character upsert as artifact purchases. */
+[[nodiscard]] bool consume_unlock_character_refresh(Session& session,
                                                     Scratch& scratch,
                                                     std::span<std::byte> response,
                                                     std::size_t& written,
                                                     bool& touchesScratch) noexcept {
-    if (!session.artifactFamily4RefreshArmed
-        || GetTickCount64() < session.artifactFamily4RefreshDueTick) {
+    const auto now = GetTickCount64();
+    if (session.unlockCharacterRefreshDueTick == 0 || now < session.unlockCharacterRefreshDueTick
+        || session.family5RefreshArmed || session.accountResyncArmed
+        || now < session.acquisitionPresentationUntilTick || !session.queuez.family4Active) {
         return false;
     }
+    session.unlockCharacterRefreshDueTick = now + kUnlockCharacterRefreshDelayMs;
     const state::AccountState account = state::account_snapshot();
     const state::CharacterState* selected = selected_character(account);
     if (selected == nullptr) {
@@ -763,7 +715,7 @@ selected_character(const state::AccountState& account) noexcept {
         || framedSize == 0 || framedSize > response.size()) {
         core::log::write(core::log::Channel::server,
                          core::log::Level::warn,
-                         "ev=queuez stage=artifact_refresh result=fail");
+                         "ev=queuez stage=unlock_character_refresh result=fail");
         return false;
     }
     std::copy_n(scratch.framed.begin(), framedSize, response.begin());
@@ -771,8 +723,7 @@ selected_character(const state::AccountState& account) noexcept {
     middleware::secure_channel::advance_nonce(nextSendNonce);
     session.sendNonce = nextSendNonce;
     session.queuez = update.after;
-    session.artifactFamily4RefreshArmed = false;
-    session.artifactFamily4RefreshDueTick = 0;
+    session.unlockCharacterRefreshDueTick = 0;
     return true;
 }
 
@@ -846,10 +797,7 @@ bool consume_deferred(Session& session,
     if (consume_family5_refresh(session, scratch, response, written, touchesScratch)) {
         return true;
     }
-    if (consume_crafting_refresh(session, scratch, response, written, touchesScratch)) {
-        return true;
-    }
-    if (consume_artifact_family4_refresh(session, scratch, response, written, touchesScratch)) {
+    if (consume_unlock_character_refresh(session, scratch, response, written, touchesScratch)) {
         return true;
     }
     if (consume_artifact_item_refresh(session, scratch, response, written, touchesScratch)) {

@@ -356,11 +356,9 @@ struct Session {
     std::int32_t pendingSeasonalExperienceAmount{};
     std::uint32_t pendingSeasonalExperienceMutationSerial{};
     bool authenticated{};
-    /** Publishes predicates before their item-view companions. */
+    /** Publishes changed global unlock overrides before refreshing derived character state. */
     bool family5RefreshArmed{};
-    std::uint64_t craftingRefreshDueTick{};
-    bool artifactFamily4RefreshArmed{};
-    std::uint64_t artifactFamily4RefreshDueTick{};
+    std::uint64_t unlockCharacterRefreshDueTick{};
     state::ArtifactResetResult artifactResetRefresh{};
     std::size_t artifactResetRefreshCursor{};
     std::uint8_t acquisitionPresentationRowCount{};

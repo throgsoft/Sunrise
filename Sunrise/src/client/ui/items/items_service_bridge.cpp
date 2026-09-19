@@ -71,6 +71,14 @@ Inventory inventory() noexcept {
                 }
                 output.bounties.push_back(held);
             }
+            // Inventory order follows acquisition and compaction. Sorting by installed identity
+            // makes the grid read the same way the installed pages are numbered.
+            std::sort(output.bounties.begin(),
+                      output.bounties.end(),
+                      [](const Held& left, const Held& right) noexcept {
+                          return left.index != right.index ? left.index < right.index
+                                                           : left.instance < right.instance;
+                      });
             break;
         }
     } catch (...) {
@@ -157,12 +165,15 @@ Feedback complete_bounties() noexcept {
     return report(state::investment_edit::complete_bounties());
 }
 
-/** An installed bounty: a character-bucket pursuit that expires. */
+/** An installed bounty: a character-bucket pursuit that expires and is not a reward marker. */
 bool installed_bounty(std::uint16_t index,
                       data::items::Definition& item,
                       data::items::details::Definition& detail) noexcept {
+    namespace bounty = state::runtime::detail::bounty;
     data::inventory::buckets::Descriptor bucket{};
-    return data::find_item_definition_index(index, item)
+    std::uint32_t markerHash = 0;
+    return bounty::reward_marker(index, markerHash) == bounty::RewardMarker::none
+           && data::find_item_definition_index(index, item)
            && data::find_configured_item_detail(index, detail)
            && detail.definitionHash == item.definitionHash && detail.bucketId == item.bucketId
            && detail.objectiveCount != 0 && detail.objectiveCount <= detail.objectiveIndices.size()

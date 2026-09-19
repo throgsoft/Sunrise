@@ -519,7 +519,7 @@ bool held_complete(const Entry& entry, const service::Held& held) noexcept {
 /** Held pursuits as the Character screen lays them out: four across, seven down, one page. */
 void held_grid(const Catalog& data) {
     constexpr std::size_t kColumns = 4, kRows = 7, kPerPage = kColumns * kRows;
-    constexpr float kTile = 56.0f;
+    constexpr float kTile = 72.0f;
     const auto total = g_inventory.bounties.size();
     const int lastPage = (std::max)(1, static_cast<int>((total + kPerPage - 1) / kPerPage));
     g_heldPage = (std::clamp)(g_heldPage, 1, lastPage);
@@ -573,6 +573,27 @@ void held_grid(const Catalog& data) {
     }
 }
 
+/** The selected held pursuit and its lanes, drawn beside the grid when the page is wide. */
+void held_detail(const Catalog& data) {
+    for (const auto& held : g_inventory.bounties) {
+        if (held.instance != g_heldSelection) continue;
+        const auto* entry = find(data, held.index, held.hash);
+        if (!entry) {
+            ImGui::TextDisabled("Installed bounty details unavailable.");
+            return;
+        }
+        icon(*entry, 64);
+        ImGui::SameLine();
+        ImGui::BeginGroup();
+        ImGui::TextWrapped("%s", name(*entry));
+        ImGui::TextDisabled("Item %u", static_cast<unsigned>(held.index));
+        ImGui::EndGroup();
+        bounty_lanes(*entry, held);
+        return;
+    }
+    ImGui::TextDisabled("Select a held pursuit to edit its objective lanes.");
+}
+
 void bounties_tab(const Catalog& data) {
     if (!g_inventory.ready) {
         ImGui::TextWrapped("Select a character to view held bounties.");
@@ -624,28 +645,29 @@ void bounties_tab(const Catalog& data) {
                 "acquiring %zu of %zu...", g_inventory.bounties.size(), g_pageExpected);
         }
     }
-    ImGui::TextDisabled("%zu installed bounties, %zu per page. Discards held first.",
-                        pages.bounties,
-                        service::kBountyPageSize);
-    if (g_inventory.unresolved)
-        ImGui::TextDisabled("%zu inventory entries have unresolved metadata.",
-                            g_inventory.unresolved);
-    held_grid(data);
-    for (const auto& held : g_inventory.bounties) {
-        if (held.instance != g_heldSelection) continue;
-        const auto* entry = find(data, held.index, held.hash);
-        if (!entry) {
-            ImGui::TextDisabled("Installed bounty details unavailable.");
-            return;
-        }
-        icon(*entry, 64);
-        ImGui::SameLine();
-        ImGui::BeginGroup();
-        ImGui::TextWrapped("%s", name(*entry));
-        ImGui::EndGroup();
-        bounty_lanes(*entry, held);
-        return;
+    ImGui::SameLine();
+    ImGui::TextDisabled("(?)");
+    if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("%zu installed bounties, %zu per page. Discards held first. "
+                          "%zu held entries have unresolved metadata.",
+                          pages.bounties,
+                          service::kBountyPageSize,
+                          g_inventory.unresolved);
+    const auto& style = ImGui::GetStyle();
+    const float available = ImGui::GetContentRegionAvail().x;
+    constexpr float kDetailWidth = 360.0f;
+    const bool sideBySide = available > kDetailWidth + 340.0f;
+    const float height = (std::max)(200.0f, ImGui::GetContentRegionAvail().y);
+    const float width =
+        sideBySide ? (std::max)(200.0f, available - kDetailWidth - style.ItemSpacing.x) : 0.0f;
+    if (ImGui::BeginChild("##held_grid", {width, height}, ImGuiChildFlags_Borders)) held_grid(data);
+    ImGui::EndChild();
+    if (sideBySide) {
+        ImGui::SameLine(0, style.ItemSpacing.x);
+        ImGui::BeginChild("##held_detail", {0, height}, ImGuiChildFlags_Borders);
     }
+    held_detail(data);
+    if (sideBySide) ImGui::EndChild();
 }
 void clear_tab() {
     ImGui::TextWrapped("Drops every held item in the chosen scope. Equipped items are kept.");

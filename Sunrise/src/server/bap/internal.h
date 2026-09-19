@@ -558,10 +558,6 @@ void arm_acquisition_presentation_hold(Session& session) noexcept;
  * Caller owns the session lock; this is scheduling, not a client consumption ACK. */
 [[nodiscard]] std::uint64_t acquisition_queue_deadline() noexcept;
 
-/** Short queue grace for the observer to copy acquisition data. This is a
- * Sunrise scheduling grace, not a decoded client acknowledgment or retail timeout. */
-inline constexpr std::uint64_t kAcquisitionQueueGraceMs = 1'500;
-
 /** Backoff after a queued reward refuses. A retained reward whose refusal is durable, such as a
  * full authored bucket that cannot spill to the Postmaster, would otherwise copy a whole account
  * image on every pump and starve every other deferred lane. */

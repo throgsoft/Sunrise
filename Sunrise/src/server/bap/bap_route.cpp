@@ -41,6 +41,9 @@ std::atomic<InvestmentSliceConsumer> g_investmentSliceConsumer{};
 
 /** Existing conservative hold for acquisition flyouts and retained inventory-row overlays. */
 constexpr std::uint64_t kAcquisitionPresentationHoldMs = 8'000;
+/** Short queue grace for the observer to copy acquisition data. This is a
+ * Sunrise scheduling grace, not a decoded client acknowledgment or retail timeout. */
+constexpr std::uint64_t kAcquisitionQueueGraceMs = 1'500;
 static_assert(kAcquisitionQueueGraceMs <= kAcquisitionPresentationHoldMs);
 
 /** Arms every other active peer after one shared-account transaction is published. */

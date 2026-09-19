@@ -543,7 +543,8 @@ selected_character(const state::AccountState& account) noexcept {
                                            std::span<std::byte> response,
                                            std::size_t& written,
                                            bool& touchesScratch) noexcept {
-    if (!session.family5RefreshArmed) {
+    if (!session.family5RefreshArmed
+        || GetTickCount64() < session.acquisitionPresentationUntilTick) {
         return false;
     }
     if (session.queuez.family5Version == (std::numeric_limits<std::int32_t>::max)()) {

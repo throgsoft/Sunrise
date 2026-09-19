@@ -341,23 +341,28 @@ bool runtime::detail::stage_record_reward_grant(const AccountState& account,
                           == item_details::InstancedDefinitionState::stackable
                    && !detail.equipmentSlot.has_value()) {
             CharacterState& character = working.characters[characterIndex];
-            if (requested.quantity > detail.maxStackSize
-                || character.nextInventorySerial
-                       >= static_cast<std::uint32_t>((std::numeric_limits<std::int32_t>::max)())) {
+            if (character.nextInventorySerial
+                >= static_cast<std::uint32_t>((std::numeric_limits<std::int32_t>::max)())) {
                 return false;
             }
             std::size_t stackIndex = character.stacks.count;
+            std::size_t bucketStacks = 0;
             for (std::size_t candidate = 0; candidate < character.stacks.count; ++candidate) {
-                if (character.stacks.values[candidate].definitionHash == item.definitionHash) {
-                    stackIndex = candidate;
-                    break;
-                }
+                const auto& row = character.stacks.values[candidate];
+                build_data::items::Definition held{};
+                if (!build_data::find_item_definition_hash(row.definitionHash, held)) return false;
+                bucketStacks += held.bucketId == item.bucketId;
+                if (row.definitionHash == item.definitionHash) stackIndex = candidate;
             }
             const bool appended = stackIndex == character.stacks.count;
-            if ((appended && stackIndex >= character.stacks.values.size())
-                || (!appended
-                    && character.stacks.values[stackIndex].quantity
-                           > detail.maxStackSize - requested.quantity)) {
+            const std::int32_t held = appended ? 0 : character.stacks.values[stackIndex].quantity;
+            if (held < 0 || held > detail.maxStackSize) return false;
+            // The same saturation the earned reward path uses: credit what the stack can hold
+            // rather than refusing the payout, and keep a bucket inside its own slot range.
+            const std::int32_t credited =
+                (std::min)(requested.quantity, detail.maxStackSize - held);
+            if (credited <= 0 || (appended && stackIndex >= character.stacks.values.size())
+                || (appended && bucketStacks >= bucket.slotCount)) {
                 return false;
             }
             auto& stack = character.stacks.values[stackIndex];
@@ -365,8 +370,9 @@ bool runtime::detail::stage_record_reward_grant(const AccountState& account,
                 stack.definitionHash = item.definitionHash;
                 ++character.stacks.count;
             }
-            stack.quantity += requested.quantity;
+            stack.quantity = held + credited;
             stack.mutationSerial = static_cast<std::int32_t>(character.nextInventorySerial++);
+            prepared.quantity = credited;
             prepared.stateIndex = stackIndex;
             prepared.afterQuantity = stack.quantity;
             prepared.mutationSerial = stack.mutationSerial;

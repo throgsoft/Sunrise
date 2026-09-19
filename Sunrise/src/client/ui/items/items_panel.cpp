@@ -37,8 +37,6 @@ int g_probed{-1};
 service::Feedback g_probe{};
 std::size_t g_pageExpected{};
 double g_pageDeadline{};
-std::vector<std::uint16_t> g_pageQueue{};
-std::size_t g_pageCursor{};
 std::uint64_t g_clearCharacter{};
 enum class Sort : int { type, name, id };
 constexpr std::array<const char*, 3> kSortNames{"Type", "Name", "ID"};
@@ -647,30 +645,14 @@ void bounties_tab(const Catalog& data) {
     ImGui::BeginDisabled(pages.count == 0);
     if (ImGui::Button("Grant page")) {
         feedback(service::clear(service::Clear::bounties));
-        g_pageQueue = service::bounty_page(static_cast<std::size_t>(g_bountyPage));
-        g_pageCursor = 0;
-        g_pageExpected = g_pageQueue.size();
+        const auto page = service::bounty_page(static_cast<std::size_t>(g_bountyPage));
+        g_pageExpected = service::queue_bounty_page(page) ? page.size() : 0;
         g_pageDeadline = ImGui::GetTime() + 60.0;
     }
     ImGui::EndDisabled();
-    // Proving and saving one acquisition copies an account image, so a page is fed in over
-    // several frames. Completion then waits for the instances the pump has published.
-    if (!g_pageQueue.empty()) {
-        constexpr std::size_t kPerFrame = 2;
-        for (std::size_t step = 0; step < kPerFrame && g_pageCursor < g_pageQueue.size(); ++step)
-            (void)service::queue_bounty(g_pageQueue[g_pageCursor++]);
-        const auto remaining = g_pageQueue.size() - g_pageCursor;
-        if (remaining == 0) {
-            g_pageQueue.clear();
-            g_pageCursor = 0;
-            g_pageCursor = 0;
-        }
-        ImGui::SameLine();
-        ImGui::TextDisabled("queueing %zu...", remaining);
-    } else if (g_pageExpected != 0) {
+    if (g_pageExpected != 0) {
         if (g_inventory.bounties.size() >= g_pageExpected) {
             g_pageExpected = 0;
-            g_pageQueue.clear();
             feedback(service::complete_bounties());
         } else if (ImGui::GetTime() >= g_pageDeadline) {
             g_pageExpected = 0;

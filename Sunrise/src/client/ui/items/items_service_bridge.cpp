@@ -230,19 +230,33 @@ bool installed_bounty(std::uint16_t index,
            && bucket.arraySelector == data::inventory::buckets::ArraySelector::character;
 }
 
+std::vector<std::uint16_t>& installed_bounty_order() noexcept {
+    static std::vector<std::uint16_t> order;
+    return order;
+}
+
 Pages bounty_pages() noexcept {
     // Installed definitions are fixed once the packages load, and this walks every one of them.
-    // Caching on the definition count keeps it off the frame that draws the page controls.
+    // Caching the order on the definition count keeps both the count and the page off the frame.
     static Pages cached{};
     static std::size_t scanned{};
     const auto definitions = (std::min)(data::item_definition_count(), std::size_t{65536});
     if (definitions == scanned) return cached;
-    Pages pages{};
-    for (std::size_t i = 0; i < definitions; ++i) {
-        data::items::Definition item{};
-        data::items::details::Definition detail{};
-        pages.bounties += installed_bounty(static_cast<std::uint16_t>(i), item, detail);
+    auto& order = installed_bounty_order();
+    try {
+        order.clear();
+        for (std::size_t i = 0; i < definitions; ++i) {
+            data::items::Definition item{};
+            data::items::details::Definition detail{};
+            if (installed_bounty(static_cast<std::uint16_t>(i), item, detail))
+                order.push_back(item.definitionIndex);
+        }
+    } catch (...) {
+        order.clear();
+        return {};
     }
+    Pages pages{};
+    pages.bounties = order.size();
     pages.count = (pages.bounties + kBountyPageSize - 1) / kBountyPageSize;
     cached = pages;
     scanned = definitions;
@@ -250,30 +264,23 @@ Pages bounty_pages() noexcept {
 }
 
 std::vector<std::uint16_t> bounty_page(std::size_t page) noexcept {
-    std::vector<std::uint16_t> indices;
     const auto pages = bounty_pages();
-    if (page == 0 || page > pages.count) return indices;
-    const auto definitions = (std::min)(data::item_definition_count(), std::size_t{65536});
+    if (page == 0 || page > pages.count) return {};
+    const auto& order = installed_bounty_order();
     const auto first = (page - 1) * kBountyPageSize;
-    std::size_t ordinal = 0;
+    if (first >= order.size()) return {};
+    const auto count = (std::min)(kBountyPageSize, order.size() - first);
     try {
-        indices.reserve(kBountyPageSize);
-        for (std::size_t i = 0; i < definitions && ordinal < first + kBountyPageSize; ++i) {
-            data::items::Definition item{};
-            data::items::details::Definition detail{};
-            if (!installed_bounty(static_cast<std::uint16_t>(i), item, detail)) continue;
-            if (ordinal++ < first) continue;
-            indices.push_back(item.definitionIndex);
-        }
+        return std::vector<std::uint16_t>(order.begin() + static_cast<std::ptrdiff_t>(first),
+                                          order.begin()
+                                              + static_cast<std::ptrdiff_t>(first + count));
     } catch (...) {
         return {};
     }
-    return indices;
 }
 
-bool queue_bounty(std::uint16_t index) noexcept {
-    // One acquisition proves and saves one reward, which is the whole cost of a page step.
-    return server::bap::queue_item_acquisition(index, 1);
+bool queue_bounty_page(std::span<const std::uint16_t> indices) noexcept {
+    return server::bap::queue_item_acquisitions(indices);
 }
 
 Feedback page_bounty(const Entry& entry) noexcept {

@@ -59,6 +59,7 @@ Inventory inventory() noexcept {
                           item.definitionHash,
                           identity.definitionIndex,
                           item.mutationSerial,
+                          data::pursuits::complete(identity.definitionIndex, item.objectiveValues),
                           item.objectiveValues,
                           true,
                           ""};
@@ -73,12 +74,13 @@ Inventory inventory() noexcept {
                 }
                 output.bounties.push_back(held);
             }
-            // Inventory order follows acquisition and compaction, not presentation. Ordering by
-            // the serial the Client sorts a bucket with puts the grid in the order the Character
-            // screen shows, most recently acquired first.
+            // Inventory order follows acquisition and compaction, not presentation. The Character
+            // screen floats finished pursuits so the player knows to redeem them, and orders the
+            // rest by the serial it sorts a bucket with, most recently acquired first.
             std::sort(output.bounties.begin(),
                       output.bounties.end(),
                       [](const Held& left, const Held& right) noexcept {
+                          if (left.complete != right.complete) return left.complete;
                           return left.mutationSerial != right.mutationSerial
                                      ? left.mutationSerial > right.mutationSerial
                                      : left.instance > right.instance;

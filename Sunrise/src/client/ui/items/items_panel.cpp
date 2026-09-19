@@ -210,6 +210,8 @@ void bounty_lanes(const Entry& entry, const service::Held& held) {
         ImGui::BeginDisabled(!held.editable || !objective.resolved || !objective.itemProgress);
         ImGui::SetNextItemWidth((std::min)(145.0f, ImGui::GetContentRegionAvail().x));
         if (ImGui::InputInt("##value", &g_laneValues[i], 0, 0)) g_laneEdited[i] = true;
+        ImGui::SameLine();
+        ImGui::TextDisabled("/ %d", objective.completion);
         if (ImGui::GetContentRegionAvail().x >= 230) ImGui::SameLine();
         const bool apply = ImGui::Button("Set lane");
         ImGui::EndDisabled();
@@ -505,6 +507,27 @@ void selected_item(const std::shared_ptr<const Catalog>& data) {
         else
             ImGui::TextDisabled("Cannot be granted: %s", g_probe.text.data());
     }
+    // Where an item lands is derived from installed data, so the panel reports it rather than
+    // leaving the bucket a number to look up elsewhere.
+    {
+        namespace buckets = definitions::inventory::buckets;
+        buckets::Descriptor bucket{};
+        if (definitions::find_inventory_bucket_descriptor(entry.identity.bucketId, bucket)
+            && bucket.bucketId == entry.identity.bucketId) {
+            constexpr std::array<const char*, 3> kArrays{"character", "profile", "small profile"};
+            const auto selector = static_cast<std::size_t>(bucket.arraySelector);
+            ImGui::TextDisabled("Bucket %u, %s array, slots %u-%u, stack %d%s",
+                                static_cast<unsigned>(bucket.bucketId),
+                                selector < kArrays.size() ? kArrays[selector] : "unknown",
+                                static_cast<unsigned>(bucket.firstSlot),
+                                static_cast<unsigned>(bucket.firstSlot + bucket.slotCount),
+                                detail.maxStackSize,
+                                (bucket.policyFlags & buckets::kFifo) != 0 ? ", FIFO" : "");
+        } else {
+            ImGui::TextDisabled("Bucket %u, no installed descriptor",
+                                static_cast<unsigned>(entry.identity.bucketId));
+        }
+    }
     if (!entry.description.empty())
         ImGui::TextWrapped("Description: %s", entry.description.c_str());
     else
@@ -514,19 +537,6 @@ void selected_item(const std::shared_ptr<const Catalog>& data) {
     else
         objectives(entry);
 }
-/** @return True when every declared objective of one held pursuit has reached its value. */
-bool held_complete(const Entry& entry, const service::Held& held) noexcept {
-    if (entry.objectives.empty()) return false;
-    for (std::size_t lane = 0; lane < entry.objectives.size() && lane + 1 < held.values.size();
-         ++lane) {
-        const auto& objective = entry.objectives[lane];
-        if (!objective.resolved || !objective.itemProgress
-            || held.values[lane + 1] < objective.completion)
-            return false;
-    }
-    return true;
-}
-
 /** Held pursuits as the Character screen lays them out: four across, seven down, one page. */
 void held_grid(const Catalog& data) {
     constexpr std::size_t kColumns = 4, kRows = 7, kPerPage = kColumns * kRows;
@@ -570,7 +580,7 @@ void held_grid(const Catalog& data) {
             else
                 draw->AddRect(origin, corner, ImGui::GetColorU32(ImGuiCol_TextDisabled));
             // A complete pursuit is the one worth redeeming, so it reads at a glance.
-            if (entry && held_complete(*entry, held))
+            if (held.complete)
                 draw->AddRect(origin, corner, IM_COL32(120, 220, 120, 255), 0.0f, 0, 2.0f);
             if (g_heldSelection == held.instance)
                 draw->AddRect(

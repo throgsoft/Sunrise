@@ -20,6 +20,8 @@ struct Held {
     std::uint16_t index{};
     /** The Client orders a bucket's grid by this, so the module lists held pursuits by it too. */
     std::int32_t mutationSerial{};
+    /** Every declared objective has reached its value, so the pursuit is ready to redeem. */
+    bool complete{};
     std::array<std::int32_t, 8> values{};
     bool editable{};
     const char* reason{};

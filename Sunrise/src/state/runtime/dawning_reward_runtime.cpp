@@ -7,17 +7,18 @@
 
 #include "../build_data/runtime.h"
 #include "../investment/store_internal.h"
-#include "fifo_bucket_eviction.h"
 
 namespace sunrise::state::runtime::detail::dawning {
 namespace identity = account::inventory::dawning;
 namespace buckets = build_data::inventory::buckets;
 namespace {
 
-bool delivery_lane(std::uint32_t hash, buckets::Descriptor& bucket) noexcept {
+bool pickup_bucket(std::uint32_t hash, buckets::Descriptor& bucket) noexcept {
     build_data::items::Definition item{};
     build_data::items::details::Definition detail{};
-    return build_data::find_item_definition_hash(hash, item)
+    const auto index = identity::ingredient(hash);
+    return index < identity::kIngredientCount && hash == identity::kIngredients[index].pickupHash
+           && build_data::find_item_definition_hash(hash, item)
            && build_data::find_configured_item_detail(item.definitionIndex, detail)
            && detail.definitionHash == hash && detail.bucketId == item.bucketId
            && detail.instancedDefinitionState
@@ -27,12 +28,6 @@ bool delivery_lane(std::uint32_t hash, buckets::Descriptor& bucket) noexcept {
            && bucket.arraySelector == buckets::ArraySelector::character && bucket.slotCount > 0
            && bucket.slotCount <= account::inventory::kCharacterStackCapacity
            && bucket.policyFlags == (buckets::kFifo | buckets::kNoTransferOnEviction);
-}
-
-bool pickup_bucket(std::uint32_t hash, buckets::Descriptor& bucket) noexcept {
-    const auto index = identity::ingredient(hash);
-    return index < identity::kIngredientCount && hash == identity::kIngredients[index].pickupHash
-           && delivery_lane(hash, bucket);
 }
 
 bool pickup_space(const CharacterState& character,
@@ -74,13 +69,7 @@ bool insert_pickups(CharacterState& character,
                            - static_cast<std::int64_t>(character.nextInventorySerial))
         return false;
     std::size_t available{};
-    if (!pickup_space(character, bucket, available)) return false;
-    if (static_cast<std::size_t>(quantity) > available) {
-        (void)evict_oldest_stacks(
-            character, bucket, static_cast<std::size_t>(quantity) - available);
-        if (!pickup_space(character, bucket, available)) return false;
-    }
-    if (static_cast<std::size_t>(quantity) > available) return false;
+    if (!pickup_space(character, bucket, available) || quantity > available) return false;
     for (std::int32_t i = 0; i < quantity; ++i) {
         const auto slot = character.stacks.count++;
         lastSerial = static_cast<std::int32_t>(character.nextInventorySerial++);
@@ -257,6 +246,39 @@ bool stage_queued_pickups(std::uint64_t characterSoid, std::size_t& acquired) no
         acquired += count;
     }
     if (acquired == 0) return transaction.commit();
+    return account::valid(*current) && store::write_account(*current) && transaction.commit();
+}
+
+bool drain_pickups(std::uint64_t characterSoid, std::size_t& removed) noexcept {
+    namespace store = investment::store;
+    removed = 0;
+    store::Transaction transaction;
+    auto current = std::unique_ptr<AccountState>{new (std::nothrow) AccountState};
+    if (!transaction.ready() || !current || !store::read_account(*current)
+        || !account::valid(*current))
+        return false;
+    CharacterState* character = nullptr;
+    for (std::size_t i = 0; i < current->characterCount; ++i)
+        if (current->characters[i].soid == characterSoid) character = &current->characters[i];
+    if (!character || !character->selected) return false;
+    auto& rows = character->stacks;
+    std::size_t retained = 0;
+    for (std::size_t i = 0; i < rows.count; ++i) {
+        const auto& row = rows.values[i];
+        const auto ingredient = identity::ingredient(row.definitionHash);
+        if (ingredient < identity::kIngredientCount
+            && row.definitionHash == identity::kIngredients[ingredient].pickupHash) {
+            buckets::Descriptor bucket{};
+            if (!pickup_bucket(row.definitionHash, bucket) || row.quantity != 1) return false;
+            ++removed;
+        } else {
+            rows.values[retained++] = row;
+        }
+    }
+    if (removed == 0) return transaction.commit();
+    std::fill(
+        rows.values.begin() + retained, rows.values.end(), account::inventory::CharacterStack{});
+    rows.count = retained;
     return account::valid(*current) && store::write_account(*current) && transaction.commit();
 }
 } // namespace sunrise::state::runtime::detail::dawning

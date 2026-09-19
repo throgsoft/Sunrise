@@ -2244,8 +2244,6 @@
     <ClCompile Include="src\state\runtime\dawning_reward_runtime.cpp" />
     <ClCompile Include="src\server\bap\encrypted\queuez\dawning_pickup_release.cpp" />
     <ClInclude Include="src\server\bap\encrypted\queuez\dawning_pickup_release.h" />
-    <ClCompile Include="src\server\bap\encrypted\queuez\synthesizer_family4_refresh.cpp" />
-    <ClInclude Include="src\server\bap\encrypted\queuez\synthesizer_family4_refresh.h" />
     <ClInclude Include="src\state\runtime\dawning_reward_runtime.h" />
   </ItemGroup>
   <ItemGroup>

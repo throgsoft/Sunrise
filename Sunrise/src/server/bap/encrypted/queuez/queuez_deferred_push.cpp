@@ -18,10 +18,12 @@
 #include "dawning_pickup_release.h"
 #include "queuez_state_validation.h"
 #include "state/investment/store_internal.h"
-#include "synthesizer_family4_refresh.h"
 
 namespace sunrise::server::bap::encrypted {
 namespace {
+
+/** Allow the preceding predicate push to settle before refreshing its dependent views. */
+constexpr std::uint64_t kCraftingRefreshDelayMs = 100;
 
 /**
  * Whether an acquired item is one a crafting container derives its plugs from.
@@ -619,14 +621,9 @@ selected_character(const state::AccountState& account) noexcept {
 }
 
 /**
- * Publishes current account unlock overrides without scheduling a Family-4 rebuild.
- * Retain the arm until the frame fits and is published, including on a transient failure.
- * @param session Auth, nonce and queuez state owned by the connection.
- * @param scratch Transform buffers owned by the lock.
- * @param response Whole-frame storage owned by the caller.
- * @param written Gets the encoded notification size in bytes.
- * @param touchesScratch Set before any scratch buffer is used.
- * @return True when the family-five snapshot is published.
+ * Publishes unlock predicates before scheduling the dependent account and item refresh.
+ * Keep the
+ * pending refresh on failure so the client cannot miss a predicate change.
  */
 [[nodiscard]] bool consume_family5_refresh(Session& session,
                                            Scratch& scratch,
@@ -678,7 +675,51 @@ selected_character(const state::AccountState& account) noexcept {
                           static_cast<unsigned>(publishedMoteMask));
     }
     session.queuez.publishedMoteMask = publishedMoteMask;
-    arm_synthesizer_family4_refresh(session.synthesizerFamily4Refresh, GetTickCount64());
+    session.craftingRefreshDueTick = GetTickCount64() + kCraftingRefreshDelayMs;
+    return true;
+}
+
+/** Republishes the account banks and their item residents together after predicate changes. */
+[[nodiscard]] bool consume_crafting_refresh(Session& session,
+                                            Scratch& scratch,
+                                            std::span<std::byte> response,
+                                            std::size_t& written,
+                                            bool& touchesScratch) noexcept {
+    const auto now = GetTickCount64();
+    if (session.craftingRefreshDueTick == 0 || now < session.craftingRefreshDueTick
+        || session.family5RefreshArmed || session.accountResyncArmed
+        || now < session.acquisitionPresentationUntilTick || !session.queuez.family4Active) {
+        return false;
+    }
+    // Retry failures at the settling interval without consuming the pending refresh.
+    session.craftingRefreshDueTick = now + kCraftingRefreshDelayMs;
+    auto nextSendNonce = session.sendNonce;
+    queuez::SessionState after{};
+    std::size_t framedSize = 0;
+    touchesScratch = true;
+    if (!push::append_account_resync_notification(scratch,
+                                                  session.queuez,
+                                                  active_acquisition_presentation_rows(session),
+                                                  session.sessionKey,
+                                                  nextSendNonce,
+                                                  scratch.framed,
+                                                  framedSize,
+                                                  after)
+        || framedSize == 0 || framedSize > response.size()) {
+        return false;
+    }
+    std::copy_n(scratch.framed.begin(), framedSize, response.begin());
+    written = framedSize;
+    session.sendNonce = nextSendNonce;
+    session.queuez = after;
+    session.craftingRefreshDueTick = 0;
+    core::log::writef(core::log::Channel::server,
+                      core::log::Level::info,
+                      "ev=crafting_visibility stage=account_refresh result=published "
+                      "family4_version=%d family5_version=%d residents=%zu",
+                      after.family4Version,
+                      after.family5Version,
+                      after.family4ResidentCount);
     return true;
 }
 
@@ -805,12 +846,7 @@ bool consume_deferred(Session& session,
     if (consume_family5_refresh(session, scratch, response, written, touchesScratch)) {
         return true;
     }
-    if (consume_synthesizer_family4_refresh(session,
-                                            session.synthesizerFamily4Refresh,
-                                            scratch,
-                                            response,
-                                            written,
-                                            touchesScratch)) {
+    if (consume_crafting_refresh(session, scratch, response, written, touchesScratch)) {
         return true;
     }
     if (consume_artifact_family4_refresh(session, scratch, response, written, touchesScratch)) {

@@ -23,7 +23,6 @@
 #include "activity_authority_query_owner.h"
 #include "activity_authority_reset_owner.h"
 #include "encrypted/queuez/definition.h"
-#include "encrypted/queuez/synthesizer_family4_refresh.h"
 #include "runtime.h"
 
 namespace sunrise::server::bap {
@@ -359,7 +358,7 @@ struct Session {
     bool authenticated{};
     /** Publishes predicates before their item-view companions. */
     bool family5RefreshArmed{};
-    encrypted::SynthesizerFamily4Refresh synthesizerFamily4Refresh{};
+    std::uint64_t craftingRefreshDueTick{};
     bool artifactFamily4RefreshArmed{};
     std::uint64_t artifactFamily4RefreshDueTick{};
     state::ArtifactResetResult artifactResetRefresh{};

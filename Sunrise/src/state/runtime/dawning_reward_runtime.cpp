@@ -270,7 +270,7 @@ bool drain_pickups(std::uint64_t characterSoid, std::size_t& removed) noexcept {
     for (std::size_t i = 0; i < rows.count; ++i) {
         const auto& row = rows.values[i];
         buckets::Descriptor bucket{};
-        if (delivery_lane(row.definitionHash, bucket) && row.quantity == 1) {
+        if (pickup_bucket(row.definitionHash, bucket) && row.quantity == 1) {
             ++removed;
         } else {
             rows.values[retained++] = row;

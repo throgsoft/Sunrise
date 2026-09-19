@@ -739,7 +739,8 @@ bool consume_deferred(Session& session,
         return true;
     }
     WorldRewardRequest reward{};
-    if (session.queuez.family4Active && bap::current_world_reward(reward)) {
+    if (session.queuez.family4Active && GetTickCount64() >= session.worldRewardRetryDueTick
+        && bap::current_world_reward(reward)) {
         bool published = false;
         switch (reward.kind) {
         case WorldRewardKind::item:
@@ -752,8 +753,10 @@ bool consume_deferred(Session& session,
             break;
         }
         if (published) {
+            session.worldRewardRetryDueTick = 0;
             return true;
         }
+        session.worldRewardRetryDueTick = GetTickCount64() + bap::kWorldRewardRetryMs;
     }
     if (consume_seasonal_experience_presentation(
             session, scratch, response, written, touchesScratch)) {

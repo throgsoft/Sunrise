@@ -56,7 +56,7 @@ struct Pages {
     std::size_t bounties{};
     std::size_t count{};
 };
-inline constexpr std::size_t kBountyPageSize = 56;
+inline constexpr std::size_t kBountyPageSize = 40;
 [[nodiscard]] Pages bounty_pages() noexcept;
 
 /**

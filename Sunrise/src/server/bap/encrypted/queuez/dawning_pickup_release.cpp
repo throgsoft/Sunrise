@@ -95,10 +95,14 @@ bool consume_dawning_pickup_release(Session& session,
     if (!session.queuez.family4Active || session.queuez.family4Version == 0
         || now < session.dawningPickupSweepDueTick)
         return false;
-    // Allow the observer to copy acquisition data before the separate empty-row revision.
-    // Retained row overlays still require the longer presentation hold. Recheck the live
-    // deadline rather than caching it: another action can clear an overlay before it expires.
-    if (now < bap::acquisition_queue_deadline()) return false;
+    // The grace exists so the observer can copy the rows this sweep published, so it is scoped to
+    // this peer's own last publication. A global deadline would let any unrelated acquisition
+    // defer the flush for as long as acquisitions keep arriving. A retained row overlay still
+    // owns the longer presentation window.
+    if (now < session.dawningPickupHoldUntilTick
+        || (session.acquisitionPresentationRowCount != 0
+            && now < session.acquisitionPresentationUntilTick))
+        return false;
     session.dawningPickupSweepDueTick = now + 1'000;
     state::investment::store::Transaction transaction;
     auto account = std::unique_ptr<state::AccountState>{new (std::nothrow) state::AccountState};
@@ -142,6 +146,7 @@ bool consume_dawning_pickup_release(Session& session,
     session.queuez = after;
     // Send the empty revision separately before reusing its slots for the next queued batch.
     session.dawningPickupSweepDueTick = now;
+    session.dawningPickupHoldUntilTick = acquired != 0 ? now + bap::kAcquisitionQueueGraceMs : 0;
     if (acquired != 0) bap::arm_acquisition_presentation_hold(session);
     bap::arm_account_resync_elsewhere(session);
     const auto nextEligible = bap::acquisition_queue_deadline();

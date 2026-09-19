@@ -519,10 +519,24 @@ void selected_item(const std::shared_ptr<const Catalog>& data) {
     else
         objectives(entry);
 }
-/** Held pursuits as the Character screen lays them out: four across, seven down, one page. */
+constexpr std::size_t kHeldColumns = 4, kHeldRows = 7;
+constexpr std::size_t kHeldPerPage = kHeldColumns * kHeldRows;
+constexpr float kHeldTile = 72.0f;
+
+/** @return Rows the current page actually fills, so the grid claims no empty space. */
+std::size_t held_rows_used() noexcept {
+    const auto total = g_inventory.bounties.size();
+    const auto first = static_cast<std::size_t>((std::max)(g_heldPage, 1) - 1) * kHeldPerPage;
+    const auto shown = first >= total ? 0 : (std::min)(total - first, kHeldPerPage);
+    const std::size_t used = (shown + kHeldColumns - 1) / kHeldColumns;
+    return used == 0 ? std::size_t{1} : used;
+}
+
+/** Held pursuits as the Character screen lays them out: four across, one page. */
 void held_grid(const Catalog& data) {
-    constexpr std::size_t kColumns = 4, kRows = 7, kPerPage = kColumns * kRows;
-    constexpr float kTile = 72.0f;
+    constexpr std::size_t kColumns = kHeldColumns, kPerPage = kHeldPerPage;
+    constexpr float kTile = kHeldTile;
+    const auto kRows = held_rows_used();
     const auto total = g_inventory.bounties.size();
     const int lastPage = (std::max)(1, static_cast<int>((total + kPerPage - 1) / kPerPage));
     g_heldPage = (std::clamp)(g_heldPage, 1, lastPage);
@@ -597,21 +611,8 @@ void held_detail(const Catalog& data) {
     ImGui::TextDisabled("Select a held pursuit to edit its objective lanes.");
 }
 
-void bounties_tab(const Catalog& data) {
-    if (!g_inventory.ready) {
-        ImGui::TextWrapped("Select a character to view held bounties.");
-        return;
-    }
-    ImGui::Text("%zu held pursuits", g_inventory.bounties.size());
-    ImGui::SameLine();
-    if (ImGui::Button("Refresh")) refresh();
-    ImGui::SameLine();
-    ImGui::BeginDisabled(g_inventory.bounties.empty());
-    if (ImGui::Button("Complete all held")) feedback(service::complete_bounties());
-    ImGui::EndDisabled();
-    const auto pages = service::bounty_pages();
-    const int lastPage = (std::max)(1, static_cast<int>(pages.count));
-    g_bountyPage = (std::clamp)(g_bountyPage, 1, lastPage);
+/** Installed page selection and the page grant, drawn beside the grid. */
+void bounty_page_controls(const service::Pages& pages, int lastPage) {
     ImGui::BeginDisabled(g_bountyPage <= 1);
     if (ImGui::ArrowButton("##bounty_previous", ImGuiDir_Left)) --g_bountyPage;
     ImGui::EndDisabled();
@@ -651,19 +652,45 @@ void bounties_tab(const Catalog& data) {
                           pages.bounties,
                           service::kBountyPageSize,
                           g_inventory.unresolved);
+}
+
+void bounties_tab(const Catalog& data) {
+    if (!g_inventory.ready) {
+        ImGui::TextWrapped("Select a character to view held bounties.");
+        return;
+    }
+    const auto pages = service::bounty_pages();
+    const int lastPage = (std::max)(1, static_cast<int>(pages.count));
+    g_bountyPage = (std::clamp)(g_bountyPage, 1, lastPage);
     const auto& style = ImGui::GetStyle();
     const float available = ImGui::GetContentRegionAvail().x;
-    constexpr float kDetailWidth = 360.0f;
-    const bool sideBySide = available > kDetailWidth + 340.0f;
-    const float height = (std::max)(200.0f, ImGui::GetContentRegionAvail().y);
-    const float width =
-        sideBySide ? (std::max)(200.0f, available - kDetailWidth - style.ItemSpacing.x) : 0.0f;
-    if (ImGui::BeginChild("##held_grid", {width, height}, ImGuiChildFlags_Borders)) held_grid(data);
+    // The grid claims exactly the tiles it draws; everything else belongs to the detail column.
+    const float gridWidth = kHeldColumns * kHeldTile + (kHeldColumns - 1) * style.ItemSpacing.x
+                            + style.WindowPadding.x * 2.0f;
+    const float gridHeight = held_rows_used() * (kHeldTile + style.ItemSpacing.y)
+                             + ImGui::GetFrameHeightWithSpacing() + style.WindowPadding.y * 2.0f;
+    const bool sideBySide = available > gridWidth + 320.0f;
+    const float height =
+        sideBySide ? (std::max)(gridHeight, ImGui::GetContentRegionAvail().y) : gridHeight;
+    if (ImGui::BeginChild(
+            "##held_grid", {sideBySide ? gridWidth : 0.0f, gridHeight}, ImGuiChildFlags_Borders))
+        held_grid(data);
     ImGui::EndChild();
     if (sideBySide) {
         ImGui::SameLine(0, style.ItemSpacing.x);
         ImGui::BeginChild("##held_detail", {0, height}, ImGuiChildFlags_Borders);
     }
+    // Page and completion controls sit beside the grid rather than above it, so the tiles keep
+    // the vertical space.
+    ImGui::Text("%zu held", g_inventory.bounties.size());
+    ImGui::SameLine();
+    if (ImGui::Button("Refresh")) refresh();
+    ImGui::SameLine();
+    ImGui::BeginDisabled(g_inventory.bounties.empty());
+    if (ImGui::Button("Complete all held")) feedback(service::complete_bounties());
+    ImGui::EndDisabled();
+    bounty_page_controls(pages, lastPage);
+    ImGui::Separator();
     held_detail(data);
     if (sideBySide) ImGui::EndChild();
 }
@@ -740,7 +767,24 @@ void buckets_tab(const Catalog& data) {
         for (const auto& candidate : data.entries)
             if (candidate.identity.definitionIndex == item.index) entry = &candidate;
         ImGui::PushID(static_cast<int>(i));
-        ImGui::Text("%-34s", entry && !entry->name.empty() ? entry->name.c_str() : "(unnamed)");
+        // The icon cache holds fewer slots than the largest bucket holds rows, so asking for
+        // every one would evict the icons drawn earlier in the same frame.
+        constexpr std::size_t kBucketIconBudget = 48;
+        const auto texture =
+            entry && i < kBucketIconBudget ? icons::get(entry->iconIndex) : ImTextureID_Invalid;
+        const float side = ImGui::GetFrameHeight() * 1.6f;
+        const ImVec2 origin = ImGui::GetCursorScreenPos();
+        ImGui::Dummy({side, side});
+        if (texture != ImTextureID_Invalid)
+            ImGui::GetWindowDrawList()->AddImage(
+                ImTextureRef(texture), origin, {origin.x + side, origin.y + side});
+        else
+            ImGui::GetWindowDrawList()->AddRect(origin,
+                                                {origin.x + side, origin.y + side},
+                                                ImGui::GetColorU32(ImGuiCol_TextDisabled));
+        ImGui::SameLine();
+        ImGui::BeginGroup();
+        ImGui::Text("%s", entry && !entry->name.empty() ? entry->name.c_str() : "(unnamed)");
         ImGui::SameLine();
         ImGui::TextDisabled("idx=%u serial=%d%s",
                             unsigned(item.index),
@@ -764,6 +808,7 @@ void buckets_tab(const Catalog& data) {
         ImGui::EndDisabled();
         ImGui::SameLine();
         ImGui::TextDisabled("of %d", (std::max)(1, item.maxStack));
+        ImGui::EndGroup();
         ImGui::PopID();
     }
     ImGui::EndChild();

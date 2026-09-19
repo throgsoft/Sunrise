@@ -1,6 +1,9 @@
+#include <algorithm>
+#include <array>
 #include <memory>
 #include <mutex>
 #include <new>
+#include <span>
 
 #include "../../state/build_data/runtime.h"
 #include "../../state/runtime/runtime.h"
@@ -34,10 +37,10 @@ namespace {
  * read first, so one that can never commit would hold every reward behind it. This prepares
  * through the same function the deferred pump commits with, and discards the result.
  *
- * The prepare judges one copy against the committed account, so a request for several copies
- * proves only the first. The difference the rest can make is capacity, and a reward the queue
- * holds for want of room commits by itself once room exists. A definition the acquisition path
- * refuses outright never clears, and that is what this has to catch.
+ * Several copies are proven together, not one at a time. The reward preparer threads one
+ * working account image through every row, so it sees what the earlier copies did: an item the
+ * account may hold only once refuses its second copy here rather than in the queue, where it
+ * would never commit and would hold every later reward behind it.
  */
 [[nodiscard]] bool
 commits(std::uint16_t itemDefinitionIndex, std::int32_t quantity, WorldRewardKind kind) noexcept {
@@ -48,9 +51,15 @@ commits(std::uint16_t itemDefinitionIndex, std::int32_t quantity, WorldRewardKin
                && state::prepare_profile_item_acquisition_for_item(
                    itemDefinitionIndex, quantity, *probe);
     }
-    const std::unique_ptr<state::PendingItemAcquisition> probe(new (std::nothrow)
-                                                                   state::PendingItemAcquisition);
-    return probe && state::prepare_item_acquisition_for_item(itemDefinitionIndex, *probe);
+    if (quantity > static_cast<std::int32_t>(state::kRecordRewardGrantCapacity)) return false;
+    const std::unique_ptr<state::PendingRecordRewardGrant> probe(
+        new (std::nothrow) state::PendingRecordRewardGrant);
+    if (!probe) return false;
+    const auto count = static_cast<std::size_t>(quantity);
+    std::array<state::DirectRecordReward, state::kRecordRewardGrantCapacity> rows{};
+    std::fill_n(rows.begin(), count, state::DirectRecordReward{itemDefinitionIndex, 1});
+    return state::prepare_record_reward_grant(
+        std::span(rows).first(count), state::kUnclaimedRecordIndex, *probe);
 }
 
 } // namespace

@@ -5,6 +5,7 @@
 #include <new>
 #include <span>
 
+#include "../../core/logging/log.h"
 #include "../../state/build_data/runtime.h"
 #include "../../state/investment/store_internal.h"
 #include "../../state/runtime/runtime.h"
@@ -110,8 +111,18 @@ bool queue_item_acquisitions(std::span<const std::uint16_t> itemDefinitionIndice
 
 bool queue_item_acquisition(std::uint16_t itemDefinitionIndex, std::int32_t quantity) noexcept {
     WorldRewardKind kind{};
-    if (quantity < 1 || !reward_kind(itemDefinitionIndex, kind)
-        || !commits(itemDefinitionIndex, quantity, kind)) {
+    const char* refused = quantity < 1                                    ? "quantity"
+                          : !reward_kind(itemDefinitionIndex, kind)       ? "bucket"
+                          : !commits(itemDefinitionIndex, quantity, kind) ? "policy"
+                                                                          : nullptr;
+    if (refused != nullptr) {
+        core::log::writef(core::log::Channel::server,
+                          core::log::Level::warn,
+                          "ev=item_acquisition stage=queue result=fail reason=%s item=%u "
+                          "quantity=%d",
+                          refused,
+                          static_cast<unsigned>(itemDefinitionIndex),
+                          quantity);
         return false;
     }
     // Arming reads the peer table and may settle the reward, so the session lock covers both.

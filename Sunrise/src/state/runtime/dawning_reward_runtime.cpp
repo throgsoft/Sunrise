@@ -201,12 +201,25 @@ bool stage_queued_pickups(std::uint64_t characterSoid, std::size_t& acquired) no
     for (std::size_t i = 0; i < current->characterCount; ++i)
         if (current->characters[i].soid == characterSoid) character = &current->characters[i];
     if (!character || !character->selected) return false;
+    // The rows this pass replaces were named by the frame that published them, so they are
+    // dropped in the same transaction that inserts their successors. One revision carries both,
+    // which is what the bucket's first in, first out policy describes.
+    std::size_t retained = 0, delivered = 0;
     for (std::size_t i = 0; i < character->stacks.count; ++i) {
-        const auto& row = character->stacks.values[i];
+        const auto row = character->stacks.values[i];
         const auto index = identity::ingredient(row.definitionHash);
         if (index < identity::kIngredientCount
-            && row.definitionHash == identity::kIngredients[index].pickupHash)
-            return true; // An empty-row revision must precede reuse of these FIFO slots.
+            && row.definitionHash == identity::kIngredients[index].pickupHash) {
+            ++delivered;
+            continue;
+        }
+        character->stacks.values[retained++] = row;
+    }
+    if (delivered != 0) {
+        std::fill(character->stacks.values.begin() + retained,
+                  character->stacks.values.end(),
+                  account::inventory::CharacterStack{});
+        character->stacks.count = retained;
     }
     std::size_t capacity = character->stacks.values.size() - character->stacks.count;
     while (acquired < capacity) {
@@ -245,40 +258,8 @@ bool stage_queued_pickups(std::uint64_t characterSoid, std::size_t& acquired) no
         }
         acquired += count;
     }
-    if (acquired == 0) return transaction.commit();
+    if (acquired == 0 && delivered == 0) return transaction.commit();
     return account::valid(*current) && store::write_account(*current) && transaction.commit();
 }
 
-bool drain_pickups(std::uint64_t characterSoid, std::size_t& removed) noexcept {
-    namespace store = investment::store;
-    removed = 0;
-    store::Transaction transaction;
-    auto current = std::unique_ptr<AccountState>{new (std::nothrow) AccountState};
-    if (!transaction.ready() || !current || !store::read_account(*current)
-        || !account::valid(*current))
-        return false;
-    CharacterState* character = nullptr;
-    for (std::size_t i = 0; i < current->characterCount; ++i)
-        if (current->characters[i].soid == characterSoid) character = &current->characters[i];
-    if (!character || !character->selected) return false;
-    auto& rows = character->stacks;
-    std::size_t retained = 0;
-    for (std::size_t i = 0; i < rows.count; ++i) {
-        const auto& row = rows.values[i];
-        const auto ingredient = identity::ingredient(row.definitionHash);
-        if (ingredient < identity::kIngredientCount
-            && row.definitionHash == identity::kIngredients[ingredient].pickupHash) {
-            buckets::Descriptor bucket{};
-            if (!pickup_bucket(row.definitionHash, bucket) || row.quantity != 1) return false;
-            ++removed;
-        } else {
-            rows.values[retained++] = row;
-        }
-    }
-    if (removed == 0) return transaction.commit();
-    std::fill(
-        rows.values.begin() + retained, rows.values.end(), account::inventory::CharacterStack{});
-    rows.count = retained;
-    return account::valid(*current) && store::write_account(*current) && transaction.commit();
-}
 } // namespace sunrise::state::runtime::detail::dawning

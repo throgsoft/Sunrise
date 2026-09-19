@@ -553,11 +553,6 @@ void arm_account_resync_everywhere() noexcept;
 /** Holds this peer's full Family-4 refreshes until its acquisition flyout has finished. */
 void arm_acquisition_presentation_hold(Session& session) noexcept;
 
-/** Queue admission across peers: short observation grace without retained rows, full
- * presentation hold with a row overlay. Does not shorten ordinary refresh protection.
- * Caller owns the session lock; this is scheduling, not a client consumption ACK. */
-[[nodiscard]] std::uint64_t acquisition_queue_deadline() noexcept;
-
 /** Backoff after a queued reward refuses. A retained reward whose refusal is durable, such as a
  * full authored bucket that cannot spill to the Postmaster, would otherwise copy a whole account
  * image on every pump and starve every other deferred lane. */

@@ -107,46 +107,9 @@ read_sale_cost(std::span<const std::byte> blob, std::size_t at, domain::SaleRow&
     if (cost.count == 0) {
         return true;
     }
-    value.costCount = cost.count;
-    if (cost.classId != domain::kSaleCostRowClass
-        || !read(blob, cost.base + kSaleCostItemIndexOffset, value.costItemIndex)
-        || !read(blob, cost.base + kSaleCostQuantityOffset, value.costQuantity))
-        return false;
-    std::uint64_t firstProgram{}, secondProgram{};
-    std::uint32_t scale{}, reserved{};
-    if (!read(blob, cost.base + 8, firstProgram) || !read(blob, cost.base + 24, secondProgram)
-        || !read(blob, cost.base + 40, scale) || !read(blob, cost.base + 44, reserved))
-        return false;
-    // The unchanged price form has empty adjustments and the full 100000 scale. Dynamic
-    // bundle/discount prices retain their first cost for existing vendors, but Store refuses.
-    value.costIsConstant = cost.count == 1 && firstProgram == 0 && secondProgram == 0
-                           && scale == 100000 && reserved == 0;
-    return true;
-}
-
-/** Restricts Store authorization to an absent gate or one complete NOT FLAG program. */
-[[nodiscard]] bool read_purchase_gate(std::span<const std::byte> blob,
-                                      std::size_t at,
-                                      domain::SaleRow& value) noexcept {
-    ArrayView alternatives{};
-    if (!read_array(blob, at + 8, 16, alternatives)) return false;
-    if (alternatives.count == 0) {
-        value.purchaseGate = domain::PurchaseGate::unrestricted;
-        return true;
-    }
-    if (alternatives.classId != 0x80807D2FU || alternatives.count != 1) return true;
-    ArrayView program{};
-    if (!read_array(blob, alternatives.base, 8, program)) return false;
-    if (program.classId != 0x80807D31U || program.count != 2) return true;
-    std::uint32_t first{}, operand{}, second{}, unused{};
-    if (!read(blob, program.base, first) || !read(blob, program.base + 4, operand)
-        || !read(blob, program.base + 8, second) || !read(blob, program.base + 12, unused))
-        return false;
-    if (first == 1 && operand < 0xFFFFU && second == 2 && unused == 0) {
-        value.purchaseGate = domain::PurchaseGate::notOwned;
-        value.purchaseUnlockSlot = static_cast<std::uint16_t>(operand);
-    }
-    return true;
+    return cost.classId == domain::kSaleCostRowClass
+           && read(blob, cost.base + kSaleCostItemIndexOffset, value.costItemIndex)
+           && read(blob, cost.base + kSaleCostQuantityOffset, value.costQuantity);
 }
 
 /**
@@ -191,29 +154,19 @@ read_index(const reader::Source& source, reader::Scratch& scratch, Storage& stor
 [[nodiscard]] bool read_sale_rows(std::span<const std::byte> blob,
                                   const domain::Definition& definition,
                                   Storage& storage) noexcept {
-    if (definition.saleCount > domain::kSaleRowCapacity - storage.saleRowCount
-        || (definition.saleCount != 0 && definition.saleRowClass != domain::kSaleRowClass)) {
+    if (definition.saleCount > domain::kSaleRowCapacity - storage.saleRowCount) {
         return false;
     }
     for (std::size_t row = 0; row < definition.saleCount; ++row) {
         const std::size_t at = definition.saleRowBase + (row * domain::kSaleRowStride);
         domain::SaleRow& value = storage.saleRows[storage.saleRowCount + row];
         value = {};
-        std::uint8_t refundPolicy{};
         if (!read(blob, at + kSaleItemIndexOffset, value.itemIndex)
-            || !read(blob, at + 76, value.quantity)
             || !read(blob, at + kSaleSecondaryItemOffset, value.secondaryItemIndex)
             || !read(blob, at + kSaleCategoryIndexOffset, value.categoryIndex)
-            || !read(blob, at + kSaleRefundPolicyOffset, refundPolicy)
-            || !domain::valid_refund_policy(static_cast<domain::RefundPolicy>(refundPolicy))
             || !read_sale_cost(blob, at, value)) {
             return false;
         }
-        value.refundPolicy = static_cast<domain::RefundPolicy>(refundPolicy);
-        // Purchase predicates are only consumed by Store. Do not expand general-vendor
-        // extraction's rejection boundary while their existing transaction paths are retained.
-        if (definition.definitionHash == 3361454721U && !read_purchase_gate(blob, at, value))
-            return false;
     }
     storage.saleRowCount += definition.saleCount;
     return true;

@@ -30,8 +30,6 @@ inline constexpr std::size_t kSaleCostQuantityOffset = 4;
 inline constexpr std::size_t kSaleItemIndexOffset = 70;
 /** Sale row vendor category index. */
 inline constexpr std::size_t kSaleCategoryIndexOffset = 100;
-/** Sale row raw refund policy byte. */
-inline constexpr std::size_t kSaleRefundPolicyOffset = 154;
 /** Sale row secondary item-definition index. */
 inline constexpr std::size_t kSaleSecondaryItemOffset = 176;
 /** A category row names its item by definition hash at this offset. */

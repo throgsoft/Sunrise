@@ -91,7 +91,7 @@ Table<InstalledRow, kInstalledRowCapacity> g_installedRows;
  * Checks the sale rows one definition owns.
  * @param definition Owning definition.
  * @param saleRows Complete flat sale bank.
- * @return True when every row names a category or none, and has a known refund policy.
+ * @return True when every row names a category of this definition, or none at all.
  */
 [[nodiscard]] bool canonical_sale_rows(const Definition& definition,
                                        std::span<const SaleRow> saleRows) noexcept {
@@ -101,7 +101,7 @@ Table<InstalledRow, kInstalledRowCapacity> g_installedRows;
         const bool selects =
             value.categoryIndex == kAbsentCategoryIndex
             || (value.categoryIndex >= 0 && value.categoryIndex < definition.installedCount);
-        if (!selects || !valid_refund_policy(value.refundPolicy)) {
+        if (!selects) {
             return false;
         }
     }

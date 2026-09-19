@@ -90,30 +90,18 @@ bool decode(const VendorDefinitionRecord& record, vendors::Definition& value) no
 /** Encodes one vendor sale row. */
 bool encode(const vendors::SaleRow& value, VendorSaleRowRecord& record) noexcept {
     record = {};
-    if (!vendors::valid_refund_policy(value.refundPolicy)) {
-        return false;
-    }
     record.itemIndex = value.itemIndex;
     record.secondaryItemIndex = value.secondaryItemIndex;
     record.categoryIndex = value.categoryIndex;
     record.costQuantity = value.costQuantity;
     record.costItemIndex = value.costItemIndex;
-    record.quantity = value.quantity;
-    record.costCount = value.costCount;
-    record.purchaseUnlockSlot = value.purchaseUnlockSlot;
-    record.costIsConstant = value.costIsConstant ? 1 : 0;
-    record.purchaseGate = static_cast<std::uint8_t>(value.purchaseGate);
-    record.refundPolicy = static_cast<std::uint8_t>(value.refundPolicy);
     return true;
 }
 
 /** Decodes one vendor sale row. */
 bool decode(const VendorSaleRowRecord& record, vendors::SaleRow& value) noexcept {
     value = {};
-    if (record.reserved != decltype(record.reserved){} || record.reservedStore != 0
-        || record.costIsConstant > 1
-        || !vendors::valid_refund_policy(static_cast<vendors::RefundPolicy>(record.refundPolicy))
-        || record.purchaseGate > static_cast<std::uint8_t>(vendors::PurchaseGate::notOwned)) {
+    if (record.reserved != decltype(record.reserved){}) {
         return false;
     }
     value.itemIndex = record.itemIndex;
@@ -121,12 +109,6 @@ bool decode(const VendorSaleRowRecord& record, vendors::SaleRow& value) noexcept
     value.categoryIndex = record.categoryIndex;
     value.costQuantity = record.costQuantity;
     value.costItemIndex = record.costItemIndex;
-    value.quantity = record.quantity;
-    value.costCount = record.costCount;
-    value.purchaseUnlockSlot = record.purchaseUnlockSlot;
-    value.costIsConstant = record.costIsConstant != 0;
-    value.purchaseGate = static_cast<vendors::PurchaseGate>(record.purchaseGate);
-    value.refundPolicy = static_cast<vendors::RefundPolicy>(record.refundPolicy);
     return true;
 }
 

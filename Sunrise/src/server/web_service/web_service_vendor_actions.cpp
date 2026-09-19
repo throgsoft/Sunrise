@@ -757,8 +757,8 @@ void acquire_quest(const middleware::web_service::Message& message, Outcome& out
 
 /**
  * Prepares one opcode-901 vendor purchase, for any Tower vendor.
- * Store settles its package sale price through the prepared purchase transaction. Other rows
- * retain their bounty, exchange, or Collections behavior.
+ * The sale row names an item-definition index, so this hands over to the Collections grant.
+ * Only a recycle row charges: an ordinary row's cost is read but not yet spent.
  */
 void purchase_item(const middleware::web_service::Message& message, Outcome& outcome) noexcept {
     namespace purchase = middleware::web_service::messages::opcode901;

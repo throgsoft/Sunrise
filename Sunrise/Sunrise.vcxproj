@@ -2226,7 +2226,6 @@
     <ClInclude Include="src\client\content\items\packages\package_objective_build.h" />
     <ClCompile Include="src\core\runtime\wall_clock.cpp" />
     <ClInclude Include="src\core\runtime\wall_clock.h" />
-    <ClInclude Include="src\server\bap\encrypted\activity_message\receipts\incident_world_reward_policy.h" />
     <ClInclude Include="src\state\account\inventory\dawning_oven_state.h" />
     <ClInclude Include="src\state\build_data\objectives\definition.h" />
     <ClCompile Include="src\state\build_data\objectives\objective_build_data_runtime.cpp" />

@@ -50,8 +50,6 @@ enum class Clear : std::uint8_t { weapons, armor, bounties, engrams, seasonPass 
                                 std::uint8_t lane,
                                 std::int32_t value) noexcept;
 [[nodiscard]] Feedback complete_bounties() noexcept;
-/** Grants or reuses one installed bounty and completes it, ready to redeem at its vendor. */
-[[nodiscard]] Feedback page_bounty(const Entry& entry) noexcept;
 
 /** Installed bounties, in definition order, split into fixed pages. */
 struct Pages {

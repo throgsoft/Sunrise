@@ -263,15 +263,6 @@ bool queue_bounty_page(std::span<const std::uint16_t> indices) noexcept {
     return server::bap::queue_item_acquisitions(indices);
 }
 
-Feedback page_bounty(const Entry& entry) noexcept {
-    if (!entry.bounty) return report({false, 0, "Not an installed bounty"});
-    const auto grant = state::investment_edit::grant_item(
-        entry.identity.definitionIndex, 1, entry.identity.definitionHash);
-    if (!grant.accepted) return report(grant);
-    const auto completion = state::investment_edit::complete_bounty(entry.identity.definitionIndex,
-                                                                    entry.identity.definitionHash);
-    return report({completion.accepted, grant.changed + completion.changed, completion.reason});
-}
 Feedback clear(Clear category) noexcept {
     switch (category) {
     case Clear::weapons:

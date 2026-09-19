@@ -229,18 +229,6 @@ void bounty_lanes(const Entry& entry, const service::Held& held) {
     }
 }
 
-/** Acquires the bounty if it is not held, completes it, and leaves redemption to the vendor. */
-void page_bounty_button(const Entry& entry) {
-    ImGui::BeginDisabled(!g_inventory.ready);
-    if (ImGui::Button("Grant and complete")) feedback(service::page_bounty(entry));
-    ImGui::EndDisabled();
-    ImGui::SameLine();
-    ImGui::TextDisabled("(page)");
-    if (ImGui::IsItemHovered())
-        ImGui::SetTooltip("Grants or reuses this bounty and completes its objectives. Rewards "
-                          "stay unclaimed so redemption can be tested at the vendor.");
-}
-
 void catalog_bounty(const Entry& entry) {
     ImGui::SeparatorText("Held bounty");
     if (!g_inventory.ready) {
@@ -258,12 +246,10 @@ void catalog_bounty(const Entry& entry) {
     }
     if (!selected) {
         ImGui::TextWrapped("This character is not holding this bounty.");
-        page_bounty_button(entry);
         objectives(entry);
         return;
     }
     if (selected->instance != g_heldSelection) select_held(*selected);
-    page_bounty_button(entry);
     if (count > 1) {
         char preview[64]{};
         std::snprintf(preview,
@@ -649,10 +635,7 @@ void bounties_tab(const Catalog& data) {
     }
     ImGui::EndDisabled();
     if (g_pageExpected != 0) {
-        if (g_inventory.bounties.size() >= g_pageExpected) {
-            g_pageExpected = 0;
-            feedback(service::complete_bounties());
-        } else if (ImGui::GetTime() >= g_pageDeadline) {
+        if (g_inventory.bounties.size() >= g_pageExpected || ImGui::GetTime() >= g_pageDeadline) {
             g_pageExpected = 0;
         } else {
             ImGui::SameLine();

@@ -18,6 +18,8 @@ struct Held {
     std::uint64_t instance{};
     std::uint32_t hash{};
     std::uint16_t index{};
+    /** The Client orders a bucket's grid by this, so the module lists held pursuits by it too. */
+    std::int32_t mutationSerial{};
     std::array<std::int32_t, 8> values{};
     bool editable{};
     const char* reason{};

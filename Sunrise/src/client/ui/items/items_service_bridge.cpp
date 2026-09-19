@@ -58,6 +58,7 @@ Inventory inventory() noexcept {
                 Held held{item.instanceSoid,
                           item.definitionHash,
                           identity.definitionIndex,
+                          item.mutationSerial,
                           item.objectiveValues,
                           true,
                           ""};
@@ -72,14 +73,15 @@ Inventory inventory() noexcept {
                 }
                 output.bounties.push_back(held);
             }
-            // Inventory order follows acquisition and compaction. The Character screen lists the
-            // most recently acquired bounty first, and a page acquires in installed order, so
-            // descending installed identity puts the grid in the same order the game shows.
+            // Inventory order follows acquisition and compaction, not presentation. Ordering by
+            // the serial the Client sorts a bucket with puts the grid in the order the Character
+            // screen shows, most recently acquired first.
             std::sort(output.bounties.begin(),
                       output.bounties.end(),
                       [](const Held& left, const Held& right) noexcept {
-                          return left.index != right.index ? left.index > right.index
-                                                           : left.instance > right.instance;
+                          return left.mutationSerial != right.mutationSerial
+                                     ? left.mutationSerial > right.mutationSerial
+                                     : left.instance > right.instance;
                       });
             break;
         }

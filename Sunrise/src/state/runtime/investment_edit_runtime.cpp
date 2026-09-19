@@ -2,7 +2,6 @@
 
 #include <algorithm>
 #include <array>
-#include <limits>
 #include <memory>
 #include <new>
 #include <span>
@@ -128,13 +127,10 @@ Result edit(std::uint16_t index,
         }
         if (after == held.objectiveValues && held.objectiveDefinitionIndex == item.definitionIndex)
             continue;
-        constexpr auto maximum =
-            static_cast<std::uint32_t>((std::numeric_limits<std::int32_t>::max)());
-        if (character->nextInventorySerial >= maximum)
-            return {false, 0, "inventory serial exhausted; no changes committed"};
+        // Only the objectives changed, so the row keeps the serial that holds its grid cell.
+        // Reissuing it would move a bounty the moment it completed.
         held.objectiveValues = after;
         held.objectiveDefinitionIndex = item.definitionIndex;
-        held.mutationSerial = static_cast<std::int32_t>(character->nextInventorySerial++);
         ++changed;
     }
     if (matched == 0 && skipped == 0)

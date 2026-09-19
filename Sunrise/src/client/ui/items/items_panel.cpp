@@ -521,17 +521,27 @@ void bounties_tab(const Catalog& data) {
         page_bounty_button(*selected);
     }
     const auto pages = service::bounty_pages();
-    ImGui::SetNextItemWidth(90);
+    const int lastPage = (std::max)(1, static_cast<int>(pages.count));
+    g_bountyPage = (std::clamp)(g_bountyPage, 1, lastPage);
+    ImGui::BeginDisabled(g_bountyPage <= 1);
+    if (ImGui::ArrowButton("##bounty_previous", ImGuiDir_Left)) --g_bountyPage;
+    ImGui::EndDisabled();
+    ImGui::SameLine();
+    ImGui::SetNextItemWidth(60);
     ImGui::InputInt("##bounty_page", &g_bountyPage, 0, 0);
-    g_bountyPage = (std::clamp)(g_bountyPage, 1, (std::max)(1, static_cast<int>(pages.count)));
+    ImGui::SameLine();
+    ImGui::BeginDisabled(g_bountyPage >= lastPage);
+    if (ImGui::ArrowButton("##bounty_next", ImGuiDir_Right)) ++g_bountyPage;
+    ImGui::EndDisabled();
+    g_bountyPage = (std::clamp)(g_bountyPage, 1, lastPage);
+    ImGui::SameLine();
+    ImGui::Text("of %d", lastPage);
     ImGui::SameLine();
     ImGui::BeginDisabled(pages.count == 0);
     if (ImGui::Button("Grant page"))
         feedback(service::grant_bounty_page(static_cast<std::size_t>(g_bountyPage)));
     ImGui::EndDisabled();
-    ImGui::SameLine();
-    ImGui::TextDisabled("of %zu; %zu installed bounties, %zu per page. Discards held first.",
-                        pages.count,
+    ImGui::TextDisabled("%zu installed bounties, %zu per page. Discards held first.",
                         pages.bounties,
                         service::kBountyPageSize);
     if (g_inventory.unresolved)

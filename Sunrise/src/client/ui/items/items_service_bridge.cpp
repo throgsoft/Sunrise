@@ -209,14 +209,23 @@ Feedback grant_bounty_page(std::size_t page) noexcept {
             ++reused;
             continue;
         }
-        if (!held)
-            (void)state::investment_edit::grant_item(item.definitionIndex, 1, item.definitionHash);
-        const auto result =
+        if (held) {
+            ++reused;
+        } else {
+            // A refused acquisition owns the row: completing a bounty nobody holds proves nothing.
+            const auto grant =
+                state::investment_edit::grant_item(item.definitionIndex, 1, item.definitionHash);
+            changed += grant.changed;
+            if (!grant.accepted) {
+                ++refused;
+                continue;
+            }
+            ++granted;
+        }
+        const auto completion =
             state::investment_edit::complete_bounty(item.definitionIndex, item.definitionHash);
-        changed += result.changed;
-        granted += result.accepted && !held;
-        reused += held;
-        refused += !result.accepted;
+        changed += completion.changed;
+        refused += !completion.accepted;
     }
     if (changed != 0) server::bap::request_account_resync();
     Feedback output{refused == 0};
@@ -233,10 +242,12 @@ Feedback grant_bounty_page(std::size_t page) noexcept {
 
 Feedback page_bounty(const Entry& entry) noexcept {
     if (!entry.bounty) return report({false, 0, "Not an installed bounty"});
-    (void)state::investment_edit::grant_item(
+    const auto grant = state::investment_edit::grant_item(
         entry.identity.definitionIndex, 1, entry.identity.definitionHash);
-    return report(state::investment_edit::complete_bounty(entry.identity.definitionIndex,
-                                                          entry.identity.definitionHash));
+    if (!grant.accepted) return report(grant);
+    const auto completion = state::investment_edit::complete_bounty(entry.identity.definitionIndex,
+                                                                    entry.identity.definitionHash);
+    return report({completion.accepted, grant.changed + completion.changed, completion.reason});
 }
 Feedback clear(Clear category) noexcept {
     switch (category) {

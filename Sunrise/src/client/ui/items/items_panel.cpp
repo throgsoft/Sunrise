@@ -31,6 +31,7 @@ std::array<int, 7> g_laneValues{};
 std::array<bool, 7> g_laneEdited{};
 int g_clearCategory{-1};
 int g_bountyPage{1};
+int g_heldPage{1};
 std::uint64_t g_clearCharacter{};
 enum class Sort : int { type, name, id };
 constexpr std::array<const char*, 3> kSortNames{"Type", "Name", "ID"};
@@ -500,15 +501,81 @@ void selected_item(const std::shared_ptr<const Catalog>& data) {
     else
         objectives(entry);
 }
+/** @return True when every declared objective of one held pursuit has reached its value. */
+bool held_complete(const Entry& entry, const service::Held& held) noexcept {
+    if (entry.objectives.empty()) return false;
+    for (std::size_t lane = 0; lane < entry.objectives.size() && lane + 1 < held.values.size();
+         ++lane) {
+        const auto& objective = entry.objectives[lane];
+        if (!objective.resolved || !objective.itemProgress
+            || held.values[lane + 1] < objective.completion)
+            return false;
+    }
+    return true;
+}
+
+/** Held pursuits as the Character screen lays them out: four across, seven down, one page. */
+void held_grid(const Catalog& data) {
+    constexpr std::size_t kColumns = 4, kRows = 7, kPerPage = kColumns * kRows;
+    constexpr float kTile = 56.0f;
+    const auto total = g_inventory.bounties.size();
+    const int lastPage = (std::max)(1, static_cast<int>((total + kPerPage - 1) / kPerPage));
+    g_heldPage = (std::clamp)(g_heldPage, 1, lastPage);
+    ImGui::BeginDisabled(g_heldPage <= 1);
+    if (ImGui::ArrowButton("##held_previous", ImGuiDir_Left)) --g_heldPage;
+    ImGui::EndDisabled();
+    ImGui::SameLine();
+    ImGui::Text("Page %d of %d", g_heldPage, lastPage);
+    ImGui::SameLine();
+    ImGui::BeginDisabled(g_heldPage >= lastPage);
+    if (ImGui::ArrowButton("##held_next", ImGuiDir_Right)) ++g_heldPage;
+    ImGui::EndDisabled();
+    ImGui::SameLine();
+    ImGui::TextDisabled("%zu held", total);
+
+    auto* draw = ImGui::GetWindowDrawList();
+    const auto first = static_cast<std::size_t>(g_heldPage - 1) * kPerPage;
+    for (std::size_t row = 0; row < kRows; ++row) {
+        for (std::size_t column = 0; column < kColumns; ++column) {
+            const auto slot = first + row * kColumns + column;
+            if (column != 0) ImGui::SameLine();
+            ImGui::PushID(static_cast<int>(row * kColumns + column));
+            if (slot >= total) {
+                ImGui::Dummy({kTile, kTile});
+                ImGui::PopID();
+                continue;
+            }
+            const auto& held = g_inventory.bounties[slot];
+            const auto* entry = find(data, held.index, held.hash);
+            const ImVec2 origin = ImGui::GetCursorScreenPos();
+            const ImVec2 corner{origin.x + kTile, origin.y + kTile};
+            if (ImGui::Selectable("##slot", g_heldSelection == held.instance, 0, {kTile, kTile}))
+                select_held(held);
+            const auto texture = entry ? icons::get(entry->iconIndex) : ImTextureID_Invalid;
+            if (texture != ImTextureID_Invalid)
+                draw->AddImage(ImTextureRef(texture), origin, corner);
+            else
+                draw->AddRect(origin, corner, ImGui::GetColorU32(ImGuiCol_TextDisabled));
+            // A complete pursuit is the one worth redeeming, so it reads at a glance.
+            if (entry && held_complete(*entry, held))
+                draw->AddRect(origin, corner, IM_COL32(120, 220, 120, 255), 0.0f, 0, 2.0f);
+            if (g_heldSelection == held.instance)
+                draw->AddRect(
+                    origin, corner, ImGui::GetColorU32(ImGuiCol_NavCursor), 0.0f, 0, 2.0f);
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip("%u  %s",
+                                  static_cast<unsigned>(held.index),
+                                  entry ? name(*entry) : "Metadata unavailable");
+            ImGui::PopID();
+        }
+    }
+}
+
 void bounties_tab(const Catalog& data) {
     if (!g_inventory.ready) {
         ImGui::TextWrapped("Select a character to view held bounties.");
         return;
     }
-    // Resolved before the controls so the test section can act on the current selection.
-    const Entry* selected = nullptr;
-    for (const auto& held : g_inventory.bounties)
-        if (held.instance == g_heldSelection) selected = find(data, held.index, held.hash);
     ImGui::Text("%zu held pursuits", g_inventory.bounties.size());
     ImGui::SameLine();
     if (ImGui::Button("Refresh")) refresh();
@@ -516,10 +583,6 @@ void bounties_tab(const Catalog& data) {
     ImGui::BeginDisabled(g_inventory.bounties.empty());
     if (ImGui::Button("Complete all held")) feedback(service::complete_bounties());
     ImGui::EndDisabled();
-    if (selected) {
-        ImGui::SameLine();
-        page_bounty_button(*selected);
-    }
     const auto pages = service::bounty_pages();
     const int lastPage = (std::max)(1, static_cast<int>(pages.count));
     g_bountyPage = (std::clamp)(g_bountyPage, 1, lastPage);
@@ -547,22 +610,7 @@ void bounties_tab(const Catalog& data) {
     if (g_inventory.unresolved)
         ImGui::TextDisabled("%zu inventory entries have unresolved metadata.",
                             g_inventory.unresolved);
-    if (ImGui::BeginListBox("##held_bounties", {-1, 155})) {
-        for (const auto& held : g_inventory.bounties) {
-            const auto* entry = find(data, held.index, held.hash);
-            char label[384]{};
-            std::snprintf(label,
-                          sizeof label,
-                          "%u  %s##%llu",
-                          static_cast<unsigned>(held.index),
-                          entry ? name(*entry) : "Metadata unavailable",
-                          static_cast<unsigned long long>(held.instance));
-            if (ImGui::Selectable(label, g_heldSelection == held.instance)) {
-                select_held(held);
-            }
-        }
-        ImGui::EndListBox();
-    }
+    held_grid(data);
     for (const auto& held : g_inventory.bounties) {
         if (held.instance != g_heldSelection) continue;
         const auto* entry = find(data, held.index, held.hash);
@@ -667,6 +715,7 @@ void shutdown() noexcept {
     g_inventory = {};
     g_feedback = {};
     g_grantFeedback = {};
+    g_heldPage = 1;
     g_heldSelection = 0;
     g_laneEdited.fill(false);
     g_selected = -1;

@@ -689,13 +689,14 @@ finalize_profile_item_acquisition(const AccountState& account,
                                   PendingProfileItemAcquisition& mutation) noexcept {
     if (authored_inventory::dawning::ingredient(definitionHash)
             != authored_inventory::dawning::kIngredientCount
-        || quantity <= 0 || quantity > detail.maxStackSize) {
+        || quantity <= 0 || (!source.direct && quantity > detail.maxStackSize)) {
         return false;
     }
     std::size_t profileIndex = chargedAccount.profileItemCount;
     std::int32_t previousQuantity = 0;
     std::int32_t previousMutationSerial = 0;
     std::int32_t greatestMutationSerial = 0;
+    std::int32_t headroom = 0;
     bool appended = true;
     for (std::size_t index = 0; index < account.profileItemCount; ++index) {
         greatestMutationSerial =
@@ -724,17 +725,22 @@ finalize_profile_item_acquisition(const AccountState& account,
         if (existing.quantity > detail.maxStackSize) {
             return false;
         }
-        if (appended && existing.quantity <= detail.maxStackSize - quantity) {
+        const std::int32_t room = detail.maxStackSize - existing.quantity;
+        if (room > headroom) {
+            headroom = room;
             profileIndex = index;
             previousQuantity = existing.quantity;
             previousMutationSerial = existing.mutationSerial;
             appended = false;
         }
     }
-    if (greatestMutationSerial == (std::numeric_limits<std::int32_t>::max)()
+    // A wallet row at its cap must not block the rest of a payout, so an earned grant credits
+    // what the row can hold and saturates there. Anything charged for still has to land whole.
+    const std::int32_t credited = (std::min)(quantity, appended ? detail.maxStackSize : headroom);
+    if (credited <= 0 || (!source.direct && credited != quantity)
+        || greatestMutationSerial == (std::numeric_limits<std::int32_t>::max)()
         || (appended && chargedAccount.profileItemCount >= chargedAccount.profileItems.size())
-        || (appended && bucketRows >= bucket.slotCount)
-        || quantity > detail.maxStackSize - previousQuantity) {
+        || (appended && bucketRows >= bucket.slotCount)) {
         return false;
     }
 
@@ -772,10 +778,10 @@ finalize_profile_item_acquisition(const AccountState& account,
     }
     if (appended) {
         after.profileItems[profileIndex] = {
-            acquiredInstanceSoid, definitionHash, quantity, acquiredMutationSerial};
+            acquiredInstanceSoid, definitionHash, credited, acquiredMutationSerial};
         ++after.profileItemCount;
     } else {
-        after.profileItems[profileIndex].quantity += quantity;
+        after.profileItems[profileIndex].quantity += credited;
         after.profileItems[profileIndex].mutationSerial = acquiredMutationSerial;
     }
     const std::int32_t acquiredQuantity = after.profileItems[profileIndex].quantity;

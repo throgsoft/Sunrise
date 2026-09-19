@@ -309,6 +309,8 @@ bool runtime::detail::stage_record_reward_grant(const AccountState& account,
             }
             working.profileItems = staged.afterItems;
             working.profileItemCount = staged.afterItemCount;
+            // A wallet row saturates at its cap, so the reward reports what it actually credited.
+            prepared.quantity = staged.acquiredQuantity - staged.previousQuantity;
             prepared.instanceSoid = staged.acquiredInstanceSoid;
             prepared.stateIndex = staged.profileIndex;
             prepared.afterQuantity = staged.acquiredQuantity;

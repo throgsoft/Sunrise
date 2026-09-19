@@ -22,22 +22,6 @@ namespace items = build_data::items;
 namespace {
 using Requests = std::array<DirectRecordReward, kRecordRewardGrantCapacity>;
 
-bool engram_reward(const items::Definition& definition,
-                   const items::details::Definition& detail) noexcept {
-    return detail.instancedDefinitionState == items::details::InstancedDefinitionState::instanced
-           && !detail.equipmentSlot.has_value() && detail.objectiveCount == 0
-           && !contains(bounty_policy::kArrivalsUmbralEngrams, definition.definitionHash);
-}
-
-bool engram_reward(std::uint16_t index) noexcept {
-    items::Definition definition{};
-    items::details::Definition detail{};
-    return build_data::find_item_definition_index(index, definition)
-           && build_data::find_configured_item_detail(index, detail)
-           && detail.definitionIndex == index && detail.definitionHash == definition.definitionHash
-           && engram_reward(definition, detail);
-}
-
 bool append(Requests& requests,
             std::size_t& count,
             std::uint16_t index,
@@ -49,7 +33,10 @@ bool append(Requests& requests,
         || detail.definitionIndex != index || detail.definitionHash != definition.definitionHash
         || detail.bucketId != definition.bucketId)
         return false;
-    if (engram_reward(definition, detail)) return false;
+    if (detail.instancedDefinitionState == items::details::InstancedDefinitionState::instanced
+        && !detail.equipmentSlot.has_value() && detail.objectiveCount == 0
+        && !contains(bounty_policy::kArrivalsUmbralEngrams, definition.definitionHash))
+        return false;
     if (detail.instancedDefinitionState == items::details::InstancedDefinitionState::stackable)
         for (std::size_t i = 0; i < count; ++i) {
             if (requests[i].itemDefinitionIndex != index) continue;
@@ -200,16 +187,6 @@ bool collect(AccountState& working,
                               source.definitionHash,
                               static_cast<unsigned>(paidIndex),
                               quantity);
-        }
-        // One unavailable reward suppresses itself rather than the whole payout.
-        if (engram_reward(paidIndex)) {
-            core::log::writef(core::log::Channel::state,
-                              core::log::Level::info,
-                              "ev=bounty_reward policy=SunriseEngramRewardUnavailableSuppressed "
-                              "source=0x%08X item=%u",
-                              source.definitionHash,
-                              static_cast<unsigned>(paidIndex));
-            continue;
         }
         if (!append(requests, count, paidIndex, quantity)) return false;
     }

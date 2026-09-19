@@ -22,9 +22,10 @@ namespace data = state::build_data;
 Feedback report(const state::investment_edit::Result& result) noexcept {
     // Every service has released SQLite before returning; publication uses the normal protocol.
     if (result.changed) server::bap::request_account_resync();
+    // A refusal needs its reason; a success is already visible in the panel it changed.
     Feedback output{result.accepted};
-    std::snprintf(
-        output.text.data(), output.text.size(), "%s; changed=%zu", result.reason, result.changed);
+    if (!result.accepted)
+        std::snprintf(output.text.data(), output.text.size(), "%s", result.reason);
     return output;
 }
 
@@ -171,14 +172,8 @@ Feedback grant(const Entry& entry, std::int32_t quantity) noexcept {
     // Prefer the acquisition queue: the deferred pump publishes it as a real acquisition, which
     // is what plays the flyout. It takes only what it has proven commits, so the reward policy
     // still owns everything else, including a Dawning ingredient's balance and pickup row.
-    if (server::bap::queue_item_acquisition(entry.identity.definitionIndex, quantity)) {
-        Feedback queued{true};
-        std::snprintf(queued.text.data(),
-                      queued.text.size(),
-                      "queued for acquisition; quantity=%d",
-                      quantity);
-        return queued;
-    }
+    if (server::bap::queue_item_acquisition(entry.identity.definitionIndex, quantity))
+        return Feedback{true};
     const auto result = state::investment_edit::grant_item(
         entry.identity.definitionIndex, quantity, entry.identity.definitionHash);
     if (result.accepted) return report(result);

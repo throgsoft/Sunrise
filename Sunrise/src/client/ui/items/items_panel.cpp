@@ -527,9 +527,11 @@ constexpr float kHeldTile = 72.0f;
 std::size_t held_rows_used() noexcept {
     const auto total = g_inventory.bounties.size();
     const auto first = static_cast<std::size_t>((std::max)(g_heldPage, 1) - 1) * kHeldPerPage;
+    // An empty page keeps the full grid so the container does not collapse when nothing is held.
+    if (total == 0) return kHeldRows;
     const auto shown = first >= total ? 0 : (std::min)(total - first, kHeldPerPage);
     const std::size_t used = (shown + kHeldColumns - 1) / kHeldColumns;
-    return used == 0 ? std::size_t{1} : used;
+    return used == 0 ? kHeldRows : used;
 }
 
 /** Held pursuits as the Character screen lays them out: four across, one page. */

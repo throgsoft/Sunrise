@@ -248,6 +248,9 @@ struct PreparedRecordReward {
     std::uint16_t inventoryRow{};
     RecordRewardKind kind{};
     bool appendedProfileResident{};
+    /** Receipt rows this reward placed in its delivery bucket, from mutationSerial upward. The
+     * remainder waits in the durable queue for a bucket with room. */
+    std::int32_t placedReceipts{};
 };
 
 /** A reward grant that claims no record carries this instead of a record row. */

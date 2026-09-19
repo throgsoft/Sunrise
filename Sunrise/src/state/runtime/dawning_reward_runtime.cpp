@@ -102,7 +102,7 @@ bool same_pickups(const CharacterState& expected, const CharacterState& after) n
 }
 } // namespace
 
-MaterialReward stage_reward(CharacterState&,
+MaterialReward stage_reward(CharacterState& character,
                             const DirectRecordReward& request,
                             PendingRecordRewardGrant& mutation,
                             PreparedRecordReward& result) noexcept {
@@ -127,11 +127,24 @@ MaterialReward stage_reward(CharacterState&,
     result.quantity = credited;
     result.afterQuantity = mutation.afterDawning->ingredients[index];
     result.kind = RecordRewardKind::accountMaterial;
-    // The balance and durable acquisition queue commit with the bounty. Pickup publication
-    // waits for the FIFO to drain instead of evicting feedback the client has not read yet.
+    // Every other reward class is named by the frame that grants it. Place as many receipts as
+    // the delivery bucket can take so these are too, and leave the rest to the durable queue so
+    // a full bucket can never refuse the redemption itself.
     buckets::Descriptor bucket{};
     if (credited > 0 && !pickup_bucket(result.definitionHash, bucket))
         return MaterialReward::refused;
+    if (credited > 0) {
+        std::size_t available{};
+        if (!pickup_space(character, bucket, available)) return MaterialReward::refused;
+        const auto place = (std::min)(static_cast<std::int32_t>(available), credited);
+        if (place > 0) {
+            std::int32_t lastSerial{};
+            if (!insert_pickups(character, result.definitionHash, place, lastSerial))
+                return MaterialReward::refused;
+            result.placedReceipts = place;
+            result.mutationSerial = lastSerial - place + 1;
+        }
+    }
     return MaterialReward::staged;
 }
 
@@ -159,14 +172,25 @@ bool validate_rewards(const PendingRecordRewardGrant& mutation) noexcept {
         if (!mutation.beforeDawning || index == identity::kIngredientCount
             || reward.stateIndex != index || reward.instanceSoid != 0 || reward.inventoryRow != 0
             || reward.definitionHash != identity::kIngredients[index].pickupHash
-            || reward.appendedProfileResident || reward.quantity < 0)
+            || reward.appendedProfileResident || reward.quantity < 0 || reward.placedReceipts < 0
+            || reward.placedReceipts > reward.quantity)
             return false;
         std::int32_t credited{};
         // A full counter is an accepted zero-credit reward; no pickup is announced for it.
         if (!credit(expected, reward.definitionHash, (std::max)(1, reward.quantity), credited)
             || credited != reward.quantity || expected.ingredients[index] != reward.afterQuantity)
             return false;
-        if (reward.mutationSerial != 0) return false;
+        // A reward that placed receipts must name them, and the after-image has to be exactly
+        // the before-image with those rows inserted.
+        if ((reward.placedReceipts == 0) != (reward.mutationSerial == 0)) return false;
+        if (reward.placedReceipts != 0) {
+            std::int32_t lastSerial{};
+            if (!expectedCharacter
+                || !insert_pickups(
+                    *expectedCharacter, reward.definitionHash, reward.placedReceipts, lastSerial)
+                || lastSerial - reward.placedReceipts + 1 != reward.mutationSerial)
+                return false;
+        }
     }
     return material == mutation.beforeDawning.has_value()
            && (!material
@@ -182,8 +206,10 @@ bool write_rewards(const PendingRecordRewardGrant& mutation) noexcept {
         "INSERT INTO dawning_pickup_queue(character_soid,definition_hash,quantity) VALUES(?,?,?)");
     for (std::size_t i = 0; i < mutation.rewardCount; ++i) {
         const auto& reward = mutation.rewards[i];
-        if (reward.kind == RecordRewardKind::accountMaterial && reward.quantity > 0
-            && !queued.write(mutation.characterSoid, reward.definitionHash, reward.quantity))
+        // Only what the bucket could not take waits in the queue; the rest is already placed.
+        const auto deferred = reward.quantity - reward.placedReceipts;
+        if (reward.kind == RecordRewardKind::accountMaterial && deferred > 0
+            && !queued.write(mutation.characterSoid, reward.definitionHash, deferred))
             return false;
     }
     return true;

@@ -432,8 +432,24 @@ bool prepare_record_reward_grant(
     std::size_t characterChanges = 0;
     for (std::size_t rewardIndex = 0; rewardIndex < mutation.rewardCount; ++rewardIndex) {
         const state::PreparedRecordReward& reward = mutation.rewards[rewardIndex];
-        if (reward.kind == state::RecordRewardKind::profileStack
-            || reward.kind == state::RecordRewardKind::accountMaterial) {
+        if (reward.kind == state::RecordRewardKind::profileStack) {
+            continue;
+        }
+        // A material reward names the receipt rows it placed, so the frame that grants it draws
+        // their pickups the way it draws every other reward class.
+        if (reward.kind == state::RecordRewardKind::accountMaterial) {
+            for (std::int32_t placed = 0; placed < reward.placedReceipts; ++placed) {
+                if (characterChanges >= characterObject.inventoryChanges.records.size()) {
+                    clear_after(scratch, reservation);
+                    return report_failure("record_reward_material_changes");
+                }
+                auto& record = characterObject.inventoryChanges.records[characterChanges];
+                record.sequence = static_cast<std::uint16_t>(characterChanges);
+                record.mutationSerial = reward.mutationSerial + placed;
+                record.kind = kChangeKind;
+                record.flags = kChangeFlags;
+                ++characterChanges;
+            }
             continue;
         }
         state::build_data::items::Definition definition{};

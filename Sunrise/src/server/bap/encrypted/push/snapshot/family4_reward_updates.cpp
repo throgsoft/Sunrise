@@ -218,19 +218,15 @@ bool prepare_season_pass_package(
         clear_after(scratch, reservation);
         return report_failure("season_package_change_state");
     }
-    std::uint16_t greatestSequence = 0;
     for (std::size_t index = 0; index < itemCount; ++index) {
         auto& change = characterObject.inventoryChanges.records[index];
-        const auto serial = character.inventory.values[firstGranted + index].mutationSerial;
-        change.sequence = change_sequence(serial);
-        change.mutationSerial = serial;
+        change.sequence = static_cast<std::uint16_t>(index);
+        change.mutationSerial = character.inventory.values[firstGranted + index].mutationSerial;
         change.kind = kChangeKind;
         change.flags = kChangeFlags;
-        greatestSequence = (std::max)(greatestSequence, change.sequence);
     }
     characterObject.inventoryChanges.writeSlot = static_cast<std::uint16_t>(itemCount);
-    characterObject.inventoryChanges.nextSequence =
-        static_cast<std::uint16_t>(greatestSequence + 1);
+    characterObject.inventoryChanges.nextSequence = static_cast<std::uint16_t>(itemCount);
     if (!apply_acquisition_presentation(
             characterBytes, selected.loadout, acquisitionPresentationRows)) {
         clear_after(scratch, reservation);
@@ -434,7 +430,6 @@ bool prepare_record_reward_grant(
         return report_failure("record_reward_character_changes");
     }
     std::size_t characterChanges = 0;
-    std::uint16_t greatestCharacterSequence = 0;
     for (std::size_t rewardIndex = 0; rewardIndex < mutation.rewardCount; ++rewardIndex) {
         const state::PreparedRecordReward& reward = mutation.rewards[rewardIndex];
         if (reward.kind == state::RecordRewardKind::profileStack
@@ -470,18 +465,16 @@ bool prepare_record_reward_grant(
             return report_failure("record_reward_character_row_missing");
         }
         auto& change = characterObject.inventoryChanges.records[characterChanges];
-        change.sequence = change_sequence(reward.mutationSerial);
+        change.sequence = static_cast<std::uint16_t>(characterChanges);
         change.mutationSerial = reward.mutationSerial;
         change.kind = kChangeKind;
         change.flags = kChangeFlags;
-        greatestCharacterSequence = (std::max)(greatestCharacterSequence, change.sequence);
         ++characterChanges;
     }
     // Ingredient balances commit here. Their durable pickup queue publishes separately
     // after the native FIFO has room, with one acquisition record per actual row.
     characterObject.inventoryChanges.writeSlot = static_cast<std::uint16_t>(characterChanges);
-    characterObject.inventoryChanges.nextSequence =
-        static_cast<std::uint16_t>(greatestCharacterSequence + 1);
+    characterObject.inventoryChanges.nextSequence = static_cast<std::uint16_t>(characterChanges);
     if (!apply_acquisition_presentation(
             characterBytes, selected.loadout, acquisitionPresentationRows)) {
         clear_after(scratch, reservation);
@@ -516,7 +509,6 @@ bool prepare_record_reward_grant(
         return report_failure("record_reward_profile_changes");
     }
     std::size_t profileChanges = 0;
-    std::uint16_t greatestProfileSequence = 0;
     for (std::size_t rewardIndex = 0; rewardIndex < mutation.rewardCount; ++rewardIndex) {
         const state::PreparedRecordReward& reward = mutation.rewards[rewardIndex];
         if (reward.kind != state::RecordRewardKind::profileStack) {
@@ -547,16 +539,14 @@ bool prepare_record_reward_grant(
             return report_failure("record_reward_profile_row_missing");
         }
         auto& change = accountObject.profileInventoryChanges.records[profileChanges];
-        change.sequence = change_sequence(reward.mutationSerial);
+        change.sequence = static_cast<std::uint16_t>(profileChanges);
         change.mutationSerial = reward.mutationSerial;
         change.kind = kChangeKind;
         change.flags = kChangeFlags;
-        greatestProfileSequence = (std::max)(greatestProfileSequence, change.sequence);
         ++profileChanges;
     }
     accountObject.profileInventoryChanges.writeSlot = static_cast<std::uint16_t>(profileChanges);
-    accountObject.profileInventoryChanges.nextSequence =
-        static_cast<std::uint16_t>(greatestProfileSequence + 1);
+    accountObject.profileInventoryChanges.nextSequence = static_cast<std::uint16_t>(profileChanges);
     if (!append_object(scratch,
                        accountBytes,
                        update.accountDefinitionId,

@@ -35,7 +35,7 @@ inline constexpr std::array<char, 8> kCacheMagic{'S', 'U', 'N', 'R', 'I', 'S', '
  * Bump it when a stored shape changes or when the extraction filling it changes what it writes,
  * because a cached row survives a code change and a corrected walk keeps publishing old rows.
  */
-inline constexpr std::uint32_t kCacheFormatVersion = 70;
+inline constexpr std::uint32_t kCacheFormatVersion = 71;
 /** Signed -1 on disk means there is no equipment slot. */
 inline constexpr std::int8_t kAbsentEquipmentSlot = -1;
 /** The standard 64-bit FNV-1a offset basis starts the payload checksum. */
@@ -157,6 +157,7 @@ struct ItemRecord {
     std::int32_t questInitialValue{};
     std::uint16_t questValueRow{};
     std::uint8_t questValueScope{};
+    std::uint8_t hasInstalledType{};
 };
 
 /** Disk form of one material charged by a native Collections acquisition. */
@@ -676,7 +677,7 @@ static_assert(sizeof(NamedRecord)
               == content::kDefinitionNameCapacity + 2 * sizeof(std::uint16_t)
                      + 2 * sizeof(std::uint32_t));
 static_assert(sizeof(ItemRecord)
-              == 3 * sizeof(std::uint32_t) + 6 * sizeof(std::uint16_t) + 3 * sizeof(std::uint8_t));
+              == 3 * sizeof(std::uint32_t) + 6 * sizeof(std::uint16_t) + 4 * sizeof(std::uint8_t));
 static_assert(sizeof(MaterialRequirementRecord)
               == sizeof(std::uint32_t) + 2 * sizeof(std::uint16_t) + 2 * sizeof(std::uint8_t));
 static_assert(sizeof(CollectibleRecord)

@@ -76,6 +76,7 @@ bool encode(const items::Definition& value, ItemRecord& record) noexcept {
         value.questInitialization.value,
         value.questInitialization.row,
         static_cast<std::uint8_t>(value.questInitialization.scope),
+        static_cast<std::uint8_t>(value.hasInstalledType ? 1 : 0),
     };
     return items::valid(value.questInitialization);
 }
@@ -98,7 +99,8 @@ bool decode(const ItemRecord& record, items::Definition& value) noexcept {
              record.linkedPlugIndex,
              {record.questInitialValue,
               record.questValueRow,
-              static_cast<items::QuestInitialization::Scope>(record.questValueScope)}};
+              static_cast<items::QuestInitialization::Scope>(record.questValueScope)},
+             record.hasInstalledType != 0};
     return items::valid(value.questInitialization);
 }
 

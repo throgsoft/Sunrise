@@ -384,6 +384,11 @@ bool build() noexcept {
                 reason = "collectibles";
             } else if (!state::build_data::repeatable_bounties_ready()
                        && build_bounties(source, storage, rowCount)) {
+                // That pass is the only reader of the item strings, so it is where each row
+                // learns whether the build names it a type. The rows were published before it
+                // ran, so they are republished with what it found.
+                (void)state::build_data::publish_item_definitions(
+                    std::span(storage.rows).first(rowCount));
                 (void)state::build_data::publish_repeatable_bounties(
                     std::span(storage.bountyRows).first(storage.bountyCount));
             }

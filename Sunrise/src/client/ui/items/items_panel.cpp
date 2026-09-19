@@ -633,7 +633,18 @@ void bounty_page_controls(const service::Pages& pages, int lastPage) {
     if (ImGui::Button("Grant page")) {
         feedback(service::clear(service::Clear::bounties));
         const auto page = service::bounty_page(static_cast<std::size_t>(g_bountyPage));
-        g_pageExpected = service::queue_bounty_page(page) ? page.size() : 0;
+        const auto granted = service::queue_bounty_page(page);
+        // The Pursuits bucket is not first-in-first-out, so a full one refuses the remainder.
+        if (granted < page.size()) {
+            service::Feedback shortfall{false};
+            std::snprintf(shortfall.text.data(),
+                          shortfall.text.size(),
+                          "granted %zu of %zu; Pursuits bucket is full",
+                          granted,
+                          page.size());
+            feedback(shortfall);
+        }
+        g_pageExpected = granted;
         g_pageDeadline = ImGui::GetTime() + 60.0;
     }
     ImGui::EndDisabled();

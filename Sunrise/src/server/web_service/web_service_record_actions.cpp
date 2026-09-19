@@ -313,8 +313,11 @@ void report_record_reward(const middleware::web_service::Message& message,
         if (detail.instancedDefinitionState != detail_domain::InstancedDefinitionState::stackable) {
             return "profile_item_instanced";
         }
-        auto& mutation = grant.grant.emplace<state::PendingProfileItemAcquisition>();
-        return state::prepare_profile_item_acquisition_for_item(itemIndex, quantity, mutation)
+        // The reward planner owns stack capacity: it saturates a full row and spreads over the
+        // rows the bucket still has, which a single-row acquisition cannot express.
+        auto& mutation = grant.grant.emplace<state::PendingRecordRewardGrant>();
+        const std::array rewards{state::DirectRecordReward{itemIndex, quantity}};
+        return state::prepare_record_reward_grant(rewards, state::kUnclaimedRecordIndex, mutation)
                    ? nullptr
                    : "profile_state";
     }

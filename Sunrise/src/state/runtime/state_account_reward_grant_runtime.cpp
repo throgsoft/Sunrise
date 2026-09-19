@@ -60,9 +60,10 @@ namespace {
             static_cast<std::uint8_t>(item->afterCharacter.characterClass));
     }
     if (const auto* profile = std::get_if<PendingProfileItemAcquisition>(&mutation.grant)) {
-        return profile->acquiredDefinitionHash == reward.itemHash
-               && profile->acquiredQuantity - profile->previousQuantity
-                      == static_cast<std::int32_t>(reward.quantity);
+        // A wallet row saturates at its cap, so the claim credits at most what the row asked for.
+        const auto credited = profile->acquiredQuantity - profile->previousQuantity;
+        return profile->acquiredDefinitionHash == reward.itemHash && credited > 0
+               && credited <= static_cast<std::int32_t>(reward.quantity);
     }
     if (const auto* bundle = std::get_if<PendingDirectItemBundle>(&mutation.grant)) {
         build_data::season_pass::Package package{};
@@ -70,20 +71,34 @@ namespace {
                && build_data::find_season_pass_package(reward.itemHash, package);
     }
     const auto* resources = std::get_if<PendingRecordRewardGrant>(&mutation.grant);
-    if (resources == nullptr || reward.quantity != 1
-        || reward.itemHash != progression::season_pass::kDestinationResourceBundleHash
-        || resources->rewardCount != progression::season_pass::kDestinationResourceHashes.size()) {
+    if (resources == nullptr || resources->rewardCount == 0
+        || resources->rewardCount > resources->rewards.size()) {
         return false;
     }
-    for (std::size_t index = 0; index < resources->rewardCount; ++index) {
-        if (resources->rewards[index].definitionHash
-                != progression::season_pass::kDestinationResourceHashes[index]
-            || resources->rewards[index].quantity
-                   != progression::season_pass::kDestinationResourceQuantity) {
+    if (reward.itemHash == progression::season_pass::kDestinationResourceBundleHash) {
+        if (reward.quantity != 1
+            || resources->rewardCount
+                   != progression::season_pass::kDestinationResourceHashes.size()) {
             return false;
         }
+        for (std::size_t index = 0; index < resources->rewardCount; ++index) {
+            if (resources->rewards[index].definitionHash
+                    != progression::season_pass::kDestinationResourceHashes[index]
+                || resources->rewards[index].quantity
+                       != progression::season_pass::kDestinationResourceQuantity) {
+                return false;
+            }
+        }
+        return true;
     }
-    return true;
+    // One stackable reward may credit several rows and may saturate, so every row has to be the
+    // reward's own item and the total may not exceed what the row promised.
+    std::int64_t credited = 0;
+    for (std::size_t index = 0; index < resources->rewardCount; ++index) {
+        if (resources->rewards[index].definitionHash != reward.itemHash) return false;
+        credited += resources->rewards[index].quantity;
+    }
+    return credited > 0 && credited <= static_cast<std::int64_t>(reward.quantity);
 }
 
 } // namespace

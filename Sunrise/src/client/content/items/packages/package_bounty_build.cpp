@@ -47,33 +47,32 @@ bool build_bounties(const reader::Source& source,
     }
     const std::span<const std::byte> table{storage.itemStringsTable};
     for (std::size_t item = 0; item < itemCount; ++item) {
-        state::build_data::items::Definition& definition = storage.rows[item];
-        // A strings blob that will not read carries no item type. Such a row names no pool, and
-        // nothing installs it anywhere, so every pass reads the pair and records its presence.
-        tables::IndexRow entry{};
-        domain::ItemType itemType{};
-        definition.hasInstalledType =
-            tables::index_row(table, rows, definition.definitionIndex, entry)
-            && reader::read_tag(source, storage.scratch, entry.targetTag, storage.definition)
-            && read(std::span<const std::byte>{storage.definition},
-                    tables::kItemStringsTypePairOffset,
-                    itemType.bank)
-            && read(std::span<const std::byte>{storage.definition},
-                    tables::kItemStringsTypeHashOffset,
-                    itemType.hash)
-            && itemType.hash != 0;
-        if (definition.bucketId != domain::kBountyBucketId || definition.tier != domain::kBountyTier
-            || !definition.hasInstalledType) {
+        const state::build_data::items::Definition& definition = storage.rows[item];
+        if (definition.bucketId != domain::kBountyBucketId
+            || definition.tier != domain::kBountyTier) {
             continue;
         }
         if (storage.bountyCount >= domain::kDefinitionCapacity) {
             storage.bountyCount = 0;
             return false;
         }
+        tables::IndexRow entry{};
         domain::Definition& row = storage.bountyRows[storage.bountyCount];
         row = {};
         row.itemIndex = definition.definitionIndex;
-        row.itemType = itemType;
+        // A bounty whose strings blob will not read carries no pool key, so it is dropped rather
+        // than published with a zero pair that would merge it into every other unnamed row.
+        if (!tables::index_row(table, rows, definition.definitionIndex, entry)
+            || !reader::read_tag(source, storage.scratch, entry.targetTag, storage.definition)
+            || !read(std::span<const std::byte>{storage.definition},
+                     tables::kItemStringsTypePairOffset,
+                     row.itemType.bank)
+            || !read(std::span<const std::byte>{storage.definition},
+                     tables::kItemStringsTypeHashOffset,
+                     row.itemType.hash)
+            || row.itemType.hash == 0) {
+            continue;
+        }
         ++storage.bountyCount;
     }
     return storage.bountyCount != 0;

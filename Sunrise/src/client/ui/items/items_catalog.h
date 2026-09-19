@@ -12,7 +12,7 @@
 namespace sunrise::client::ui::items {
 namespace package = middleware::content::packages::items;
 
-enum class GrantPolicy : std::uint8_t { unknown, legitimate, typeless };
+enum class GrantPolicy : std::uint8_t { unknown, legitimate, dummy };
 // Display grouping only. A category never authorizes an item grant.
 enum class Category : std::uint8_t {
     all,
@@ -24,7 +24,7 @@ enum class Category : std::uint8_t {
     consumables,
     materials,
     cosmetics,
-    typeless,
+    dummies,
     other
 };
 inline constexpr std::array<const char*, 11> kCategoryNames{"All",
@@ -36,7 +36,7 @@ inline constexpr std::array<const char*, 11> kCategoryNames{"All",
                                                             "Consumables",
                                                             "Materials",
                                                             "Cosmetics",
-                                                            "Typeless",
+                                                            "Dummies",
                                                             "Other"};
 struct Objective {
     std::uint16_t index{};

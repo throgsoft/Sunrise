@@ -107,9 +107,10 @@ GrantPolicy classify(const Entry& entry) noexcept {
         || !data::find_inventory_bucket_descriptor(identity.bucketId, bucket)
         || bucket.bucketId != identity.bucketId)
         return GrantPolicy::unknown;
-    // The installed strings give every real item a type line. A row without one is a reward
-    // marker or a placeholder pursuit: it stands for something without ever living anywhere.
-    if (!identity.hasInstalledType) return GrantPolicy::typeless;
+    // A reward marker stands in for an item without ever being a resident of its own.
+    if (bounty::reward_marker(identity.definitionIndex, identity.definitionHash)
+        != bounty::RewardMarker::none)
+        return GrantPolicy::dummy;
     // A bucket that cannot transfer what it evicts is a delivery lane, not somewhere an item
     // lives: acquiring from it is a side effect elsewhere, such as a weapon gaining a plug.
     // Minting the row would show an item the account does not really own.
@@ -136,8 +137,10 @@ GrantPolicy classify(const Entry& entry) noexcept {
 
 Feedback grantable(const Entry& entry) noexcept {
     Feedback output{};
-    if (classify(entry) == GrantPolicy::typeless) {
-        std::snprintf(output.text.data(), output.text.size(), "Unable to grant");
+    if (classify(entry) == GrantPolicy::dummy) {
+        std::snprintf(output.text.data(),
+                      output.text.size(),
+                      "Reward marker; it stands for an item without being one");
         return output;
     }
     const std::unique_ptr<state::PendingRecordRewardGrant> probe(
@@ -155,7 +158,8 @@ Feedback grantable(const Entry& entry) noexcept {
 
 Feedback grant(const Entry& entry, std::int32_t quantity) noexcept {
     const auto policy = classify(entry);
-    if (policy == GrantPolicy::typeless) return report({false, 0, "Unable to grant"});
+    if (policy == GrantPolicy::dummy)
+        return report({false, 0, "Reward marker; it stands for an item without being one"});
     if (policy != GrantPolicy::legitimate)
         return report({false, 0, "No inventory array the reward policy can place this in"});
     // Prefer the acquisition queue: the deferred pump publishes it as a real acquisition, which
@@ -191,12 +195,15 @@ Feedback complete_bounties() noexcept {
 bool installed_bounty(std::uint16_t index,
                       data::items::Definition& item,
                       data::items::details::Definition& detail) noexcept {
+    namespace bounty = state::runtime::detail::bounty;
     data::inventory::buckets::Descriptor bucket{};
+    std::uint32_t markerHash = 0;
     // Zero lanes measure resolution only: an objective this build cannot read leaves the
-    // granted bounty with nothing to progress.
+    // granted bounty with nothing to progress, which is what the dummy pursuits look like.
     const std::array<std::int32_t, state::account::inventory::kItemObjectiveLaneCount> unset{};
-    return data::find_item_definition_index(index, item) && item.hasInstalledType
+    return bounty::reward_marker(index, markerHash) == bounty::RewardMarker::none
            && data::pursuits::measure(index, unset).resolved
+           && data::find_item_definition_index(index, item)
            && data::find_configured_item_detail(index, detail)
            && detail.definitionHash == item.definitionHash && detail.bucketId == item.bucketId
            && detail.objectiveCount != 0 && detail.objectiveCount <= detail.objectiveIndices.size()

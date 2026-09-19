@@ -39,8 +39,6 @@ struct Definition {
     std::uint16_t linkedPlugIndex{kUnavailableLinkedPlugIndex};
     /** Empty unless this item is the first member of a supported quest set. */
     QuestInitialization questInitialization{};
-    /** Whether the installed strings name an item type; a typeless row has nowhere to live. */
-    bool hasInstalledType{};
 };
 
 /** Roll-set ordinals outside the rolled ladder. */

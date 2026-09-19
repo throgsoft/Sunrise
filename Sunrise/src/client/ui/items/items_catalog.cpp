@@ -54,7 +54,7 @@ void number(std::string& search, std::uint32_t value) {
 Category category(const Entry& entry) noexcept {
     // The service distinguishes real residents from same-name preview/reward markers.
     // Its dummy result must win even when a marker has a plausible item type or bucket.
-    if (entry.policy == GrantPolicy::typeless) return Category::typeless;
+    if (entry.policy == GrantPolicy::dummy) return Category::dummies;
     namespace dawning = state::account::inventory::dawning;
     namespace pass = state::progression::season_pass;
     const auto hash = entry.identity.definitionHash;

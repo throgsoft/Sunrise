@@ -715,10 +715,11 @@ finalize_profile_item_acquisition(const AccountState& account,
         const authored_inventory::ProfileItem& existing = chargedAccount.profileItems[index];
         greatestMutationSerial = (std::max)(greatestMutationSerial, existing.mutationSerial);
         build_data::items::Definition held{};
-        if (!build_data::find_item_definition_hash(existing.definitionHash, held)) {
-            return false;
+        // A row whose definition no longer resolves belongs to no known bucket, so it is not
+        // counted against this one rather than refusing an unrelated grant outright.
+        if (build_data::find_item_definition_hash(existing.definitionHash, held)) {
+            bucketRows += held.bucketId == detail.bucketId;
         }
-        bucketRows += held.bucketId == detail.bucketId;
         if (existing.definitionHash != definitionHash) {
             continue;
         }

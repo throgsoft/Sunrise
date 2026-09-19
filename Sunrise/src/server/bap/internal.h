@@ -345,9 +345,7 @@ struct Session {
     std::uint64_t activityAdvertisementHostGeneration{};
     std::uint64_t acquisitionPresentationUntilTick{};
     /** Bounds recovery/cleanup reads of the persisted Dawning acquisition FIFO. */
-    std::uint64_t dawningPickupSweepDueTick{};
     std::uint64_t worldRewardRetryDueTick{};
-    std::uint64_t dawningPickupHoldUntilTick{};
     std::array<encrypted::queuez::AcquisitionPresentationRow,
                encrypted::queuez::kAcquisitionPresentationRowCapacity>
         acquisitionPresentationRows{};
@@ -554,19 +552,10 @@ void arm_account_resync_everywhere() noexcept;
 /** Holds this peer's full Family-4 refreshes until its acquisition flyout has finished. */
 void arm_acquisition_presentation_hold(Session& session) noexcept;
 
-/** Short queue grace for the observer to copy acquisition data. This is a
- * Sunrise scheduling grace, not a decoded client acknowledgment or retail timeout. */
-inline constexpr std::uint64_t kAcquisitionQueueGraceMs = 1'500;
-
 /** Backoff after a queued reward refuses. A retained reward whose refusal is durable, such as a
  * full authored bucket that cannot spill to the Postmaster, would otherwise copy a whole account
  * image on every pump and starve every other deferred lane. */
 inline constexpr std::uint64_t kWorldRewardRetryMs = 1'000;
-
-/** Queue admission across peers: short observation grace without retained rows, full
- * presentation hold with a row overlay. Does not shorten ordinary refresh protection.
- * Caller owns the session lock; this is scheduling, not a client consumption ACK. */
-[[nodiscard]] std::uint64_t acquisition_queue_deadline() noexcept;
 
 /** Queues one character item for normal acquisition feedback. */
 [[nodiscard]] bool arm_world_item_acquisition(std::uint16_t itemDefinitionIndex) noexcept;

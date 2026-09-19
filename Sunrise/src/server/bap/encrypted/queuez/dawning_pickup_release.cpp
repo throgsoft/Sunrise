@@ -91,19 +91,7 @@ bool consume_dawning_pickup_release(Session& session,
                                     std::span<std::byte> response,
                                     std::size_t& written,
                                     bool& touchesScratch) noexcept {
-    const auto now = GetTickCount64();
-    if (!session.queuez.family4Active || session.queuez.family4Version == 0
-        || now < session.dawningPickupSweepDueTick)
-        return false;
-    // The grace exists so the observer can copy the rows this sweep published, so it is scoped to
-    // this peer's own last publication. A global deadline would let any unrelated acquisition
-    // defer the flush for as long as acquisitions keep arriving. A retained row overlay still
-    // owns the longer presentation window.
-    if (now < session.dawningPickupHoldUntilTick
-        || (session.acquisitionPresentationRowCount != 0
-            && now < session.acquisitionPresentationUntilTick))
-        return false;
-    session.dawningPickupSweepDueTick = now + 1'000;
+    if (!session.queuez.family4Active || session.queuez.family4Version == 0) return false;
     state::investment::store::Transaction transaction;
     auto account = std::unique_ptr<state::AccountState>{new (std::nothrow) state::AccountState};
     if (!transaction.ready() || !account || !state::investment::store::read_account(*account)
@@ -113,30 +101,19 @@ bool consume_dawning_pickup_release(Session& session,
     for (std::size_t i = 0; i < account->characterCount; ++i)
         if (account->characters[i].selected) selected = &account->characters[i];
     if (!selected) return false;
-    std::size_t removed{};
-    if (!state::runtime::detail::dawning::drain_pickups(selected->soid, removed)) return false;
     std::size_t acquired{};
-    if (removed == 0
-        && !state::runtime::detail::dawning::stage_queued_pickups(selected->soid, acquired))
+    if (!state::runtime::detail::dawning::stage_queued_pickups(selected->soid, acquired)
+        || acquired == 0) {
         return false;
-    if (removed == 0 && acquired == 0) return false;
+    }
 
     touchesScratch = true;
     auto nonce = session.sendNonce;
     queuez::SessionState after{};
     std::size_t size{};
-    // The outer transaction keeps the deletion private until the complete frame fits.
-    // Failure rolls back the rows and leaves the oven counters untouched in either case.
-    const bool encoded = acquired != 0
-                             ? append_pickups(session, scratch, nonce, size, after)
-                             : push::append_account_resync_notification(scratch,
-                                                                        session.queuez,
-                                                                        {},
-                                                                        session.sessionKey,
-                                                                        nonce,
-                                                                        scratch.framed,
-                                                                        size,
-                                                                        after);
+    // The outer transaction keeps the rows private until the complete frame fits. Failure rolls
+    // them back and leaves the oven counters untouched either way.
+    const bool encoded = append_pickups(session, scratch, nonce, size, after);
     if (!encoded || size == 0 || size > response.size() || !queuez::valid(after)
         || !transaction.commit())
         return false;
@@ -144,20 +121,16 @@ bool consume_dawning_pickup_release(Session& session,
     written = size;
     session.sendNonce = nonce;
     session.queuez = after;
-    // Send the empty revision separately before reusing its slots for the next queued batch.
-    session.dawningPickupSweepDueTick = now;
-    session.dawningPickupHoldUntilTick = acquired != 0 ? now + bap::kAcquisitionQueueGraceMs : 0;
-    if (acquired != 0) bap::arm_acquisition_presentation_hold(session);
+    // The rows are receipts: the oven balance already carries what they announce, so the bucket
+    // reclaims their slots by evicting the oldest when the next pickup arrives.
+    bap::arm_acquisition_presentation_hold(session);
     bap::arm_account_resync_elsewhere(session);
-    const auto nextEligible = bap::acquisition_queue_deadline();
-    core::log::writef(
-        core::log::Channel::server,
-        core::log::Level::info,
-        "ev=dawning_pickup stage=%s revision=%d rows=%zu oven_balance=preserved queue_wait_ms=%llu",
-        acquired ? "published" : "released",
-        after.family4Version,
-        acquired ? acquired : removed,
-        static_cast<unsigned long long>(nextEligible > now ? nextEligible - now : 0));
+    core::log::writef(core::log::Channel::server,
+                      core::log::Level::info,
+                      "ev=dawning_pickup stage=published revision=%d rows=%zu "
+                      "oven_balance=preserved",
+                      after.family4Version,
+                      acquired);
     return true;
 }
 } // namespace sunrise::server::bap::encrypted

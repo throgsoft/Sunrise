@@ -13,7 +13,15 @@ bool commit_world_reward(const WorldRewardRequest& request) noexcept {
         return false;
     }
     bool committed = false;
-    if (request.kind == WorldRewardKind::item) {
+    if (request.kind == WorldRewardKind::characterStack) {
+        const std::unique_ptr<state::PendingRecordRewardGrant> grant(
+            new (std::nothrow) state::PendingRecordRewardGrant);
+        const std::array rows{
+            state::DirectRecordReward{request.itemDefinitionIndex, request.quantity}};
+        committed =
+            grant && state::prepare_record_reward_grant(rows, state::kUnclaimedRecordIndex, *grant)
+            && state::commit_record_reward(*grant);
+    } else if (request.kind == WorldRewardKind::item) {
         state::PendingItemAcquisition acquisition;
         committed =
             state::prepare_item_acquisition_for_item(request.itemDefinitionIndex, acquisition)
@@ -48,6 +56,13 @@ bool enqueue_world_reward(std::uint16_t definitionIndex,
 /** Saves one item reward before its pickup presentation is queued. */
 bool arm_world_item_acquisition(std::uint16_t itemDefinitionIndex) noexcept {
     return enqueue_world_reward(itemDefinitionIndex, 1, WorldRewardKind::item);
+}
+
+/** Saves one character stack reward before its pickup presentation is queued. */
+bool arm_world_character_stack_acquisition(std::uint16_t itemDefinitionIndex,
+                                           std::int32_t quantity) noexcept {
+    return quantity > 0
+           && enqueue_world_reward(itemDefinitionIndex, quantity, WorldRewardKind::characterStack);
 }
 
 /** Saves a profile material reward before its pickup presentation is queued. */

@@ -328,6 +328,8 @@ struct ReplicationEpochPublication {
 enum class WorldRewardKind : std::uint8_t {
     item,
     profileItem,
+    /** A stack row in a character bucket, which only the reward policy can place. */
+    characterStack,
 };
 
 /** One reward earned in world, held until a Family-4 peer can publish it. */
@@ -560,6 +562,10 @@ inline constexpr std::uint64_t kWorldRewardRetryMs = 1'000;
 
 /** Queues one character item for normal acquisition feedback. */
 [[nodiscard]] bool arm_world_item_acquisition(std::uint16_t itemDefinitionIndex) noexcept;
+
+/** Queues one character stack row for normal acquisition feedback. */
+[[nodiscard]] bool arm_world_character_stack_acquisition(std::uint16_t itemDefinitionIndex,
+                                                         std::int32_t quantity) noexcept;
 
 /** Queues one profile material for normal acquisition feedback. */
 [[nodiscard]] bool arm_world_profile_item_acquisition(std::uint16_t itemDefinitionIndex,

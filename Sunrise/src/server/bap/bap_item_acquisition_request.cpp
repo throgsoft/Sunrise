@@ -27,9 +27,16 @@ namespace {
         || bucket.bucketId != item.bucketId) {
         return false;
     }
-    kind = bucket.arraySelector == data::inventory::buckets::ArraySelector::character
-               ? WorldRewardKind::item
-               : WorldRewardKind::profileItem;
+    if (bucket.arraySelector != data::inventory::buckets::ArraySelector::character) {
+        kind = WorldRewardKind::profileItem;
+        return true;
+    }
+    // A stack row in a character bucket is placed by the reward policy, not by the instanced
+    // acquisition the ordinary item kind commits with.
+    kind =
+        detail.instancedDefinitionState == data::items::details::InstancedDefinitionState::stackable
+            ? WorldRewardKind::characterStack
+            : WorldRewardKind::item;
     return true;
 }
 
@@ -57,6 +64,10 @@ commits(std::uint16_t itemDefinitionIndex, std::int32_t quantity, WorldRewardKin
     const std::unique_ptr<state::PendingRecordRewardGrant> probe(
         new (std::nothrow) state::PendingRecordRewardGrant);
     if (!probe) return false;
+    if (kind == WorldRewardKind::characterStack) {
+        const std::array rows{state::DirectRecordReward{itemDefinitionIndex, quantity}};
+        return state::prepare_record_reward_grant(rows, state::kUnclaimedRecordIndex, *probe);
+    }
     const auto count = static_cast<std::size_t>(quantity);
     std::array<state::DirectRecordReward, state::kRecordRewardGrantCapacity> rows{};
     std::fill_n(rows.begin(), count, state::DirectRecordReward{itemDefinitionIndex, 1});
@@ -91,6 +102,8 @@ bool queue_item_acquisition(std::uint16_t itemDefinitionIndex, std::int32_t quan
     const std::lock_guard lock(session_lock());
     if (kind == WorldRewardKind::profileItem)
         return arm_world_profile_item_acquisition(itemDefinitionIndex, quantity);
+    if (kind == WorldRewardKind::characterStack)
+        return arm_world_character_stack_acquisition(itemDefinitionIndex, quantity);
     // One instanced copy per queued reward, so each arrives with its own acquisition.
     for (std::int32_t copy = 0; copy < quantity; ++copy)
         if (!arm_world_item_acquisition(itemDefinitionIndex)) return false;

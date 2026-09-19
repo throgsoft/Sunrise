@@ -218,6 +218,83 @@ selected_character(const state::AccountState& account) noexcept {
     return true;
 }
 
+/** Publishes and commits one character stack world reward through the reward policy. */
+[[nodiscard]] bool consume_world_character_stack_acquisition(const WorldRewardRequest& request,
+                                                             Session& session,
+                                                             Scratch& scratch,
+                                                             std::span<std::byte> response,
+                                                             std::size_t& written,
+                                                             bool& touchesScratch) noexcept {
+    state::investment::store::Transaction transaction;
+    if (!transaction.ready()) return false;
+    const std::unique_ptr<state::PendingRecordRewardGrant> pending(
+        new (std::nothrow) state::PendingRecordRewardGrant);
+    const std::array rows{state::DirectRecordReward{request.itemDefinitionIndex, request.quantity}};
+    if (!pending
+        || !state::prepare_record_reward_grant(rows, state::kUnclaimedRecordIndex, *pending)) {
+        core::log::write(core::log::Channel::server,
+                         core::log::Level::warn,
+                         "ev=queuez stage=world_stack_acquisition result=fail reason=prepare");
+        bap::settle_world_reward();
+        return false;
+    }
+    touchesScratch = true;
+    std::array<std::uint64_t, state::kRecordRewardGrantCapacity> residents{};
+    std::size_t residentCount = 0;
+    for (std::size_t index = 0; index < pending->rewardCount; ++index) {
+        const auto& reward = pending->rewards[index];
+        if (reward.kind == state::RecordRewardKind::characterInstance
+            || reward.appendedProfileResident)
+            residents[residentCount++] = reward.instanceSoid;
+    }
+    queuez::RecordRewardGrant update{};
+    if (!queuez::stage_record_reward_grant(session.queuez,
+                                           pending->accountSoid,
+                                           pending->characterSoid,
+                                           std::span(residents).first(residentCount),
+                                           update)) {
+        core::log::write(core::log::Channel::server,
+                         core::log::Level::warn,
+                         "ev=queuez stage=world_stack_acquisition result=fail reason=stage");
+        bap::settle_world_reward();
+        return false;
+    }
+    auto nextSendNonce = session.sendNonce;
+    std::size_t framedSize = 0;
+    if (!push::append_record_reward_notification(scratch,
+                                                 session.queuez,
+                                                 update,
+                                                 *pending,
+                                                 active_acquisition_presentation_rows(session),
+                                                 session.sessionKey,
+                                                 nextSendNonce,
+                                                 scratch.framed,
+                                                 framedSize)
+        || framedSize == 0 || framedSize > response.size()) {
+        core::log::write(core::log::Channel::server,
+                         core::log::Level::warn,
+                         "ev=queuez stage=world_stack_acquisition result=fail reason=encode");
+        bap::settle_world_reward();
+        return false;
+    }
+    if (!state::commit_record_reward(*pending) || !bap::complete_world_reward(request.id)
+        || !transaction.commit()) {
+        core::log::write(core::log::Channel::server,
+                         core::log::Level::warn,
+                         "ev=queuez stage=world_stack_acquisition result=fail reason=commit");
+        bap::settle_world_reward();
+        return false;
+    }
+    std::copy_n(scratch.framed.begin(), framedSize, response.begin());
+    written = framedSize;
+    middleware::secure_channel::advance_nonce(nextSendNonce);
+    session.sendNonce = nextSendNonce;
+    session.queuez = update.after;
+    bap::arm_account_resync_elsewhere(session);
+    bap::arm_acquisition_presentation_hold(session);
+    return true;
+}
+
 /** Publishes one non-persistent XP reward row so the native seasonal XP HUD animates. */
 [[nodiscard]] bool consume_seasonal_experience_presentation(Session& session,
                                                             Scratch& scratch,
@@ -749,6 +826,10 @@ bool consume_deferred(Session& session,
             break;
         case WorldRewardKind::profileItem:
             published = consume_world_profile_item_acquisition(
+                reward, session, scratch, response, written, touchesScratch);
+            break;
+        case WorldRewardKind::characterStack:
+            published = consume_world_character_stack_acquisition(
                 reward, session, scratch, response, written, touchesScratch);
             break;
         }

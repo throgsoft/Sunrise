@@ -756,27 +756,7 @@ finalize_profile_item_acquisition(const AccountState& account,
     }
 
     AccountState after = chargedAccount;
-    // The Client orders a bucket's grid by this serial. Merging changes only the quantity, so the
-    // row keeps its serial and its cell. A new overflow row takes the serial just after its
-    // highest sibling, shifting the rows above it, so identical stacks stay adjacent instead of
-    // landing at the end of the bucket.
-    std::int32_t acquiredMutationSerial = greatestMutationSerial + 1;
-    if (!appended) {
-        acquiredMutationSerial = previousMutationSerial;
-    } else {
-        std::int32_t sibling = 0;
-        for (std::size_t index = 0; index < chargedAccount.profileItemCount; ++index) {
-            const auto& existing = chargedAccount.profileItems[index];
-            if (existing.definitionHash == definitionHash)
-                sibling = (std::max)(sibling, existing.mutationSerial);
-        }
-        if (sibling != 0) {
-            acquiredMutationSerial = sibling + 1;
-            for (std::size_t index = 0; index < after.profileItemCount; ++index)
-                if (after.profileItems[index].mutationSerial >= acquiredMutationSerial)
-                    ++after.profileItems[index].mutationSerial;
-        }
-    }
+    const std::int32_t acquiredMutationSerial = greatestMutationSerial + 1;
     if (appended) {
         after.profileItems[profileIndex] = {
             acquiredInstanceSoid, definitionHash, credited, acquiredMutationSerial};

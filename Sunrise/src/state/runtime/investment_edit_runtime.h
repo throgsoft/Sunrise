@@ -11,6 +11,16 @@ struct Result {
     const char* reason{"unavailable"};
 };
 
+/** Grants one installed item through the record reward policy, which owns bucket placement,
+ * Postmaster overflow and stacking. A Dawning ingredient stages its authoritative balance and
+ * pickup queue row instead of a resident. Existing held pursuits are left untouched.
+ * @param index Installed item to grant.
+ * @param quantity Instanced copies, or the stack size for a stackable item.
+ * @param expectedHash Installed identity the caller resolved, or zero to accept any.
+ */
+[[nodiscard]] Result
+grant_item(std::uint16_t index, std::int32_t quantity, std::uint32_t expectedHash) noexcept;
+
 /** Sets one objective lane of one held pursuit, preserving other copies and expiry.
  * Lane zero carries the expiry deadline rather than an objective and is never written.
  */

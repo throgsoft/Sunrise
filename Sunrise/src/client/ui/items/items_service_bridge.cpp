@@ -152,11 +152,10 @@ GrantPolicy classify(const Entry& entry) noexcept {
         return GrantPolicy::legitimate;
     for (const auto& reward : bounty::kScaledPursuitRewards)
         if (reward.paidIndex == identity.definitionIndex) return GrantPolicy::legitimate;
-    // Ingredients are pickup-only: State refuses them on both acquisition gates, so the oven
-    // reaches them through the Dawning pickup path rather than a grant.
-    if (dawning::ingredient(identity.definitionHash) < dawning::kIngredientCount)
-        return GrantPolicy::unknown;
-    if (dawning::cookie(identity.definitionHash)
+    const auto ingredient = dawning::ingredient(identity.definitionHash);
+    if ((ingredient < dawning::kIngredientCount
+         && identity.definitionHash == dawning::kIngredients[ingredient].pickupHash)
+        || dawning::cookie(identity.definitionHash)
         || identity.definitionHash == dawning::kEssenceHash)
         return GrantPolicy::legitimate;
     return GrantPolicy::unknown;
@@ -167,18 +166,8 @@ Feedback grant(const Entry& entry, std::int32_t quantity) noexcept {
     if (policy == GrantPolicy::dummy) return report({false, 0, "Dummy minting is disabled"});
     if (policy != GrantPolicy::legitimate)
         return report({false, 0, "No positive installed grant classification; item is read-only"});
-    if (quantity < 1) return report({false, 0, "Quantity must be positive"});
-    // The queue owns placement, overflow and duplicate refusal, and republishes the account.
-    const bool granted =
-        server::bap::grant_installed_item(entry.identity.definitionIndex, quantity);
-    Feedback output{granted};
-    if (granted)
-        std::snprintf(output.text.data(), output.text.size(), "granted; quantity=%d", quantity);
-    else
-        std::snprintf(output.text.data(),
-                      output.text.size(),
-                      "State acquisition policy refused the grant; nothing committed");
-    return output;
+    return report(state::investment_edit::grant_item(
+        entry.identity.definitionIndex, quantity, entry.identity.definitionHash));
 }
 Feedback set_lane(std::uint64_t instance,
                   std::uint16_t item,
@@ -254,7 +243,8 @@ Feedback grant_bounty_page(std::size_t page) noexcept {
             ++reused;
             continue;
         }
-        if (!held) (void)server::bap::grant_installed_item(item.definitionIndex, 1);
+        if (!held)
+            (void)state::investment_edit::grant_item(item.definitionIndex, 1, item.definitionHash);
         const auto result =
             state::investment_edit::complete_bounty(item.definitionIndex, item.definitionHash);
         changed += result.changed;
@@ -277,7 +267,8 @@ Feedback grant_bounty_page(std::size_t page) noexcept {
 
 Feedback page_bounty(const Entry& entry) noexcept {
     if (!entry.bounty) return report({false, 0, "Not an installed bounty"});
-    (void)server::bap::grant_installed_item(entry.identity.definitionIndex, 1);
+    (void)state::investment_edit::grant_item(
+        entry.identity.definitionIndex, 1, entry.identity.definitionHash);
     return report(state::investment_edit::complete_bounty(entry.identity.definitionIndex,
                                                           entry.identity.definitionHash));
 }

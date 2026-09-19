@@ -5,6 +5,7 @@
 #include <limits>
 #include <memory>
 #include <new>
+#include <span>
 
 #include "../../core/runtime/wall_clock.h"
 #include "../account/pursuit_hold.h"
@@ -270,6 +271,56 @@ Result drop(std::uint16_t index, DropScope scope) noexcept {
 }
 
 } // namespace
+
+Result grant_item(std::uint16_t index, std::int32_t quantity, std::uint32_t expectedHash) noexcept {
+    data::items::Definition item{};
+    data::items::details::Definition detail{};
+    if (quantity < 1) return {false, 0, "quantity must be positive"};
+    if (!resolve(index, item, detail) || (expectedHash != 0 && item.definitionHash != expectedHash))
+        return {false, 0, "installed item identity or detail unavailable or changed"};
+    const bool instanced = detail.instancedDefinitionState
+                           == data::items::details::InstancedDefinitionState::instanced;
+    if (!instanced && quantity > (std::max)(1, detail.maxStackSize))
+        return {false, 0, "quantity exceeds the installed stack size"};
+    std::unique_ptr<AccountState> account(new (std::nothrow) AccountState);
+    std::unique_ptr<PendingRecordRewardGrant> pending(new (std::nothrow) PendingRecordRewardGrant);
+    if (!account || !pending) return {false, 0, "allocation failed"};
+    store::Transaction transaction;
+    if (!transaction.ready() || !store::read_account(*account) || !account::valid(*account))
+        return {false, 0, "investment database unavailable"};
+    const auto* character = selected(*account);
+    if (!character) return {false, 0, "no selected character"};
+    if (detail.objectiveCount != 0) {
+        std::array<std::int32_t, inventory::kItemObjectiveLaneCount> thresholds{};
+        if (!objectives(detail, thresholds)) return {false, 0, "objective thresholds unavailable"};
+        if (quantity != 1) return {false, 0, "pursuits require quantity one"};
+        for (std::size_t i = 0; i < character->inventory.count; ++i) {
+            const auto& held = character->inventory.values[i];
+            if (held.definitionHash != item.definitionHash) continue;
+            if (const auto* reason = editable(held, index, detail)) return {false, 0, reason};
+            return {true, 0, "already held; expiry and progress preserved"};
+        }
+    }
+    // One batch fills the shared reward capacity; larger instanced requests take several.
+    // Reward policy owns bucket placement, Postmaster overflow, stacking, and the Dawning
+    // balance and pickup queue an ingredient request stages instead of a resident row.
+    std::int32_t remaining = instanced ? quantity : 1;
+    std::size_t granted = 0;
+    while (remaining > 0) {
+        const auto count = static_cast<std::size_t>(
+            (std::min)(remaining, static_cast<std::int32_t>(kRecordRewardGrantCapacity)));
+        std::array<DirectRecordReward, kRecordRewardGrantCapacity> rewards{};
+        std::fill_n(rewards.begin(), count, DirectRecordReward{index, instanced ? 1 : quantity});
+        if (!prepare_record_reward_grant(
+                std::span(rewards).first(count), kUnclaimedRecordIndex, *pending))
+            return {false, 0, "reward policy refused support, ownership, capacity or quantity"};
+        if (!commit_record_reward(*pending)) return {false, 0, "grant commit failed; rolled back"};
+        granted += count;
+        remaining -= static_cast<std::int32_t>(count);
+    }
+    if (!transaction.commit()) return {false, 0, "transaction commit failed; rolled back"};
+    return {true, granted, "granted through the record reward policy"};
+}
 
 Result complete_bounties() noexcept {
     return edit(0, 0, 0, true, false, true);

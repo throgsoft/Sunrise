@@ -188,65 +188,32 @@ Feedback grant_bounty_page(std::size_t page) noexcept {
     const auto pages = bounty_pages();
     if (page == 0 || page > pages.count)
         return report({false, 0, "Page is outside the installed bounty range"});
-    // Discard first so a reused resident cannot be mistaken for one this page granted.
+    // Discard first so a reused resident cannot be mistaken for one this page acquired.
     const auto dropped = state::investment_edit::drop_bounties();
     if (!dropped.accepted) return report(dropped);
-    const auto account = state::account_snapshot();
-    const state::CharacterState* character = nullptr;
-    for (std::size_t c = 0; c < account.characterCount; ++c)
-        if (account.characters[c].selected) character = &account.characters[c];
-    if (!character) {
-        if (dropped.changed != 0) server::bap::request_account_resync();
-        return report({false, dropped.changed, "No selected character"});
-    }
+    if (dropped.changed != 0) server::bap::request_account_resync();
     const auto definitions = (std::min)(data::item_definition_count(), std::size_t{65536});
     const auto first = (page - 1) * kBountyPageSize;
-    std::size_t ordinal = 0, changed = dropped.changed, granted = 0, reused = 0, refused = 0;
+    std::size_t ordinal = 0, queued = 0, refused = 0;
     for (std::size_t i = 0; i < definitions && ordinal < first + kBountyPageSize; ++i) {
         data::items::Definition item{};
         data::items::details::Definition detail{};
         if (!installed_bounty(static_cast<std::uint16_t>(i), item, detail)) continue;
         if (ordinal++ < first) continue;
-        bool held = false, heldComplete = true;
-        for (std::size_t row = 0; row < character->inventory.count; ++row) {
-            const auto& resident = character->inventory.values[row];
-            if (resident.definitionHash != item.definitionHash) continue;
-            held = true;
-            heldComplete =
-                heldComplete
-                && data::pursuits::complete(item.definitionIndex, resident.objectiveValues);
-        }
-        if (held && heldComplete) {
-            ++reused;
-            continue;
-        }
-        if (held) {
-            ++reused;
-        } else {
-            // A refused acquisition owns the row: completing a bounty nobody holds proves nothing.
-            const auto grant =
-                state::investment_edit::grant_item(item.definitionIndex, 1, item.definitionHash);
-            changed += grant.changed;
-            if (!grant.accepted) {
-                ++refused;
-                continue;
-            }
-            ++granted;
-        }
-        const auto completion =
-            state::investment_edit::complete_bounty(item.definitionIndex, item.definitionHash);
-        changed += completion.changed;
-        refused += !completion.accepted;
+        // Queue rather than commit: the deferred pump publishes each as a real acquisition.
+        if (server::bap::queue_item_acquisition(item.definitionIndex, 1))
+            ++queued;
+        else
+            ++refused;
     }
-    if (changed != 0) server::bap::request_account_resync();
     Feedback output{refused == 0};
+    output.expected = queued;
     std::snprintf(output.text.data(),
                   output.text.size(),
-                  "page %zu/%zu: %zu granted, %zu reused, %zu refused",
+                  "page %zu/%zu: %zu queued, %zu refused",
                   page,
                   pages.count,
-                  granted,
-                  reused,
+                  queued,
                   refused);
     return output;
 }

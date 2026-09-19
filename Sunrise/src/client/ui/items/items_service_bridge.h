@@ -1,6 +1,7 @@
 #pragma once
 
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <vector>
 
@@ -9,6 +10,8 @@
 namespace sunrise::client::ui::items::service {
 struct Feedback {
     bool accepted{};
+    /** Held pursuits expected once every queued acquisition has been published, or zero. */
+    std::size_t expected{};
     std::array<char, 384> text{};
 };
 struct Held {
@@ -46,7 +49,9 @@ inline constexpr std::size_t kBountyPageSize = 40;
 [[nodiscard]] Pages bounty_pages() noexcept;
 
 /**
- * Discards every held bounty, then grants and completes one page of installed bounties.
+ * Discards every held bounty, then queues one page of installed bounties for acquisition.
+ * Each lands through the normal acquisition publication, so the caller completes them once
+ * `expected` of them are held rather than acting on instances that do not exist yet.
  * @param page One-based page over the installed bounty order.
  * @return Counts for the page, or a refusal when the page is outside the installed range.
  */

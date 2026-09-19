@@ -32,6 +32,8 @@ std::array<bool, 7> g_laneEdited{};
 int g_clearCategory{-1};
 int g_bountyPage{1};
 int g_heldPage{1};
+std::size_t g_pageExpected{};
+double g_pageDeadline{};
 std::uint64_t g_clearCharacter{};
 enum class Sort : int { type, name, id };
 constexpr std::array<const char*, 3> kSortNames{"Type", "Name", "ID"};
@@ -601,9 +603,27 @@ void bounties_tab(const Catalog& data) {
     ImGui::Text("of %d", lastPage);
     ImGui::SameLine();
     ImGui::BeginDisabled(pages.count == 0);
-    if (ImGui::Button("Grant page"))
-        feedback(service::grant_bounty_page(static_cast<std::size_t>(g_bountyPage)));
+    if (ImGui::Button("Grant page")) {
+        const auto result = service::grant_bounty_page(static_cast<std::size_t>(g_bountyPage));
+        feedback(result);
+        g_pageExpected = result.expected;
+        g_pageDeadline = ImGui::GetTime() + 30.0;
+    }
     ImGui::EndDisabled();
+    // Each queued bounty is published as its own acquisition, so completion waits for the
+    // instances to exist rather than acting on a page that has not finished arriving.
+    if (g_pageExpected != 0) {
+        if (g_inventory.bounties.size() >= g_pageExpected) {
+            g_pageExpected = 0;
+            feedback(service::complete_bounties());
+        } else if (ImGui::GetTime() >= g_pageDeadline) {
+            g_pageExpected = 0;
+        } else {
+            ImGui::SameLine();
+            ImGui::TextDisabled(
+                "acquiring %zu of %zu...", g_inventory.bounties.size(), g_pageExpected);
+        }
+    }
     ImGui::TextDisabled("%zu installed bounties, %zu per page. Discards held first.",
                         pages.bounties,
                         service::kBountyPageSize);
@@ -716,6 +736,7 @@ void shutdown() noexcept {
     g_feedback = {};
     g_grantFeedback = {};
     g_heldPage = 1;
+    g_pageExpected = 0;
     g_heldSelection = 0;
     g_laneEdited.fill(false);
     g_selected = -1;

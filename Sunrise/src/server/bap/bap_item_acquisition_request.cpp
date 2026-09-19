@@ -33,6 +33,11 @@ namespace {
  * A queued reward whose commit fails is retained for a later attempt, and the oldest is always
  * read first, so one that can never commit would hold every reward behind it. This prepares
  * through the same function the deferred pump commits with, and discards the result.
+ *
+ * The prepare judges one copy against the committed account, so a request for several copies
+ * proves only the first. The difference the rest can make is capacity, and a reward the queue
+ * holds for want of room commits by itself once room exists. A definition the acquisition path
+ * refuses outright never clears, and that is what this has to catch.
  */
 [[nodiscard]] bool
 commits(std::uint16_t itemDefinitionIndex, std::int32_t quantity, WorldRewardKind kind) noexcept {
@@ -43,12 +48,9 @@ commits(std::uint16_t itemDefinitionIndex, std::int32_t quantity, WorldRewardKin
                && state::prepare_profile_item_acquisition_for_item(
                    itemDefinitionIndex, quantity, *probe);
     }
-    // One prepare proves one copy. Several instanced copies are judged against the same
-    // before-image, so only a single copy is queued and the caller keeps the rest.
     const std::unique_ptr<state::PendingItemAcquisition> probe(new (std::nothrow)
                                                                    state::PendingItemAcquisition);
-    return quantity == 1 && probe
-           && state::prepare_item_acquisition_for_item(itemDefinitionIndex, *probe);
+    return probe && state::prepare_item_acquisition_for_item(itemDefinitionIndex, *probe);
 }
 
 } // namespace
@@ -61,9 +63,12 @@ bool queue_item_acquisition(std::uint16_t itemDefinitionIndex, std::int32_t quan
     }
     // Arming reads the peer table and may settle the reward, so the session lock covers both.
     const std::lock_guard lock(session_lock());
-    return kind == WorldRewardKind::profileItem
-               ? arm_world_profile_item_acquisition(itemDefinitionIndex, quantity)
-               : arm_world_item_acquisition(itemDefinitionIndex);
+    if (kind == WorldRewardKind::profileItem)
+        return arm_world_profile_item_acquisition(itemDefinitionIndex, quantity);
+    // One instanced copy per queued reward, so each arrives with its own acquisition.
+    for (std::int32_t copy = 0; copy < quantity; ++copy)
+        if (!arm_world_item_acquisition(itemDefinitionIndex)) return false;
+    return true;
 }
 
 } // namespace sunrise::server::bap

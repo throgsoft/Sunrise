@@ -99,6 +99,8 @@ using Quest = build_data::items::QuestInitialization;
         || acquiredDetail.definitionIndex != grantedDefinition.definitionIndex
         || acquiredDetail.definitionHash != definitionHash
         || acquiredDetail.bucketId != grantedDefinition.bucketId
+        || acquiredDetail.instancedDefinitionState
+               != item_details::InstancedDefinitionState::instanced
         || acquiredDetail.objectiveCount > authored_inventory::kItemObjectiveLaneCount
         || acquiredDetail.lifetimeSeconds < 0
         || account::holds_pursuit(account, grantedDefinition.definitionIndex))

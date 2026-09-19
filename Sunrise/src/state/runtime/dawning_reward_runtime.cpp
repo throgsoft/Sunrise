@@ -7,6 +7,7 @@
 
 #include "../build_data/runtime.h"
 #include "../investment/store_internal.h"
+#include "fifo_bucket_eviction.h"
 
 namespace sunrise::state::runtime::detail::dawning {
 namespace identity = account::inventory::dawning;
@@ -59,9 +60,16 @@ bool pickup_space(const CharacterState& character,
 /** Inventory entries carry acquisition identity; the oven counter carries material quantity.
  * Queued grants wait for space rather than overwriting an unconsumed pickup.
  */
+/**
+ * @param evictWhenFull Drop the oldest receipts the bucket's first in, first out policy would
+ * evict to admit these. Only a caller that names its rows in the same revision may ask for this:
+ * the rows it drops were named by an earlier one, and rows dropped before they are published are
+ * feedback nobody ever sees.
+ */
 bool insert_pickups(CharacterState& character,
                     std::uint32_t hash,
                     std::int32_t quantity,
+                    bool evictWhenFull,
                     std::int32_t& lastSerial) noexcept {
     buckets::Descriptor bucket{};
     if (quantity <= 0 || !pickup_bucket(hash, bucket) || character.nextInventorySerial == 0
@@ -69,7 +77,13 @@ bool insert_pickups(CharacterState& character,
                            - static_cast<std::int64_t>(character.nextInventorySerial))
         return false;
     std::size_t available{};
-    if (!pickup_space(character, bucket, available) || quantity > available) return false;
+    if (!pickup_space(character, bucket, available)) return false;
+    if (evictWhenFull && static_cast<std::size_t>(quantity) > available) {
+        (void)evict_oldest_stacks(
+            character, bucket, static_cast<std::size_t>(quantity) - available);
+        if (!pickup_space(character, bucket, available)) return false;
+    }
+    if (static_cast<std::size_t>(quantity) > available) return false;
     for (std::int32_t i = 0; i < quantity; ++i) {
         const auto slot = character.stacks.count++;
         lastSerial = static_cast<std::int32_t>(character.nextInventorySerial++);
@@ -134,13 +148,14 @@ MaterialReward stage_reward(CharacterState& character,
     if (credited > 0 && !pickup_bucket(result.definitionHash, bucket))
         return MaterialReward::refused;
     if (credited > 0) {
-        std::size_t available{};
-        if (!pickup_space(character, bucket, available)) return MaterialReward::refused;
-        const auto place = (std::min)(static_cast<std::int32_t>(available), credited);
-        if (place > 0) {
-            std::int32_t lastSerial{};
-            if (!insert_pickups(character, result.definitionHash, place, lastSerial))
-                return MaterialReward::refused;
+        // The bucket admits a full payout by evicting what it already published, so placement is
+        // bounded by the bucket rather than by what happens to be free. A placement that cannot
+        // be made defers instead of refusing: a full bucket must never fail the redemption.
+        const auto place = (std::min)(static_cast<std::int32_t>(bucket.slotCount), credited);
+        CharacterState placed = character;
+        std::int32_t lastSerial{};
+        if (place > 0 && insert_pickups(placed, result.definitionHash, place, true, lastSerial)) {
+            character = placed;
             result.placedReceipts = place;
             result.mutationSerial = lastSerial - place + 1;
         }
@@ -186,8 +201,11 @@ bool validate_rewards(const PendingRecordRewardGrant& mutation) noexcept {
         if (reward.placedReceipts != 0) {
             std::int32_t lastSerial{};
             if (!expectedCharacter
-                || !insert_pickups(
-                    *expectedCharacter, reward.definitionHash, reward.placedReceipts, lastSerial)
+                || !insert_pickups(*expectedCharacter,
+                                   reward.definitionHash,
+                                   reward.placedReceipts,
+                                   true,
+                                   lastSerial)
                 || lastSerial - reward.placedReceipts + 1 != reward.mutationSerial)
                 return false;
         }
@@ -269,7 +287,7 @@ bool stage_queued_pickups(std::uint64_t characterSoid, std::size_t& acquired) no
         if (available == 0) break;
         const auto count = (std::min)(quantity, static_cast<std::int32_t>(capacity - acquired));
         std::int32_t serial{};
-        if (!insert_pickups(*character, hash, count, serial)) return false;
+        if (!insert_pickups(*character, hash, count, false, serial)) return false;
         if (count == quantity) {
             store::Statement erase(
                 "DELETE FROM dawning_pickup_queue WHERE id=? AND character_soid=?");

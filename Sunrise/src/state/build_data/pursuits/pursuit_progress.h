@@ -13,6 +13,9 @@ struct Progress {
     std::uint8_t completeCount{};
     /** True when every declared objective resolved to a definition in the objective table. */
     bool resolved{};
+    /** True when every declared objective is completed by the item's own lane, so writing the
+     * lanes can finish the pursuit. A shared or unsupported source leaves this clear. */
+    bool itemBacked{};
 };
 
 /**

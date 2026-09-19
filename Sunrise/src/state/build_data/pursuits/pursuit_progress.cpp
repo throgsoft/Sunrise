@@ -17,6 +17,7 @@ Progress measure(std::uint16_t itemDefinitionIndex, std::span<const std::int32_t
     }
     progress.objectiveCount = detail.objectiveCount;
     progress.resolved = true;
+    progress.itemBacked = true;
     for (std::size_t entry = 0; entry < detail.objectiveCount; ++entry) {
         objectives::Definition objective{};
         // Lane zero is the Unix expiry; objective ordinals start in lane one.
@@ -25,8 +26,10 @@ Progress measure(std::uint16_t itemDefinitionIndex, std::span<const std::int32_t
             || !find_objective_definition(detail.objectiveIndices[entry], objective)
             || objective.completionValue <= 0) {
             progress.resolved = false;
+            progress.itemBacked = false;
             continue;
         }
+        progress.itemBacked = progress.itemBacked && objective.itemProgress;
         // Shared or unused values are not completed by writing the item's ordinal lane.
         if (objective.itemProgress && lanes[lane] >= objective.completionValue) {
             ++progress.completeCount;

@@ -195,15 +195,12 @@ Feedback complete_bounties() noexcept {
 bool installed_bounty(std::uint16_t index,
                       data::items::Definition& item,
                       data::items::details::Definition& detail) noexcept {
-    namespace bounty = state::runtime::detail::bounty;
     data::inventory::buckets::Descriptor bucket{};
-    std::uint32_t markerHash = 0;
-    // Zero lanes measure resolution only: an objective this build cannot read leaves the
-    // granted bounty with nothing to progress, which is what the dummy pursuits look like.
+    // Zero lanes measure the sources only. A pursuit whose objectives are shared or unsupported
+    // cannot be finished by writing its own lanes, so the module has no way to exercise it.
     const std::array<std::int32_t, state::account::inventory::kItemObjectiveLaneCount> unset{};
-    return bounty::reward_marker(index, markerHash) == bounty::RewardMarker::none
-           && data::pursuits::measure(index, unset).resolved
-           && data::find_item_definition_index(index, item)
+    const auto progress = data::pursuits::measure(index, unset);
+    return progress.resolved && progress.itemBacked && data::find_item_definition_index(index, item)
            && data::find_configured_item_detail(index, detail)
            && detail.definitionHash == item.definitionHash && detail.bucketId == item.bucketId
            && detail.objectiveCount != 0 && detail.objectiveCount <= detail.objectiveIndices.size()

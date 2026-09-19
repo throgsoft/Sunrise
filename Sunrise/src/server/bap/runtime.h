@@ -32,14 +32,6 @@ void request_account_resync() noexcept;
 [[nodiscard]] bool queue_item_acquisition(std::uint16_t itemDefinitionIndex,
                                           std::int32_t quantity) noexcept;
 
-/**
- * Queues one page of installed items through the same publication, saving them together.
- * @param itemDefinitionIndices Installed items to acquire, one copy each.
- * @return True when every reward reached the queue.
- */
-[[nodiscard]] bool
-queue_item_acquisitions(std::span<const std::uint16_t> itemDefinitionIndices) noexcept;
-
 /** Makes the next investment refresh pump take one more slice. */
 using InvestmentSliceConsumer = void (*)() noexcept;
 

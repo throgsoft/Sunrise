@@ -64,50 +64,7 @@ commits(std::uint16_t itemDefinitionIndex, std::int32_t quantity, WorldRewardKin
         std::span(rows).first(count), state::kUnclaimedRecordIndex, *probe);
 }
 
-/**
- * Proves a whole page against one working account image, in preparer-sized runs.
- * One run threads every row through a single image, so a copy the account may not hold twice is
- * refused here rather than in the queue, where it would never commit.
- */
-[[nodiscard]] bool commits_together(std::span<const std::uint16_t> itemDefinitionIndices) noexcept {
-    const std::unique_ptr<state::PendingRecordRewardGrant> probe(
-        new (std::nothrow) state::PendingRecordRewardGrant);
-    if (!probe) return false;
-    std::array<state::DirectRecordReward, state::kRecordRewardGrantCapacity> rows{};
-    for (std::size_t first = 0; first < itemDefinitionIndices.size();
-         first += state::kRecordRewardGrantCapacity) {
-        const auto count =
-            (std::min)(state::kRecordRewardGrantCapacity, itemDefinitionIndices.size() - first);
-        for (std::size_t row = 0; row < count; ++row) {
-            rows[row] = state::DirectRecordReward{itemDefinitionIndices[first + row], 1};
-        }
-        if (!state::prepare_record_reward_grant(
-                std::span(rows).first(count), state::kUnclaimedRecordIndex, *probe)) {
-            return false;
-        }
-    }
-    return true;
-}
-
 } // namespace
-
-bool queue_item_acquisitions(std::span<const std::uint16_t> itemDefinitionIndices) noexcept {
-    if (itemDefinitionIndices.empty() || !commits_together(itemDefinitionIndices)) return false;
-    // Saving each reward on its own durably commits once per item. One transaction spends a
-    // single commit on the whole page while the pump still publishes every acquisition.
-    const std::lock_guard lock(session_lock());
-    state::investment::store::Transaction transaction;
-    if (!transaction.ready()) return false;
-    for (const auto index : itemDefinitionIndices) {
-        WorldRewardKind kind{};
-        if (!reward_kind(index, kind)) return false;
-        const bool armed = kind == WorldRewardKind::profileItem
-                               ? arm_world_profile_item_acquisition(index, 1)
-                               : arm_world_item_acquisition(index);
-        if (!armed) return false;
-    }
-    return transaction.commit();
-}
 
 bool queue_item_acquisition(std::uint16_t itemDefinitionIndex, std::int32_t quantity) noexcept {
     WorldRewardKind kind{};

@@ -260,7 +260,18 @@ std::vector<std::uint16_t> bounty_page(std::size_t page) noexcept {
 }
 
 bool queue_bounty_page(std::span<const std::uint16_t> indices) noexcept {
-    return server::bap::queue_item_acquisitions(indices);
+    // A page is granted as one account mutation and published once. Routing it through the
+    // world reward queue instead published every item on its own, and each publication arms the
+    // acquisition presentation hold, which retains the previous overlay for another eight
+    // seconds and defers every other deferred lane behind it.
+    std::size_t changed = 0;
+    for (const auto index : indices) {
+        data::items::Definition item{};
+        if (!data::find_item_definition_index(index, item)) continue;
+        changed += state::investment_edit::grant_item(index, 1, item.definitionHash).changed;
+    }
+    if (changed != 0) server::bap::request_account_resync();
+    return changed != 0;
 }
 
 Feedback clear(Clear category) noexcept {

@@ -119,6 +119,17 @@ Feedback grant(const Entry& entry, std::int32_t quantity) noexcept {
         return report({false, 0, "Reward marker; it stands for an item without being one"});
     if (policy != GrantPolicy::legitimate)
         return report({false, 0, "No inventory array the reward policy can place this in"});
+    // Prefer the acquisition queue: the deferred pump publishes it as a real acquisition, which
+    // is what plays the flyout. It takes only what it has proven commits, so the reward policy
+    // still owns everything else, including a Dawning ingredient's balance and pickup row.
+    if (server::bap::queue_item_acquisition(entry.identity.definitionIndex, quantity)) {
+        Feedback queued{true};
+        std::snprintf(queued.text.data(),
+                      queued.text.size(),
+                      "queued for acquisition; quantity=%d",
+                      quantity);
+        return queued;
+    }
     const auto result = state::investment_edit::grant_item(
         entry.identity.definitionIndex, quantity, entry.identity.definitionHash);
     if (result.accepted) return report(result);

@@ -900,6 +900,7 @@
     <ClCompile Include="src\server\bap\bap_scriptable_override_route.cpp" />
     <ClCompile Include="src\server\bap\bap_squad_override_route.cpp" />
     <ClCompile Include="src\server\bap\bap_world_reward_queue.cpp" />
+    <ClCompile Include="src\server\bap\bap_item_acquisition_request.cpp" />
     <ClCompile Include="src\server\bap\encrypted\queuez\queuez_reward_staging.cpp" />
     <ClCompile Include="src\server\bap\encrypted\push\snapshot\family4_reward_updates.cpp" />
     <ClCompile Include="src\server\bap\encrypted\push\snapshot\family4_socket_updates.cpp" />

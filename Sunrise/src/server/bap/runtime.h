@@ -21,6 +21,17 @@ namespace sunrise::server::bap {
 /** Schedules a full persisted account image on every active Family-4 peer. */
 void request_account_resync() noexcept;
 
+/**
+ * Queues one installed item for the deferred pump's normal acquisition publication, which is
+ * what plays the native acquisition flyout. Refuses anything the acquisition path would not
+ * commit, so the shared reward queue never retains work it cannot finish.
+ * @param itemDefinitionIndex Installed item to acquire.
+ * @param quantity Stack size for a profile item; instanced items take one copy per call.
+ * @return True when the reward reached the queue.
+ */
+[[nodiscard]] bool queue_item_acquisition(std::uint16_t itemDefinitionIndex,
+                                          std::int32_t quantity) noexcept;
+
 /** Makes the next investment refresh pump take one more slice. */
 using InvestmentSliceConsumer = void (*)() noexcept;
 

@@ -1,6 +1,7 @@
 #include "items_service_bridge.h"
 
 #include <algorithm>
+#include <array>
 #include <cstdio>
 #include <memory>
 
@@ -71,13 +72,14 @@ Inventory inventory() noexcept {
                 }
                 output.bounties.push_back(held);
             }
-            // Inventory order follows acquisition and compaction. Sorting by installed identity
-            // makes the grid read the same way the installed pages are numbered.
+            // Inventory order follows acquisition and compaction. The Character screen lists the
+            // most recently acquired bounty first, and a page acquires in installed order, so
+            // descending installed identity puts the grid in the same order the game shows.
             std::sort(output.bounties.begin(),
                       output.bounties.end(),
                       [](const Held& left, const Held& right) noexcept {
-                          return left.index != right.index ? left.index < right.index
-                                                           : left.instance < right.instance;
+                          return left.index != right.index ? left.index > right.index
+                                                           : left.instance > right.instance;
                       });
             break;
         }
@@ -172,7 +174,11 @@ bool installed_bounty(std::uint16_t index,
     namespace bounty = state::runtime::detail::bounty;
     data::inventory::buckets::Descriptor bucket{};
     std::uint32_t markerHash = 0;
+    // Zero lanes measure resolution only: an objective this build cannot read leaves the
+    // granted bounty with nothing to progress, which is what the dummy pursuits look like.
+    const std::array<std::int32_t, state::account::inventory::kItemObjectiveLaneCount> unset{};
     return bounty::reward_marker(index, markerHash) == bounty::RewardMarker::none
+           && data::pursuits::measure(index, unset).resolved
            && data::find_item_definition_index(index, item)
            && data::find_configured_item_detail(index, detail)
            && detail.definitionHash == item.definitionHash && detail.bucketId == item.bucketId
@@ -184,7 +190,12 @@ bool installed_bounty(std::uint16_t index,
 }
 
 Pages bounty_pages() noexcept {
+    // Installed definitions are fixed once the packages load, and this walks every one of them.
+    // Caching on the definition count keeps it off the frame that draws the page controls.
+    static Pages cached{};
+    static std::size_t scanned{};
     const auto definitions = (std::min)(data::item_definition_count(), std::size_t{65536});
+    if (definitions == scanned) return cached;
     Pages pages{};
     for (std::size_t i = 0; i < definitions; ++i) {
         data::items::Definition item{};
@@ -192,41 +203,36 @@ Pages bounty_pages() noexcept {
         pages.bounties += installed_bounty(static_cast<std::uint16_t>(i), item, detail);
     }
     pages.count = (pages.bounties + kBountyPageSize - 1) / kBountyPageSize;
-    return pages;
+    cached = pages;
+    scanned = definitions;
+    return cached;
 }
 
-Feedback grant_bounty_page(std::size_t page) noexcept {
+std::vector<std::uint16_t> bounty_page(std::size_t page) noexcept {
+    std::vector<std::uint16_t> indices;
     const auto pages = bounty_pages();
-    if (page == 0 || page > pages.count)
-        return report({false, 0, "Page is outside the installed bounty range"});
-    // Discard first so a reused resident cannot be mistaken for one this page acquired.
-    const auto dropped = state::investment_edit::drop_bounties();
-    if (!dropped.accepted) return report(dropped);
-    if (dropped.changed != 0) server::bap::request_account_resync();
+    if (page == 0 || page > pages.count) return indices;
     const auto definitions = (std::min)(data::item_definition_count(), std::size_t{65536});
     const auto first = (page - 1) * kBountyPageSize;
-    std::size_t ordinal = 0, queued = 0, refused = 0;
-    for (std::size_t i = 0; i < definitions && ordinal < first + kBountyPageSize; ++i) {
-        data::items::Definition item{};
-        data::items::details::Definition detail{};
-        if (!installed_bounty(static_cast<std::uint16_t>(i), item, detail)) continue;
-        if (ordinal++ < first) continue;
-        // Queue rather than commit: the deferred pump publishes each as a real acquisition.
-        if (server::bap::queue_item_acquisition(item.definitionIndex, 1))
-            ++queued;
-        else
-            ++refused;
+    std::size_t ordinal = 0;
+    try {
+        indices.reserve(kBountyPageSize);
+        for (std::size_t i = 0; i < definitions && ordinal < first + kBountyPageSize; ++i) {
+            data::items::Definition item{};
+            data::items::details::Definition detail{};
+            if (!installed_bounty(static_cast<std::uint16_t>(i), item, detail)) continue;
+            if (ordinal++ < first) continue;
+            indices.push_back(item.definitionIndex);
+        }
+    } catch (...) {
+        return {};
     }
-    Feedback output{refused == 0};
-    output.expected = queued;
-    std::snprintf(output.text.data(),
-                  output.text.size(),
-                  "page %zu/%zu: %zu queued, %zu refused",
-                  page,
-                  pages.count,
-                  queued,
-                  refused);
-    return output;
+    return indices;
+}
+
+bool queue_bounty(std::uint16_t index) noexcept {
+    // One acquisition proves and saves one reward, which is the whole cost of a page step.
+    return server::bap::queue_item_acquisition(index, 1);
 }
 
 Feedback page_bounty(const Entry& entry) noexcept {

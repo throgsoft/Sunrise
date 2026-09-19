@@ -49,12 +49,16 @@ inline constexpr std::size_t kBountyPageSize = 40;
 [[nodiscard]] Pages bounty_pages() noexcept;
 
 /**
- * Discards every held bounty, then queues one page of installed bounties for acquisition.
- * Each lands through the normal acquisition publication, so the caller completes them once
- * `expected` of them are held rather than acting on instances that do not exist yet.
+ * Installed bounty definition indices on one page, in installed order.
+ * Proving and saving one acquisition copies an account image, so a caller feeds these in over
+ * several frames rather than holding the render thread for a whole page.
  * @param page One-based page over the installed bounty order.
- * @return Counts for the page, or a refusal when the page is outside the installed range.
+ * @return The page's definition indices, empty when the page is outside the installed range.
  */
-[[nodiscard]] Feedback grant_bounty_page(std::size_t page) noexcept;
+[[nodiscard]] std::vector<std::uint16_t> bounty_page(std::size_t page) noexcept;
+
+/** Queues one installed bounty for the normal acquisition publication. */
+[[nodiscard]] bool queue_bounty(std::uint16_t index) noexcept;
+
 [[nodiscard]] Feedback clear(Clear category) noexcept;
 } // namespace sunrise::client::ui::items::service

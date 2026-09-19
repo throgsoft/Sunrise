@@ -7,6 +7,7 @@
 #include <imgui.h>
 #include <string>
 #include <string_view>
+#include <vector>
 
 #include "../../../state/build_data/runtime.h"
 #include "../../hooks/graphics/renderer/state.h"
@@ -34,6 +35,8 @@ int g_bountyPage{1};
 int g_heldPage{1};
 std::size_t g_pageExpected{};
 double g_pageDeadline{};
+std::vector<std::uint16_t> g_pageQueue{};
+std::size_t g_pageCursor{};
 std::uint64_t g_clearCharacter{};
 enum class Sort : int { type, name, id };
 constexpr std::array<const char*, 3> kSortNames{"Type", "Name", "ID"};
@@ -625,17 +628,31 @@ void bounties_tab(const Catalog& data) {
     ImGui::SameLine();
     ImGui::BeginDisabled(pages.count == 0);
     if (ImGui::Button("Grant page")) {
-        const auto result = service::grant_bounty_page(static_cast<std::size_t>(g_bountyPage));
-        feedback(result);
-        g_pageExpected = result.expected;
-        g_pageDeadline = ImGui::GetTime() + 30.0;
+        feedback(service::clear(service::Clear::bounties));
+        g_pageQueue = service::bounty_page(static_cast<std::size_t>(g_bountyPage));
+        g_pageCursor = 0;
+        g_pageExpected = g_pageQueue.size();
+        g_pageDeadline = ImGui::GetTime() + 60.0;
     }
     ImGui::EndDisabled();
-    // Each queued bounty is published as its own acquisition, so completion waits for the
-    // instances to exist rather than acting on a page that has not finished arriving.
-    if (g_pageExpected != 0) {
+    // Proving and saving one acquisition copies an account image, so a page is fed in over
+    // several frames. Completion then waits for the instances the pump has published.
+    if (!g_pageQueue.empty()) {
+        constexpr std::size_t kPerFrame = 2;
+        for (std::size_t step = 0; step < kPerFrame && g_pageCursor < g_pageQueue.size(); ++step)
+            (void)service::queue_bounty(g_pageQueue[g_pageCursor++]);
+        const auto remaining = g_pageQueue.size() - g_pageCursor;
+        if (remaining == 0) {
+            g_pageQueue.clear();
+            g_pageCursor = 0;
+            g_pageCursor = 0;
+        }
+        ImGui::SameLine();
+        ImGui::TextDisabled("queueing %zu...", remaining);
+    } else if (g_pageExpected != 0) {
         if (g_inventory.bounties.size() >= g_pageExpected) {
             g_pageExpected = 0;
+            g_pageQueue.clear();
             feedback(service::complete_bounties());
         } else if (ImGui::GetTime() >= g_pageDeadline) {
             g_pageExpected = 0;

@@ -122,6 +122,10 @@ GrantPolicy classify(const Entry& entry) noexcept {
                            == data::items::details::InstancedDefinitionState::stackable;
     switch (bucket.arraySelector) {
     case buckets::ArraySelector::profile:
+        if (identity.rollSetIndex != data::items::kNoRollSet
+            && !data::is_profile_action_source(identity.definitionIndex, identity.bucketId)) {
+            return GrantPolicy::unknown;
+        }
         return stackable ? GrantPolicy::legitimate : GrantPolicy::unknown;
     case buckets::ArraySelector::character:
         return !stackable || !detail.equipmentSlot.has_value() ? GrantPolicy::legitimate

@@ -34,6 +34,14 @@ enum class Clear : std::uint8_t { weapons, armor, bounties, engrams, seasonPass 
 [[nodiscard]] Inventory inventory() noexcept;
 [[nodiscard]] GrantPolicy classify(const Entry& entry) noexcept;
 [[nodiscard]] Feedback grant(const Entry& entry, std::int32_t quantity) noexcept;
+/**
+ * Asks the reward policy itself whether it would place this item, committing nothing.
+ * Classification mirrors the policy's placements to keep the catalog cheap; this is the policy,
+ * so the selected item reports what a grant would really do. It reads the account, so the
+ * answer changes with capacity and with pursuits already held.
+ */
+[[nodiscard]] Feedback grantable(const Entry& entry) noexcept;
+
 [[nodiscard]] Feedback set_lane(std::uint64_t instance,
                                 std::uint16_t item,
                                 std::uint8_t lane,

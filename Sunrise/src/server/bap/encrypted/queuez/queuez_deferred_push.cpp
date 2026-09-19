@@ -9,7 +9,6 @@
 #include "../../../../state/activity/destination/definition.h"
 #include "../../../../state/activity/runtime.h"
 #include "../../../../state/runtime/runtime.h"
-#include "../../../../state/runtime/synthesizer_crafting_runtime.h"
 #include "../internal.h"
 #include "../push/activity/activity_keepalive_push.h"
 #include "dawning_pickup_release.h"
@@ -119,6 +118,11 @@ selected_character(const state::AccountState& account) noexcept {
     middleware::secure_channel::advance_nonce(nextSendNonce);
     session.sendNonce = nextSendNonce;
     session.queuez = acquisition.after;
+    // Every crafting container derives its plugs from inventory-backed predicates: Motes for a
+    // synthesizer, ingredients for the oven, runes and Imperials for the Chalice. Republishing
+    // item views without them leaves those menus with no plugs, so the predicates follow any
+    // acquisition rather than only the case that named Motes.
+    session.family5RefreshArmed = true;
     bap::arm_account_resync_elsewhere(session);
     bap::arm_acquisition_presentation_hold(session);
     return true;
@@ -145,8 +149,6 @@ selected_character(const state::AccountState& account) noexcept {
         bap::settle_world_reward();
         return false;
     }
-    const bool changesMoteOwnership = state::runtime::detail::synthesizer::mote_ownership_changed(
-        pending.beforeItems, pending.afterItems);
     touchesScratch = true;
     queuez::ProfileItemAcquisition acquisition{};
     if (!queuez::stage_profile_item_acquisition(session.queuez,
@@ -190,7 +192,11 @@ selected_character(const state::AccountState& account) noexcept {
     middleware::secure_channel::advance_nonce(nextSendNonce);
     session.sendNonce = nextSendNonce;
     session.queuez = acquisition.after;
-    if (changesMoteOwnership) session.family5RefreshArmed = true;
+    // Every crafting container derives its plugs from inventory-backed predicates: Motes for a
+    // synthesizer, ingredients for the oven, runes and Imperials for the Chalice. Republishing
+    // item views without them leaves those menus with no plugs, so the predicates follow any
+    // acquisition rather than only the case that named Motes.
+    session.family5RefreshArmed = true;
     bap::arm_account_resync_elsewhere(session);
     bap::arm_acquisition_presentation_hold(session);
     return true;

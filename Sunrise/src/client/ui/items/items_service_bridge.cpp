@@ -125,6 +125,35 @@ GrantPolicy classify(const Entry& entry) noexcept {
     }
 }
 
+Feedback grantable(const Entry& entry) noexcept {
+    Feedback output{};
+    if (classify(entry) == GrantPolicy::dummy) {
+        std::snprintf(output.text.data(),
+                      output.text.size(),
+                      "Reward marker; it stands for an item without being one");
+        return output;
+    }
+    const std::unique_ptr<state::PendingRecordRewardGrant> probe(
+        new (std::nothrow) state::PendingRecordRewardGrant);
+    if (!probe) {
+        std::snprintf(output.text.data(), output.text.size(), "Probe allocation failed");
+        return output;
+    }
+    const std::array rewards{state::DirectRecordReward{entry.identity.definitionIndex, 1}};
+    output.accepted =
+        state::prepare_record_reward_grant(rewards, state::kUnclaimedRecordIndex, *probe);
+    if (output.accepted) return output;
+    data::inventory::buckets::Descriptor bucket{};
+    std::snprintf(output.text.data(),
+                  output.text.size(),
+                  "Reward policy has nowhere to place this; bucket=%u array=%u",
+                  unsigned(entry.identity.bucketId),
+                  data::find_inventory_bucket_descriptor(entry.identity.bucketId, bucket)
+                      ? unsigned(bucket.arraySelector)
+                      : 0xFFU);
+    return output;
+}
+
 Feedback grant(const Entry& entry, std::int32_t quantity) noexcept {
     const auto policy = classify(entry);
     if (policy == GrantPolicy::dummy)

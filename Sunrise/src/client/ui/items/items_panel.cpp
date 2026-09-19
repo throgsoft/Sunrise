@@ -33,6 +33,8 @@ std::array<bool, 7> g_laneEdited{};
 int g_clearCategory{-1};
 int g_bountyPage{1};
 int g_heldPage{1};
+int g_probed{-1};
+service::Feedback g_probe{};
 std::size_t g_pageExpected{};
 double g_pageDeadline{};
 std::vector<std::uint16_t> g_pageQueue{};
@@ -60,6 +62,7 @@ void select_held(const service::Held& held) {
     g_laneEdited.fill(false);
 }
 void refresh() {
+    g_probed = -1;
     const auto previous = g_inventory.character;
     g_inventory = service::inventory();
     g_refreshAt = ImGui::GetTime() + 1.0;
@@ -482,20 +485,25 @@ void selected_item(const std::shared_ptr<const Catalog>& data) {
         && detail.definitionHash == entry.identity.definitionHash
         && detail.bucketId == entry.identity.bucketId;
     g_quantity = (std::clamp)(g_quantity, 1, (std::max)(1, entry.quantityLimit));
-    const bool allowed =
-        g_inventory.ready && detailReady && entry.policy == GrantPolicy::legitimate;
+    // Classification is the cheap mirror the whole catalog is built with. Ask the reward policy
+    // itself about the one item on screen, and only when the selection or the account changes.
+    if (g_probed != g_selected && g_inventory.ready && detailReady) {
+        g_probe = service::grantable(entry);
+        g_probed = g_selected;
+    }
+    const bool allowed = g_inventory.ready && detailReady && g_probe.accepted;
     ImGui::SameLine();
     ImGui::BeginDisabled(!allowed);
     if (ImGui::Button("Grant")) grant_feedback(service::grant(entry, g_quantity));
     ImGui::EndDisabled();
     ImGui::EndGroup();
     if (!allowed) {
-        const char* refusal = entry.policy != GrantPolicy::legitimate ? "Cannot be granted"
-                              : !detailReady ? "Cannot be granted: item details unavailable"
-                                             : "Select a character to grant items";
-        ImGui::TextDisabled("%s", refusal);
-        if (ImGui::IsItemHovered() && entry.policy == GrantPolicy::dummy)
-            ImGui::SetTooltip("Preview or reward marker, not a resident item.");
+        if (!g_inventory.ready)
+            ImGui::TextDisabled("Select a character to grant items");
+        else if (!detailReady)
+            ImGui::TextDisabled("Cannot be granted: item details unavailable");
+        else
+            ImGui::TextDisabled("Cannot be granted: %s", g_probe.text.data());
     }
     if (!entry.description.empty())
         ImGui::TextWrapped("Description: %s", entry.description.c_str());

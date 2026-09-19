@@ -80,6 +80,53 @@ bool Statement::text(int column, std::string_view& value) const noexcept {
 }
 
 namespace {
+/**
+ * Widens the inventory row bound from one flat budget to the span the character buckets
+ * actually address. Rebuilds only the constrained parent table; sockets and objective
+ * identities remain intact.
+ */
+bool migrate_bucket_row_span() noexcept {
+    if (!execute("PRAGMA foreign_keys=OFF")) return false;
+    const bool migrated = []() noexcept {
+        Transaction transaction;
+        if (!transaction.ready() || !execute(R"sql(
+CREATE TABLE items_row_span_migration (
+    character_slot INTEGER NOT NULL REFERENCES characters(slot),
+    location INTEGER NOT NULL CHECK (location IN (0, 1)),
+    position INTEGER NOT NULL CHECK (position >= 0),
+    instance_soid INTEGER NOT NULL UNIQUE,
+    definition_hash INTEGER NOT NULL CHECK (definition_hash BETWEEN 1 AND 4294967295),
+    level INTEGER NOT NULL,
+    quantity INTEGER NOT NULL CHECK (quantity > 0),
+    mutation_serial INTEGER NOT NULL CHECK (mutation_serial >= 0),
+    flags INTEGER NOT NULL CHECK (flags BETWEEN 0 AND 7),
+    socket_policy INTEGER NOT NULL CHECK (socket_policy IN (0, 1)),
+    plug_count INTEGER NOT NULL CHECK (plug_count BETWEEN 0 AND 12),
+    movement_ability INTEGER NOT NULL,
+    grenade_ability INTEGER NOT NULL,
+    super_ability INTEGER NOT NULL,
+    melee_ability INTEGER NOT NULL,
+    class_ability INTEGER NOT NULL,
+    seen INTEGER NOT NULL CHECK (seen IN (0, 1)),
+    placement INTEGER NOT NULL DEFAULT 0 CHECK (placement IN (0, 1)),
+    PRIMARY KEY (character_slot, location, position),
+    CHECK ((location = 0 AND position < 17 AND placement = 0)
+           OR (location = 1 AND position < 346)),
+    CHECK (placement = 0 OR quantity = 1)
+) STRICT;
+INSERT INTO items_row_span_migration SELECT * FROM items;
+DROP TABLE items;
+ALTER TABLE items_row_span_migration RENAME TO items;
+PRAGMA user_version=7;
+)sql"))
+            return false;
+        Statement foreignKeys("PRAGMA foreign_key_check");
+        return foreignKeys.step() == SQLITE_DONE && transaction.commit();
+    }();
+    const bool enforced = execute("PRAGMA foreign_keys=ON");
+    return migrated && enforced;
+}
+
 /** Rebuild only the constrained parent table; sockets and objective identities remain intact. */
 bool migrate_postmaster_storage() noexcept {
     // SQLite cannot change foreign_keys inside a savepoint. The open-time mutex is held and
@@ -247,7 +294,11 @@ bool open(std::string_view path,
                     && transaction.commit();
             currentVersion = 6;
         }
-        if (ready && currentVersion != 6) ready = false;
+        if (ready && currentVersion == 6) {
+            ready = migrate_bucket_row_span();
+            currentVersion = 7;
+        }
+        if (ready && currentVersion != 7) ready = false;
     }
     if (!ready) {
         shutdown();

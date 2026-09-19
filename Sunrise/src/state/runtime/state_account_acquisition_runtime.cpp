@@ -5,6 +5,8 @@
 #include <cstddef>
 #include <cstdint>
 #include <limits>
+#include <memory>
+#include <new>
 
 #include "../../core/runtime/wall_clock.h"
 #include "../../middleware/datagen/family4/loadout/loadout_resolver.h"
@@ -167,7 +169,11 @@ bool find_instance(const CharacterState& character,
     after.inventory.values[inventoryIndex] = acquired;
     if (evictedInstanceSoid == 0) ++after.inventory.count;
 
-    AccountState candidate = chargedAccount;
+    // An account snapshot is far too large to copy onto the stack three calls deep.
+    const std::unique_ptr<AccountState> candidateStorage(new (std::nothrow) AccountState);
+    if (!candidateStorage) return false;
+    *candidateStorage = chargedAccount;
+    AccountState& candidate = *candidateStorage;
     candidate.characters[characterIndex] = after;
     family4_loadout::ResolvedLoadout resolved{};
     std::uint16_t inventoryRow = 0;
@@ -270,7 +276,10 @@ bool prepare_item_acquisition(std::uint16_t collectibleIndex,
         return false;
     }
 
-    AccountState chargedAccount = account;
+    const std::unique_ptr<AccountState> chargedStorage(new (std::nothrow) AccountState);
+    if (!chargedStorage) return false;
+    *chargedStorage = account;
+    AccountState& chargedAccount = *chargedStorage;
     bool profileChanged = false;
     // Nothing is charged without a collectible: the cost lives on the collectible's material
     // requirements, and a sale row's own cost fields are still role-open.
@@ -368,7 +377,10 @@ bool prepare_direct_item_bundle(std::uint32_t sourceDefinitionHash,
 
     CharacterState after = before;
     const std::int32_t level = acquisition_level(before);
-    AccountState candidate = account;
+    const std::unique_ptr<AccountState> candidateStorage(new (std::nothrow) AccountState);
+    if (!candidateStorage) return false;
+    *candidateStorage = account;
+    AccountState& candidate = *candidateStorage;
     for (std::size_t index = 0; index < itemDefinitionIndices.size(); ++index) {
         authored_inventory::Item granted{};
         granted.instanceSoid = firstSoid + index;
@@ -866,7 +878,10 @@ bool prepare_profile_item_acquisition(std::uint16_t collectibleIndex,
         || item.definitionHash != definitionHash) {
         return false;
     }
-    AccountState chargedAccount = account;
+    const std::unique_ptr<AccountState> chargedStorage(new (std::nothrow) AccountState);
+    if (!chargedStorage) return false;
+    *chargedStorage = account;
+    AccountState& chargedAccount = *chargedStorage;
     bool materialsChanged = false;
     // Nothing is charged without a collectible: the cost lives on the collectible's material
     // requirements, and a sale row's own cost fields are still role-open.

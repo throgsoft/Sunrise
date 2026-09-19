@@ -59,9 +59,11 @@ inline constexpr std::size_t kProfileActionSourceCapacity = 100;
 /** Runtime-owned SOIDs for profile stacks use a namespace separate from created item instances. */
 inline constexpr std::uint64_t kFirstProfileItemInstanceSoid = 0x5000000000000001ULL;
 /**
- * 151 native rows minus the 16 equipped rows leaves 135 unequipped item rows.
+ * Every character bucket owns a disjoint range of the native 350-row inventory, so one
+ * bucket filling can never consume another's slots. The 32 character-scoped descriptors
+ * span 346 rows, of which Lost Items owns 21; the rest are ordinary placement.
  */
-inline constexpr std::size_t kOrdinaryCharacterItemCapacity = 135;
+inline constexpr std::size_t kOrdinaryCharacterItemCapacity = 325;
 /** Lost Items holds at most 21 whole instances; full storage refuses further overflow. */
 inline constexpr std::size_t kPostmasterItemCapacity = 21;
 inline constexpr std::size_t kCharacterItemCapacity =

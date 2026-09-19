@@ -101,8 +101,14 @@ inline constexpr std::size_t kBountyPageSize = 40;
 [[nodiscard]] std::vector<std::uint16_t> bounty_page(std::size_t page) noexcept;
 
 /** Queues one page of installed bounties for the normal acquisition publication. */
-/** Grants a page as one mutation and returns how many the Pursuits bucket actually admitted. */
-[[nodiscard]] std::size_t queue_bounty_page(std::span<const std::uint16_t> indices) noexcept;
+/**
+ * Grants a page as one account mutation and publishes once.
+ * @param indices Installed bounties to grant.
+ * @param refusal Receives the first refusal State reported, or stays empty.
+ * @return How many of the page the character now holds.
+ */
+[[nodiscard]] std::size_t queue_bounty_page(std::span<const std::uint16_t> indices,
+                                            Feedback& refusal) noexcept;
 
 [[nodiscard]] Feedback clear(Clear category) noexcept;
 } // namespace sunrise::client::ui::items::service

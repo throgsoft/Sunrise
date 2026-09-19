@@ -30,13 +30,17 @@ namespace runtime::detail {
 
 using Quest = build_data::items::QuestInitialization;
 
-/** Removes one instanced row by identity, compacting the rows that follow it. */
-bool drop_instance(CharacterState& character, std::uint64_t instanceSoid) noexcept {
+/**
+ * Names the row one instanced identity occupies. An evicted row is overwritten in place
+ * rather than compacted away: the encoder packs each bucket in row order, and a queued
+ * acquisition flyout still holds the absolute row its item occupied when it was queued.
+ */
+bool find_instance(const CharacterState& character,
+                   std::uint64_t instanceSoid,
+                   std::size_t& row) noexcept {
     for (std::size_t index = 0; index < character.inventory.count; ++index) {
         if (character.inventory.values[index].instanceSoid != instanceSoid) continue;
-        for (std::size_t next = index + 1; next < character.inventory.count; ++next)
-            character.inventory.values[next - 1] = character.inventory.values[next];
-        character.inventory.values[--character.inventory.count] = {};
+        row = index;
         return true;
     }
     return false;
@@ -157,13 +161,11 @@ bool drop_instance(CharacterState& character, std::uint64_t instanceSoid) noexce
     if (source.direct
         && !place_instanced_reward(chargedAccount, characterIndex, acquired, evictedInstanceSoid))
         return false;
-    // The FIFO drops before the arrival lands, so the new row takes the freed index.
-    if (evictedInstanceSoid != 0) {
-        if (!drop_instance(after, evictedInstanceSoid)) return false;
-        inventoryIndex = after.inventory.count;
-    }
+    // The arrival takes the evicted row itself, so no surviving row changes position.
+    if (evictedInstanceSoid != 0 && !find_instance(after, evictedInstanceSoid, inventoryIndex))
+        return false;
     after.inventory.values[inventoryIndex] = acquired;
-    ++after.inventory.count;
+    if (evictedInstanceSoid == 0) ++after.inventory.count;
 
     AccountState candidate = chargedAccount;
     candidate.characters[characterIndex] = after;
@@ -376,9 +378,12 @@ bool prepare_direct_item_bundle(std::uint32_t sourceDefinitionHash,
         granted.mutationSerial = static_cast<std::int32_t>(after.nextInventorySerial++);
         candidate.characters[characterIndex] = after;
         std::uint64_t evicted = 0;
-        if (!place_instanced_reward(candidate, characterIndex, granted, evicted)) return false;
-        if (evicted != 0 && !drop_instance(after, evicted)) return false;
-        after.inventory.values[after.inventory.count++] = granted;
+        std::size_t row = after.inventory.count;
+        if (!place_instanced_reward(candidate, characterIndex, granted, evicted)
+            || (evicted != 0 && !find_instance(after, evicted, row)))
+            return false;
+        after.inventory.values[row] = granted;
+        if (evicted == 0) ++after.inventory.count;
     }
 
     candidate.characters[characterIndex] = after;
@@ -450,10 +455,12 @@ valid_item_acquisition_source(const PendingItemAcquisition& mutation) noexcept {
         || mutation.expectedInventoryCount >= authored_inventory::kCharacterItemCapacity
         || mutation.evictedCount > 1U
         || (mutation.evictedCount != 0) != (mutation.evictedInstanceSoid != 0)
-        || mutation.evictedCount > mutation.expectedInventoryCount
-        || mutation.inventoryIndex != mutation.expectedInventoryCount - mutation.evictedCount
-        || mutation.afterCharacter.inventory.count
-               != mutation.expectedInventoryCount + 1U - mutation.evictedCount
+        || (mutation.evictedCount == 0
+                ? (mutation.inventoryIndex != mutation.expectedInventoryCount
+                   || mutation.afterCharacter.inventory.count
+                          != mutation.expectedInventoryCount + 1U)
+                : (mutation.inventoryIndex >= mutation.expectedInventoryCount
+                   || mutation.afterCharacter.inventory.count != mutation.expectedInventoryCount))
         || mutation.inventoryIndex >= mutation.afterCharacter.inventory.count
         || mutation.afterCharacter.inventory.values[mutation.inventoryIndex].instanceSoid
                != mutation.acquiredInstanceSoid
@@ -599,9 +606,12 @@ valid_item_acquisition_source(const PendingItemAcquisition& mutation) noexcept {
         granted.mutationSerial = static_cast<std::int32_t>(canonical.nextInventorySerial++);
         after.characters[mutation.characterIndex] = canonical;
         std::uint64_t evicted = 0;
-        if (!place_instanced_reward(after, mutation.characterIndex, granted, evicted)) return false;
-        if (evicted != 0 && !drop_instance(canonical, evicted)) return false;
-        canonical.inventory.values[canonical.inventory.count++] = granted;
+        std::size_t row = canonical.inventory.count;
+        if (!place_instanced_reward(after, mutation.characterIndex, granted, evicted)
+            || (evicted != 0 && !find_instance(canonical, evicted, row)))
+            return false;
+        canonical.inventory.values[row] = granted;
+        if (evicted == 0) ++canonical.inventory.count;
     }
     if (!same_character(canonical, mutation.afterCharacter)) {
         return false;

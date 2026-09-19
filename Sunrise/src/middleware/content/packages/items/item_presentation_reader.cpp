@@ -143,14 +143,16 @@ bool PresentationReader::icon(std::uint16_t index, Icon& output) noexcept {
         || !tables::read(std::span<const std::byte>{blob_}, 0x14, tag)
         || !read(tag, 132, blob_, cls) || cls != 0x80804A69U || blob_.size() != 132)
         return false;
-    // Only the simple one-texture set is supported. Animated/array/conditional images stay absent.
+    // Only the simple texture set is supported; animated and conditional images stay absent.
+    // A sequence's first frame is the base icon, and the later frames are item states the
+    // module does not track.
     const std::span<const std::byte> set{blob_};
     std::uint32_t kind{}, resourceClass{}, outerClass{}, innerClass{};
     tables::Array outer{}, inner{};
     if (!tables::read(set, 8, kind) || kind != 0 || !tables::read(set, 28, resourceClass)
         || resourceClass != 0x80804A67U || !tables::find_array_at(set, 32, outer)
-        || outer.count != 1 || (outerClass = outer.elementClass) != 0x80804A6CU
-        || !tables::find_array_at(set, outer.dataOffset, inner) || inner.count != 1
+        || outer.count == 0 || (outerClass = outer.elementClass) != 0x80804A6CU
+        || !tables::find_array_at(set, outer.dataOffset, inner) || inner.count == 0
         || (innerClass = inner.elementClass) != 0x80804A6FU
         || !tables::read(set, inner.dataOffset, tag) || !read(tag, 40, blob_, cls)
         || blob_.size() != 40)

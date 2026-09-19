@@ -95,10 +95,9 @@ bool consume_dawning_pickup_release(Session& session,
     if (!session.queuez.family4Active || session.queuez.family4Version == 0
         || now < session.dawningPickupSweepDueTick)
         return false;
-    // Allow the observer to copy acquisition data before the separate empty-row revision.
-    // Retained row overlays still require the longer presentation hold. Recheck the live
-    // deadline rather than caching it: another action can clear an overlay before it expires.
-    if (now < bap::acquisition_queue_deadline()) return false;
+    // Staging evicts the bucket's oldest row when it is full, so nothing waits for a separate
+    // empty-row revision and there is no deletion for an observer grace to protect. The due tick
+    // is a backoff for a sweep that could not proceed, not a pacing interval.
     session.dawningPickupSweepDueTick = now + 1'000;
     state::investment::store::Transaction transaction;
     auto account = std::unique_ptr<state::AccountState>{new (std::nothrow) state::AccountState};
@@ -109,13 +108,11 @@ bool consume_dawning_pickup_release(Session& session,
     for (std::size_t i = 0; i < account->characterCount; ++i)
         if (account->characters[i].selected) selected = &account->characters[i];
     if (!selected) return false;
-    std::size_t removed{};
-    if (!state::runtime::detail::dawning::drain_pickups(selected->soid, removed)) return false;
     std::size_t acquired{};
-    if (removed == 0
-        && !state::runtime::detail::dawning::stage_queued_pickups(selected->soid, acquired))
+    if (!state::runtime::detail::dawning::stage_queued_pickups(selected->soid, acquired)
+        || acquired == 0) {
         return false;
-    if (removed == 0 && acquired == 0) return false;
+    }
 
     touchesScratch = true;
     auto nonce = session.sendNonce;
@@ -123,16 +120,7 @@ bool consume_dawning_pickup_release(Session& session,
     std::size_t size{};
     // The outer transaction keeps the deletion private until the complete frame fits.
     // Failure rolls back the rows and leaves the oven counters untouched in either case.
-    const bool encoded = acquired != 0
-                             ? append_pickups(session, scratch, nonce, size, after)
-                             : push::append_account_resync_notification(scratch,
-                                                                        session.queuez,
-                                                                        {},
-                                                                        session.sessionKey,
-                                                                        nonce,
-                                                                        scratch.framed,
-                                                                        size,
-                                                                        after);
+    const bool encoded = append_pickups(session, scratch, nonce, size, after);
     if (!encoded || size == 0 || size > response.size() || !queuez::valid(after)
         || !transaction.commit())
         return false;
@@ -140,19 +128,16 @@ bool consume_dawning_pickup_release(Session& session,
     written = size;
     session.sendNonce = nonce;
     session.queuez = after;
-    // Send the empty revision separately before reusing its slots for the next queued batch.
+    // The next batch may publish on the very next pump: it evicts its own room.
     session.dawningPickupSweepDueTick = now;
-    if (acquired != 0) bap::arm_acquisition_presentation_hold(session);
+    bap::arm_acquisition_presentation_hold(session);
     bap::arm_account_resync_elsewhere(session);
-    const auto nextEligible = bap::acquisition_queue_deadline();
-    core::log::writef(
-        core::log::Channel::server,
-        core::log::Level::info,
-        "ev=dawning_pickup stage=%s revision=%d rows=%zu oven_balance=preserved queue_wait_ms=%llu",
-        acquired ? "published" : "released",
-        after.family4Version,
-        acquired ? acquired : removed,
-        static_cast<unsigned long long>(nextEligible > now ? nextEligible - now : 0));
+    core::log::writef(core::log::Channel::server,
+                      core::log::Level::info,
+                      "ev=dawning_pickup stage=published revision=%d rows=%zu "
+                      "oven_balance=preserved",
+                      after.family4Version,
+                      acquired);
     return true;
 }
 } // namespace sunrise::server::bap::encrypted

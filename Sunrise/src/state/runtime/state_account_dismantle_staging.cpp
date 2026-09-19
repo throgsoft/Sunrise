@@ -652,9 +652,11 @@ bool stage_character_stack_discard(const AccountState& account,
     auto target = before.stacks.count;
     for (std::size_t i = 0; i < before.stacks.count; ++i) {
         const auto& stack = before.stacks.values[i];
-        if (stack.definitionHash != item.definitionHash) continue;
-        if (target != before.stacks.count || stack.quantity != expectedStackQuantity) return false;
-        target = i;
+        if (stack.definitionHash != item.definitionHash
+            || stack.quantity != expectedStackQuantity) {
+            continue;
+        }
+        if (target == before.stacks.count) target = i;
     }
     if (target == before.stacks.count) return false;
     for (std::size_t i = 0; i < before.inventory.count; ++i)

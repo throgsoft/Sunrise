@@ -1,6 +1,5 @@
 #pragma once
 
-#include <algorithm>
 #include <limits>
 
 #include "item_discard_policy.h"
@@ -45,14 +44,11 @@ namespace sunrise::state::item_discard {
     const auto consumed = quantity(mode(hash), observed, detail.maxStackSize);
     if (consumed == 0) return false;
     auto target = before.profileItems.size();
-    std::int32_t serial = 0;
     for (std::size_t i = 0; i < before.profileItemCount; ++i) {
         const auto& row = before.profileItems[i];
-        serial = (std::max)(serial, row.mutationSerial);
-        if (row.definitionHash != hash) continue;
-        if (target != before.profileItems.size() || row.instanceSoid || row.quantity != observed)
-            return false;
-        target = i;
+        if (row.definitionHash != hash || row.quantity != observed) continue;
+        if (row.instanceSoid) return false;
+        if (target == before.profileItems.size()) target = i;
     }
     if (target == before.profileItems.size()) return false;
     const auto remaining = observed - consumed;

@@ -30,9 +30,12 @@ bool consume_synthesizer_family4_refresh(Session& session,
                                          std::span<std::byte> response,
                                          std::size_t& written,
                                          bool& touchesScratch) noexcept {
+    // Republishing a container view mid-flyout cuts the acquisition presentation short, so this
+    // waits the hold out the same way a full Family-4 repush does.
     if (!refresh.armed || session.family5RefreshArmed || session.accountResyncArmed
         || !session.queuez.family4Active || !queuez::valid(session.queuez)
-        || GetTickCount64() < refresh.dueTick)
+        || GetTickCount64() < refresh.dueTick
+        || GetTickCount64() < session.acquisitionPresentationUntilTick)
         return false;
     // Past the due tick every pump would otherwise retry immediately, and each retry copies a
     // whole account snapshot. A transient miss waits out another settling interval instead.

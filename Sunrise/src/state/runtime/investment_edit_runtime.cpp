@@ -331,6 +331,162 @@ Result set_objective_lane(std::uint64_t instanceSoid,
     return edit(index, value, lane, false, false, true, instanceSoid);
 }
 
+namespace {
+
+/** @return True when this row's installed definition names the bucket being emptied. */
+[[nodiscard]] bool in_bucket(std::uint32_t definitionHash, std::uint8_t bucketId) noexcept {
+    data::items::Definition item{};
+    return data::find_item_definition_hash(definitionHash, item) && item.bucketId == bucketId;
+}
+
+/** @return True when any character has this resident equipped. */
+[[nodiscard]] bool equipped_anywhere(const AccountState& account, std::uint64_t soid) noexcept {
+    if (soid == 0) return false;
+    for (std::size_t c = 0; c < account.characterCount; ++c)
+        for (const auto& slot : account.characters[c].equipment.slots)
+            if (slot && slot->instanceSoid == soid) return true;
+    return false;
+}
+
+} // namespace
+
+Result set_held_quantity(std::uint64_t instanceSoid,
+                         std::uint16_t definitionIndex,
+                         std::int32_t quantity) noexcept {
+    data::items::Definition item{};
+    data::items::details::Definition detail{};
+    if (quantity < 0) return {false, 0, "quantity must not be negative"};
+    if (!resolve(definitionIndex, item, detail))
+        return {false, 0, "installed item identity or detail unavailable"};
+    data::inventory::buckets::Descriptor bucket{};
+    if (!data::find_inventory_bucket_descriptor(item.bucketId, bucket)
+        || bucket.bucketId != item.bucketId)
+        return {false, 0, "installed bucket unavailable"};
+    const auto limit = (std::max)(1, detail.maxStackSize);
+    if (quantity > limit) return {false, 0, "quantity exceeds the installed stack size"};
+    std::unique_ptr<AccountState> snapshot(new (std::nothrow) AccountState);
+    if (!snapshot) return {false, 0, "allocation failed"};
+    store::Transaction transaction;
+    if (!transaction.ready() || !store::read_account(*snapshot) || !account::valid(*snapshot))
+        return {false, 0, "investment database unavailable"};
+    const auto apply = [&](std::int32_t& held) noexcept {
+        held = quantity;
+        return true;
+    };
+    std::size_t changed = 0;
+    if (bucket.arraySelector == data::inventory::buckets::ArraySelector::profile) {
+        for (std::size_t i = 0; i < snapshot->profileItemCount; ++i) {
+            auto& row = snapshot->profileItems[i];
+            if (row.definitionHash != item.definitionHash || row.instanceSoid != instanceSoid)
+                continue;
+            if (quantity == 0) {
+                for (std::size_t j = i + 1; j < snapshot->profileItemCount; ++j)
+                    snapshot->profileItems[j - 1] = snapshot->profileItems[j];
+                snapshot->profileItems[--snapshot->profileItemCount] = {};
+            } else {
+                (void)apply(row.quantity);
+            }
+            ++changed;
+            break;
+        }
+    } else {
+        auto* character = selected(*snapshot);
+        if (!character) return {false, 0, "no selected character"};
+        for (std::size_t i = 0; i < character->inventory.count && changed == 0; ++i) {
+            auto& row = character->inventory.values[i];
+            if (row.definitionHash != item.definitionHash || row.instanceSoid != instanceSoid)
+                continue;
+            if (equipped_anywhere(*snapshot, row.instanceSoid))
+                return {false, 0, "equipped residents are not edited here"};
+            if (quantity == 0) {
+                for (std::size_t j = i + 1; j < character->inventory.count; ++j)
+                    character->inventory.values[j - 1] = character->inventory.values[j];
+                character->inventory.values[--character->inventory.count] = {};
+            } else {
+                (void)apply(row.quantity);
+            }
+            ++changed;
+        }
+        for (std::size_t i = 0; i < character->stacks.count && changed == 0; ++i) {
+            auto& row = character->stacks.values[i];
+            if (row.definitionHash != item.definitionHash) continue;
+            if (quantity == 0) {
+                for (std::size_t j = i + 1; j < character->stacks.count; ++j)
+                    character->stacks.values[j - 1] = character->stacks.values[j];
+                character->stacks.values[--character->stacks.count] = {};
+            } else {
+                (void)apply(row.quantity);
+            }
+            ++changed;
+        }
+    }
+    if (changed == 0) return {true, 0, "no held row with that identity"};
+    if (!account::valid(*snapshot) || !store::write_account(*snapshot) || !transaction.commit())
+        return {false, 0, "edit transaction failed; no changes committed"};
+    return {true, changed, quantity == 0 ? "row removed" : "quantity set"};
+}
+
+Result drop_bucket(std::uint8_t bucketId) noexcept {
+    data::inventory::buckets::Descriptor bucket{};
+    if (!data::find_inventory_bucket_descriptor(bucketId, bucket) || bucket.bucketId != bucketId)
+        return {false, 0, "installed bucket unavailable"};
+    std::unique_ptr<AccountState> snapshot(new (std::nothrow) AccountState);
+    if (!snapshot) return {false, 0, "allocation failed"};
+    store::Transaction transaction;
+    if (!transaction.ready() || !store::read_account(*snapshot) || !account::valid(*snapshot))
+        return {false, 0, "investment database unavailable"};
+    std::size_t removed = 0;
+    if (bucket.arraySelector == data::inventory::buckets::ArraySelector::profile) {
+        auto& rows = snapshot->profileItems;
+        std::size_t kept = 0;
+        for (std::size_t i = 0; i < snapshot->profileItemCount; ++i) {
+            const auto row = rows[i];
+            if (in_bucket(row.definitionHash, bucketId)) {
+                ++removed;
+                continue;
+            }
+            rows[kept++] = row;
+        }
+        for (std::size_t i = kept; i < snapshot->profileItemCount; ++i)
+            rows[i] = {};
+        snapshot->profileItemCount = kept;
+    } else {
+        auto* character = selected(*snapshot);
+        if (!character) return {false, 0, "no selected character"};
+        std::size_t kept = 0;
+        const auto before = character->inventory.count;
+        for (std::size_t i = 0; i < before; ++i) {
+            const auto held = character->inventory.values[i];
+            if (in_bucket(held.definitionHash, bucketId)
+                && !equipped_anywhere(*snapshot, held.instanceSoid)) {
+                ++removed;
+                continue;
+            }
+            character->inventory.values[kept++] = held;
+        }
+        for (std::size_t i = kept; i < before; ++i)
+            character->inventory.values[i] = {};
+        character->inventory.count = kept;
+        std::size_t keptStacks = 0;
+        const auto beforeStacks = character->stacks.count;
+        for (std::size_t i = 0; i < beforeStacks; ++i) {
+            const auto row = character->stacks.values[i];
+            if (in_bucket(row.definitionHash, bucketId)) {
+                ++removed;
+                continue;
+            }
+            character->stacks.values[keptStacks++] = row;
+        }
+        for (std::size_t i = keptStacks; i < beforeStacks; ++i)
+            character->stacks.values[i] = {};
+        character->stacks.count = keptStacks;
+    }
+    if (removed == 0) return {true, 0, "bucket already empty"};
+    if (!account::valid(*snapshot) || !store::write_account(*snapshot) || !transaction.commit())
+        return {false, 0, "removal transaction failed; no changes committed"};
+    return {true, removed, "bucket emptied; no rewards, claims or refunds"};
+}
+
 Result drop_bounties() noexcept {
     return drop(0, DropScope::bounties);
 }

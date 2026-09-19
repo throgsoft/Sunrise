@@ -32,6 +32,26 @@ grant_item(std::uint16_t index, std::int32_t quantity, std::uint32_t expectedHas
 [[nodiscard]] Result complete_bounties() noexcept;
 
 /** Removes held bounties classified by installed metadata; preserves quests, stacks and rewards. */
+/**
+ * Removes everything the selected character or the account holds in one installed bucket.
+ * Equipped residents are never removed. The bucket is named by installed metadata, so no
+ * category is enumerated here.
+ * @param bucketId Installed inventory bucket to empty.
+ * @return Rows removed, or a reason nothing was committed.
+ */
+[[nodiscard]] Result drop_bucket(std::uint8_t bucketId) noexcept;
+
+/**
+ * Sets the quantity of one held row, removing it when the quantity reaches zero.
+ * @param instanceSoid Instanced resident, or zero for a stack or profile row.
+ * @param definitionIndex Installed item the row holds.
+ * @param quantity Quantity to store, bounded by the installed stack limit.
+ * @return Rows changed, or a reason nothing was committed.
+ */
+[[nodiscard]] Result set_held_quantity(std::uint64_t instanceSoid,
+                                       std::uint16_t definitionIndex,
+                                       std::int32_t quantity) noexcept;
+
 [[nodiscard]] Result drop_bounties() noexcept;
 /** Removes the selected character's held Engrams bucket residents without decrypting them. */
 [[nodiscard]] Result drop_engrams() noexcept;

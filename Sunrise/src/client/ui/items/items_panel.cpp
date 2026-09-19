@@ -667,6 +667,108 @@ void bounties_tab(const Catalog& data) {
     held_detail(data);
     if (sideBySide) ImGui::EndChild();
 }
+int g_bucketSelected = -1;
+std::vector<service::BucketSummary> g_buckets{};
+std::vector<service::BucketItem> g_bucketItems{};
+std::vector<int> g_bucketQuantities{};
+double g_bucketRefreshAt = 0.0;
+
+/** Reads every bucket and the selected one's contents, at the panel's ordinary refresh rate. */
+void refresh_buckets(bool force) {
+    const auto now = ImGui::GetTime();
+    if (!force && now < g_bucketRefreshAt) return;
+    g_bucketRefreshAt = now + 1.0;
+    g_buckets = service::buckets();
+    if (g_bucketSelected < 0 || g_bucketSelected >= static_cast<int>(g_buckets.size())) {
+        g_bucketItems.clear();
+        g_bucketQuantities.clear();
+        return;
+    }
+    g_bucketItems = service::bucket_items(g_buckets[g_bucketSelected].bucketId);
+    g_bucketQuantities.assign(g_bucketItems.size(), 0);
+    for (std::size_t i = 0; i < g_bucketItems.size(); ++i)
+        g_bucketQuantities[i] = g_bucketItems[i].quantity;
+}
+
+void buckets_tab(const Catalog& data) {
+    refresh_buckets(false);
+    constexpr std::array<const char*, 3> kArrays{"character", "profile", "small profile"};
+    ImGui::BeginChild("##bucket_list", ImVec2(330.0f, 0.0f), true);
+    for (std::size_t i = 0; i < g_buckets.size(); ++i) {
+        const auto& bucket = g_buckets[i];
+        char label[128]{};
+        std::snprintf(label,
+                      sizeof label,
+                      "%3u  %-13s %2zu/%-3u %s##bucket%zu",
+                      unsigned(bucket.bucketId),
+                      kArrays[bucket.arraySelector < 3U ? bucket.arraySelector : 2U],
+                      bucket.held,
+                      unsigned(bucket.slotCount),
+                      (bucket.policyFlags & 1U) != 0
+                          ? ((bucket.policyFlags & 2U) != 0 ? "FIFO,noXfer" : "FIFO")
+                          : "",
+                      i);
+        if (ImGui::Selectable(label, g_bucketSelected == static_cast<int>(i))) {
+            g_bucketSelected = static_cast<int>(i);
+            refresh_buckets(true);
+        }
+    }
+    ImGui::EndChild();
+    ImGui::SameLine();
+    ImGui::BeginChild("##bucket_contents", ImVec2(0.0f, 0.0f), true);
+    if (g_bucketSelected < 0 || g_bucketSelected >= static_cast<int>(g_buckets.size())) {
+        ImGui::TextDisabled("Select a bucket.");
+        ImGui::EndChild();
+        return;
+    }
+    const auto& bucket = g_buckets[g_bucketSelected];
+    ImGui::Text("Bucket %u  %s  slots %u..%u",
+                unsigned(bucket.bucketId),
+                kArrays[bucket.arraySelector < 3U ? bucket.arraySelector : 2U],
+                unsigned(bucket.firstSlot),
+                unsigned(bucket.firstSlot + bucket.slotCount));
+    ImGui::SameLine();
+    if (ImGui::Button("Empty bucket")) {
+        feedback(service::clear_bucket(bucket.bucketId));
+        refresh_buckets(true);
+    }
+    ImGui::Separator();
+    if (g_bucketItems.empty()) ImGui::TextDisabled("Nothing held here.");
+    for (std::size_t i = 0; i < g_bucketItems.size(); ++i) {
+        const auto& item = g_bucketItems[i];
+        const Entry* entry = nullptr;
+        for (const auto& candidate : data.entries)
+            if (candidate.identity.definitionIndex == item.index) entry = &candidate;
+        ImGui::PushID(static_cast<int>(i));
+        ImGui::Text("%-34s", entry && !entry->name.empty() ? entry->name.c_str() : "(unnamed)");
+        ImGui::SameLine();
+        ImGui::TextDisabled("idx=%u serial=%d%s",
+                            unsigned(item.index),
+                            item.mutationSerial,
+                            item.equipped ? " equipped" : "");
+        ImGui::SetNextItemWidth(110.0f);
+        ImGui::BeginDisabled(item.equipped);
+        ImGui::InputInt("##qty", &g_bucketQuantities[i]);
+        g_bucketQuantities[i] =
+            (std::clamp)(g_bucketQuantities[i], 0, (std::max)(1, item.maxStack));
+        ImGui::SameLine();
+        if (ImGui::Button("Set")) {
+            feedback(service::set_item_quantity(item.instance, item.index, g_bucketQuantities[i]));
+            refresh_buckets(true);
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Delete")) {
+            feedback(service::set_item_quantity(item.instance, item.index, 0));
+            refresh_buckets(true);
+        }
+        ImGui::EndDisabled();
+        ImGui::SameLine();
+        ImGui::TextDisabled("of %d", (std::max)(1, item.maxStack));
+        ImGui::PopID();
+    }
+    ImGui::EndChild();
+}
+
 void clear_tab() {
     ImGui::TextWrapped("Drops every held item in the chosen scope. Equipped items are kept.");
     ImGui::BeginDisabled(!g_inventory.ready);
@@ -728,6 +830,10 @@ void draw() noexcept {
             }
             if (ImGui::BeginTabItem("Pursuits")) {
                 bounties_tab(*data);
+                ImGui::EndTabItem();
+            }
+            if (ImGui::BeginTabItem("Buckets")) {
+                buckets_tab(*data);
                 ImGui::EndTabItem();
             }
             if (ImGui::BeginTabItem("Clear")) {

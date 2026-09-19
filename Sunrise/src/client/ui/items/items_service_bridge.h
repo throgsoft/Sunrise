@@ -33,6 +33,38 @@ struct Inventory {
     std::size_t unresolved{};
     bool ready{};
 };
+/** One installed bucket and how much of it the account currently holds. */
+struct BucketSummary {
+    std::uint16_t firstSlot{};
+    std::uint16_t slotCount{};
+    std::size_t held{};
+    std::uint8_t bucketId{};
+    std::uint8_t arraySelector{};
+    std::uint8_t policyFlags{};
+    std::int8_t equipmentSlot{};
+};
+
+/** One row a bucket holds, as the account stores it. */
+struct BucketItem {
+    std::uint64_t instance{};
+    std::uint32_t hash{};
+    std::uint16_t index{};
+    std::int32_t quantity{};
+    std::int32_t maxStack{};
+    std::int32_t mutationSerial{};
+    bool equipped{};
+};
+
+/** Every installed bucket, in bucket order. */
+[[nodiscard]] std::vector<BucketSummary> buckets() noexcept;
+/** What one bucket holds for the selected character, or for the account when it is profile wide. */
+[[nodiscard]] std::vector<BucketItem> bucket_items(std::uint8_t bucketId) noexcept;
+/** Empties one bucket, preserving anything equipped. */
+[[nodiscard]] Feedback clear_bucket(std::uint8_t bucketId) noexcept;
+/** Sets one held row's quantity, removing the row at zero. */
+[[nodiscard]] Feedback
+set_item_quantity(std::uint64_t instance, std::uint16_t index, std::int32_t quantity) noexcept;
+
 enum class Clear : std::uint8_t { weapons, armor, bounties, engrams, seasonPass };
 [[nodiscard]] Inventory inventory() noexcept;
 [[nodiscard]] GrantPolicy classify(const Entry& entry) noexcept;

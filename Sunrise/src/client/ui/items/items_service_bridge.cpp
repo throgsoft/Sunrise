@@ -279,6 +279,99 @@ bool queue_bounty_page(std::span<const std::uint16_t> indices) noexcept {
     return changed != 0;
 }
 
+std::vector<BucketSummary> buckets() noexcept {
+    std::vector<BucketSummary> output;
+    try {
+        for (std::size_t id = 0; id <= 0xFFU; ++id) {
+            data::inventory::buckets::Descriptor bucket{};
+            const auto bucketId = static_cast<std::uint8_t>(id);
+            if (!data::find_inventory_bucket_descriptor(bucketId, bucket)
+                || bucket.bucketId != bucketId)
+                continue;
+            BucketSummary summary{};
+            summary.bucketId = bucketId;
+            summary.arraySelector = static_cast<std::uint8_t>(bucket.arraySelector);
+            summary.firstSlot = bucket.firstSlot;
+            summary.slotCount = bucket.slotCount;
+            summary.policyFlags = bucket.policyFlags;
+            summary.equipmentSlot = static_cast<std::int8_t>(bucket.equipmentSlot);
+            summary.held = bucket_items(bucketId).size();
+            output.push_back(summary);
+        }
+    } catch (...) {
+        return {};
+    }
+    return output;
+}
+
+std::vector<BucketItem> bucket_items(std::uint8_t bucketId) noexcept {
+    std::vector<BucketItem> output;
+    try {
+        data::inventory::buckets::Descriptor bucket{};
+        if (!data::find_inventory_bucket_descriptor(bucketId, bucket)
+            || bucket.bucketId != bucketId)
+            return output;
+        const std::unique_ptr<state::AccountState> account(
+            new state::AccountState(state::account_snapshot()));
+        if (!state::account::valid(*account)) return output;
+        const auto describe = [&](std::uint64_t instance,
+                                  std::uint32_t hash,
+                                  std::int32_t quantity,
+                                  std::int32_t serial) {
+            data::items::Definition identity{};
+            data::items::details::Definition detail{};
+            if (!data::find_item_definition_hash(hash, identity) || identity.bucketId != bucketId
+                || !data::find_configured_item_detail(identity.definitionIndex, detail))
+                return;
+            BucketItem row{};
+            row.instance = instance;
+            row.hash = hash;
+            row.index = identity.definitionIndex;
+            row.quantity = quantity;
+            row.maxStack = detail.maxStackSize;
+            row.mutationSerial = serial;
+            for (std::size_t c = 0; c < account->characterCount && !row.equipped; ++c)
+                for (const auto& slot : account->characters[c].equipment.slots)
+                    if (slot && instance != 0 && slot->instanceSoid == instance)
+                        row.equipped = true;
+            output.push_back(row);
+        };
+        if (bucket.arraySelector == data::inventory::buckets::ArraySelector::profile) {
+            for (std::size_t i = 0; i < account->profileItemCount; ++i) {
+                const auto& item = account->profileItems[i];
+                describe(
+                    item.instanceSoid, item.definitionHash, item.quantity, item.mutationSerial);
+            }
+            return output;
+        }
+        for (std::size_t c = 0; c < account->characterCount; ++c) {
+            const auto& character = account->characters[c];
+            if (!character.selected) continue;
+            for (std::size_t i = 0; i < character.inventory.count; ++i) {
+                const auto& item = character.inventory.values[i];
+                describe(
+                    item.instanceSoid, item.definitionHash, item.quantity, item.mutationSerial);
+            }
+            for (std::size_t i = 0; i < character.stacks.count; ++i) {
+                const auto& row = character.stacks.values[i];
+                describe(0, row.definitionHash, row.quantity, row.mutationSerial);
+            }
+        }
+    } catch (...) {
+        return {};
+    }
+    return output;
+}
+
+Feedback clear_bucket(std::uint8_t bucketId) noexcept {
+    return report(state::investment_edit::drop_bucket(bucketId));
+}
+
+Feedback
+set_item_quantity(std::uint64_t instance, std::uint16_t index, std::int32_t quantity) noexcept {
+    return report(state::investment_edit::set_held_quantity(instance, index, quantity));
+}
+
 Feedback clear(Clear category) noexcept {
     switch (category) {
     case Clear::weapons:

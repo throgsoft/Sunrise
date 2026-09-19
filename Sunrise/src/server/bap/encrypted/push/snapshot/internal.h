@@ -59,6 +59,16 @@ inline constexpr std::uint8_t kChangeKind = 1;
 /** Clear policy bits leave the record enabled; the observer skips any other pair. */
 inline constexpr std::uint16_t kChangeFlags = 0;
 
+/**
+ * Rising record identity for one inventory change.
+ * The native observer orders records by this and prefers the greatest, so it has to keep rising
+ * across publications. A row's own mutation serial already rises for exactly this reason, so the
+ * record is identified by the value it already carries rather than by its slot in the ring.
+ */
+[[nodiscard]] inline std::uint16_t change_sequence(std::int32_t mutationSerial) noexcept {
+    return static_cast<std::uint16_t>(static_cast<std::uint32_t>(mutationSerial));
+}
+
 /** Pins feed-referenced item identities to their published character rows. */
 [[nodiscard]] bool apply_acquisition_presentation(
     std::span<std::byte> characterBytes,

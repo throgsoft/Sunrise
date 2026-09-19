@@ -35,9 +35,8 @@ namespace account_layout = middleware::datagen::family4::account::layout;
 
 /** Points one ring record at one profile row. */
 void name_row(account_layout::ProfileInventoryChangeRecord& record,
-              std::size_t sequence,
               std::int32_t mutationSerial) noexcept {
-    record.sequence = static_cast<std::uint16_t>(sequence);
+    record.sequence = change_sequence(mutationSerial);
     record.mutationSerial = mutationSerial;
     record.kind = kChangeKind;
     record.flags = kChangeFlags;
@@ -72,9 +71,7 @@ write_exchange_changes(account_layout::Object& accountObject,
         if (matchedRows != 1) {
             return "exchange_change_row";
         }
-        name_row(accountObject.profileInventoryChanges.records[change],
-                 change,
-                 announced.mutationSerial);
+        name_row(accountObject.profileInventoryChanges.records[change], announced.mutationSerial);
     }
     accountObject.profileInventoryChanges.writeSlot =
         static_cast<std::uint16_t>(mutation.changeCount);
@@ -111,9 +108,10 @@ write_acquisition_change(account_layout::Object& accountObject,
         return "profile_acquire_inventory_change_state";
     }
     accountObject.profileInventoryChanges.writeSlot = 1;
-    accountObject.profileInventoryChanges.nextSequence = 1;
-    name_row(
-        accountObject.profileInventoryChanges.records.front(), 0, mutation.acquiredMutationSerial);
+    accountObject.profileInventoryChanges.nextSequence =
+        static_cast<std::uint16_t>(change_sequence(mutation.acquiredMutationSerial) + 1);
+    name_row(accountObject.profileInventoryChanges.records.front(),
+             mutation.acquiredMutationSerial);
     return nullptr;
 }
 
@@ -234,10 +232,8 @@ bool prepare_seasonal_experience_presentation(
     // One new-item flag byte covers 8 inventory rows; an occupied row carries watermark 1.
     constexpr std::size_t kBitsPerFlagByte = 8;
     constexpr std::int32_t kOccupiedRowWatermark = 1;
-    // The change ring holds one entry, so the next write slot and sequence are both 1.
-    constexpr std::uint16_t kChangeSequence = 0;
+    // The change ring holds one entry, so the next write slot is 1.
     constexpr std::uint16_t kChangeNextWriteSlot = 1;
-    constexpr std::uint16_t kChangeNextSequence = 1;
 
     if (amount <= 0 || mutationSerial < 0 || !queuez::valid(before) || !before.family4Active
         || before.family4RootSoid == 0 || before.family4ResidentCount == 0
@@ -316,9 +312,10 @@ bool prepare_seasonal_experience_presentation(
                                                                  << (rowIndex % kBitsPerFlagByte);
     characterObject.instanceProgressWatermarks[rowIndex] = kOccupiedRowWatermark;
     characterObject.inventoryChanges.writeSlot = kChangeNextWriteSlot;
-    characterObject.inventoryChanges.nextSequence = kChangeNextSequence;
+    characterObject.inventoryChanges.nextSequence =
+        static_cast<std::uint16_t>(change_sequence(mutationSerial) + 1);
     auto& change = characterObject.inventoryChanges.records.front();
-    change.sequence = kChangeSequence;
+    change.sequence = change_sequence(mutationSerial);
     change.mutationSerial = mutationSerial;
     change.kind = kChangeKind;
     change.flags = kChangeFlags;
@@ -463,9 +460,7 @@ bool prepare_item_acquisition(
     // Keep it local to this push; later snapshots encode an empty bank.
     constexpr std::size_t kBitsPerFlagByte = 8;
     constexpr std::int32_t kEncodedOccupiedRowWatermark = 1;
-    constexpr std::uint16_t kAcquisitionChangeSequence = 0;
     constexpr std::uint16_t kAcquisitionChangeNextWriteSlot = 1;
-    constexpr std::uint16_t kAcquisitionChangeNextSequence = 1;
     auto& characterObject =
         *reinterpret_cast<family4_datagen::character::layout::Object*>(characterBytes.data());
     const std::size_t acquiredRow = mutation.inventoryRow;
@@ -495,9 +490,10 @@ bool prepare_item_acquisition(
         return report_failure("acquire_inventory_change_state");
     }
     characterObject.inventoryChanges.writeSlot = kAcquisitionChangeNextWriteSlot;
-    characterObject.inventoryChanges.nextSequence = kAcquisitionChangeNextSequence;
+    characterObject.inventoryChanges.nextSequence =
+        static_cast<std::uint16_t>(change_sequence(acquiredMutationSerial) + 1);
     auto& acquisitionChange = characterObject.inventoryChanges.records.front();
-    acquisitionChange.sequence = kAcquisitionChangeSequence;
+    acquisitionChange.sequence = change_sequence(acquiredMutationSerial);
     acquisitionChange.mutationSerial = acquiredMutationSerial;
     acquisitionChange.kind = kChangeKind;
     acquisitionChange.flags = kChangeFlags;
@@ -745,7 +741,7 @@ bool prepare_item_dismantle(Scratch& scratch,
                 return report_failure("dismantle_reward_row");
             }
             auto& change = accountObject.profileInventoryChanges.records[rewardIndex];
-            change.sequence = static_cast<std::uint16_t>(rewardIndex);
+            change.sequence = change_sequence(reward.mutationSerial);
             change.mutationSerial = reward.mutationSerial;
             change.kind = kChangeKind;
             change.flags = kChangeFlags;

@@ -17,6 +17,7 @@
 #include "bounty_redemption_runtime.h"
 #include "character_encoding_preflight.h"
 #include "dawning_reward_runtime.h"
+#include "fifo_bucket_eviction.h"
 #include "profile_stack_credit.h"
 #include "runtime.h"
 #include "state_account_transaction_helpers.h"
@@ -349,6 +350,24 @@ bool runtime::detail::stage_record_reward_grant(const AccountState& account,
             if (character.nextInventorySerial
                 >= static_cast<std::uint32_t>((std::numeric_limits<std::int32_t>::max)())) {
                 return false;
+            }
+            // The installed policy admits into a full first-in-first-out bucket by dropping its
+            // oldest row rather than refusing the arrival.
+            {
+                std::size_t occupied = 0;
+                bool matched = false;
+                for (std::size_t candidate = 0; candidate < character.stacks.count; ++candidate) {
+                    const auto& row = character.stacks.values[candidate];
+                    build_data::items::Definition held{};
+                    if (!build_data::find_item_definition_hash(row.definitionHash, held)) {
+                        return false;
+                    }
+                    occupied += held.bucketId == item.bucketId;
+                    matched = matched || row.definitionHash == item.definitionHash;
+                }
+                if (!matched && occupied >= bucket.slotCount) {
+                    (void)evict_oldest_stacks(character, bucket, occupied - bucket.slotCount + 1);
+                }
             }
             std::size_t stackIndex = character.stacks.count;
             std::size_t bucketStacks = 0;

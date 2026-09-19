@@ -7,6 +7,7 @@
 
 #include "../build_data/runtime.h"
 #include "../investment/store_internal.h"
+#include "fifo_bucket_eviction.h"
 
 namespace sunrise::state::runtime::detail::dawning {
 namespace identity = account::inventory::dawning;
@@ -73,7 +74,13 @@ bool insert_pickups(CharacterState& character,
                            - static_cast<std::int64_t>(character.nextInventorySerial))
         return false;
     std::size_t available{};
-    if (!pickup_space(character, bucket, available) || quantity > available) return false;
+    if (!pickup_space(character, bucket, available)) return false;
+    if (static_cast<std::size_t>(quantity) > available) {
+        (void)evict_oldest_stacks(
+            character, bucket, static_cast<std::size_t>(quantity) - available);
+        if (!pickup_space(character, bucket, available)) return false;
+    }
+    if (static_cast<std::size_t>(quantity) > available) return false;
     for (std::int32_t i = 0; i < quantity; ++i) {
         const auto slot = character.stacks.count++;
         lastSerial = static_cast<std::int32_t>(character.nextInventorySerial++);

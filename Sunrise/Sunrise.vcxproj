@@ -2237,6 +2237,7 @@
     <ClInclude Include="src\state\runtime\bounty_reward_policy.h" />
     <ClInclude Include="src\state\runtime\bounty_reward_policy_data.h" />
     <ClInclude Include="src\state\runtime\bounty_stack_reward_plan.h" />
+    <ClInclude Include="src\state\runtime\fifo_bucket_eviction.h" />
     <ClInclude Include="src\state\runtime\profile_stack_credit.h" />
     <ClCompile Include="src\state\runtime\dawning_oven_persistence.cpp" />
 

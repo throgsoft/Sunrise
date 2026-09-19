@@ -14,13 +14,11 @@ enum class GenericReward { none, moonRabbit };
  * reports orb pickups in the Dreaming City. Cat rewards require a separately proven statue/gift
  * transaction and cannot be inferred from the destination, primary definition, or player position.
  */
-template <class Find>
-[[nodiscard]] GenericReward
+[[nodiscard]] inline GenericReward
 generic_interaction(std::uint32_t target,
                     const state::build_data::sobjects::Definition* primary,
                     std::span<const std::uint32_t> extras,
-                    std::string_view package,
-                    Find&& find) noexcept {
+                    std::string_view package) noexcept {
     if (target != 3539U || !primary || primary->typeCode != 2 || primary->nameHash != 0x7A0FD954U
         || primary->lane4 != 0x0011FFFFU || package != "luna_freeroam") {
         return GenericReward::none;
@@ -29,8 +27,8 @@ generic_interaction(std::uint32_t target,
     for (const auto extra : extras) {
         state::build_data::sobjects::Definition statue{};
         if (extra >= state::build_data::sobjects::kDefinitionCapacity
-            || !find(static_cast<std::uint16_t>(extra), statue) || statue.typeCode != 2
-            || statue.recordRow() != 0xFFFFU) {
+            || !state::build_data::sobjects::find(static_cast<std::uint16_t>(extra), statue)
+            || statue.typeCode != 2 || statue.recordRow() != 0xFFFFU) {
             continue;
         }
         const auto ordinal = statue.loreObjectOrdinal();

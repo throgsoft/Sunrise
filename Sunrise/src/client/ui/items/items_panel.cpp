@@ -26,7 +26,6 @@ service::Feedback g_feedback{};
 service::Feedback g_grantFeedback{};
 service::Inventory g_inventory{};
 double g_refreshAt{};
-double g_grantPollAt{};
 std::uint64_t g_heldSelection{};
 std::array<int, 7> g_laneValues{};
 std::array<bool, 7> g_laneEdited{};
@@ -77,15 +76,8 @@ void feedback(service::Feedback result) {
 }
 void grant_feedback(service::Feedback result) {
     g_grantFeedback = result;
-    g_grantPollAt = 0;
     g_feedback = {};
-    if (!result.pending) refresh();
-}
-void poll_grant() {
-    if (!g_grantFeedback.pending || ImGui::GetTime() < g_grantPollAt) return;
-    g_grantFeedback = service::grant_receipt(g_grantFeedback.requestId);
-    g_grantPollAt = ImGui::GetTime() + 0.25;
-    if (!g_grantFeedback.pending) refresh();
+    refresh();
 }
 const Entry* find(const Catalog& catalog, std::uint16_t index, std::uint32_t hash) noexcept {
     const auto found = std::lower_bound(catalog.entries.begin(),
@@ -483,21 +475,13 @@ void selected_item(const std::shared_ptr<const Catalog>& data) {
         && detail.definitionIndex == entry.identity.definitionIndex
         && detail.definitionHash == entry.identity.definitionHash
         && detail.bucketId == entry.identity.bucketId;
-    const bool instanced =
-        detailReady
-        && detail.instancedDefinitionState
-               == definitions::items::details::InstancedDefinitionState::instanced;
-    // The queued grant service accepts at most nine instanced copies, not nine profile units.
-    const int quantityLimit = instanced ? (std::min)(9, entry.quantityLimit) : entry.quantityLimit;
-    g_quantity = (std::clamp)(g_quantity, 1, (std::max)(1, quantityLimit));
-    const bool allowed = g_inventory.ready && detailReady && entry.policy == GrantPolicy::legitimate
-                         && !g_grantFeedback.pending;
+    g_quantity = (std::clamp)(g_quantity, 1, (std::max)(1, entry.quantityLimit));
+    const bool allowed =
+        g_inventory.ready && detailReady && entry.policy == GrantPolicy::legitimate;
     ImGui::SameLine();
     ImGui::BeginDisabled(!allowed);
     if (ImGui::Button("Grant")) grant_feedback(service::grant(entry, g_quantity));
     ImGui::EndDisabled();
-    if (instanced && entry.quantityLimit > 9) ImGui::TextDisabled("Up to 9 copies per grant.");
-    if (g_grantFeedback.pending) ImGui::TextDisabled("Grant pending...");
     ImGui::EndGroup();
     if (!allowed) {
         const char* refusal = entry.policy != GrantPolicy::legitimate ? "Cannot be granted"
@@ -620,7 +604,6 @@ void draw() noexcept {
     try {
         catalog::start();
         icons::begin_frame(client::hooks::graphics::renderer::g_resources.device);
-        poll_grant();
         if (ImGui::GetTime() >= g_refreshAt) refresh();
         const char* note = g_grantFeedback.text[0] ? g_grantFeedback.text.data()
                            : g_feedback.text[0]    ? g_feedback.text.data()
@@ -665,7 +648,7 @@ void draw() noexcept {
 void release_renderer() noexcept {
     catalog::stop();
     icons::release();
-    g_refreshAt = g_grantPollAt = 0;
+    g_refreshAt = 0;
 }
 void shutdown() noexcept {
     catalog::stop();
@@ -674,7 +657,6 @@ void shutdown() noexcept {
     g_inventory = {};
     g_feedback = {};
     g_grantFeedback = {};
-    g_grantPollAt = 0;
     g_heldSelection = 0;
     g_laneEdited.fill(false);
     g_selected = -1;

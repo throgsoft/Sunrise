@@ -100,9 +100,9 @@ inline void clear_mutation(Outcome& outcome) noexcept {
 }
 
 /**
- * Reads the upstream server Unix clock for the existing Family5 publication API.
- * Multiple
- * publications in one second share a timestamp; no synthetic increments are applied.
+ * Issues the next family-5 clock, in Unix seconds.
+ * One issuer serves every family-5 publication, so the value the Client extrapolates from only
+ * ever moves forward, including for several publications within the same second.
  */
 [[nodiscard]] std::uint64_t next_family5_clock() noexcept;
 

@@ -21,6 +21,17 @@ namespace sunrise::server::bap {
 /** Schedules a full persisted account image on every active Family-4 peer. */
 void request_account_resync() noexcept;
 
+/**
+ * Grants one installed item to the selected character through the world reward queue.
+ * The queue owns bucket placement, Postmaster overflow, pursuit expiry and duplicate refusal.
+ * Settles without an acquisition flyout so a caller can act on the granted instance at once.
+ * @param itemDefinitionIndex Installed item to grant.
+ * @param quantity Instanced copies, or stack size for a profile item.
+ * @return True when the whole request reached the queue.
+ */
+[[nodiscard]] bool grant_installed_item(std::uint16_t itemDefinitionIndex,
+                                        std::int32_t quantity) noexcept;
+
 /** Makes the next investment refresh pump take one more slice. */
 using InvestmentSliceConsumer = void (*)() noexcept;
 

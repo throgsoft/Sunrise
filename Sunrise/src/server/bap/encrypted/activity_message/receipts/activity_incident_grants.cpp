@@ -422,8 +422,7 @@ static void stage_incident_grants(const message::incident::Incident& incident) n
                    incident.primaryTarget,
                    primaryFound ? &primary : nullptr,
                    std::span{incident.extraTargets}.first(incident.extraTargetCount),
-                   packageName,
-                   state::build_data::sobjects::find)
+                   packageName)
                == world_reward::GenericReward::moonRabbit) {
         grant_random_moon_loot();
         // Objective slot counting the Jade Rabbit statues fed.

@@ -11,30 +11,27 @@ inline constexpr std::size_t kPayloadSize = 16;
 /** Policy of the supported Character inventory action, not a property of the wire codec. */
 inline constexpr std::uint32_t kDiscardQuantity = 1;
 
-/** Native 8080761F/80807622: 121 fixed bits plus seven trailing padding bits.
- * The identity boolean does not omit the SOID. Signed definition/value/selector fields have
- * no presence guards. Preserve unsupported action forms for the semantic dispatcher to reject.
+/** The 128-bit descriptor: 121 fixed bits plus seven trailing padding bits.
+ * The identity boolean does not omit the SOID, and the signed definition, value and selector
+ * fields carry no presence guards. Unsupported action forms are preserved for the dispatcher.
  */
 struct Request {
     bool hasInstance{};
     std::uint64_t instanceSoid{};
     std::int16_t definitionIndex{};
-    /** Observed stack quantity in the supported action; other UI producers remain under RE. */
+    /** Stack quantity the Character action reports. */
     std::int32_t value{};
-    /** Signed UI selector. The native hold-action producer can send -1. */
+    /** Signed UI selector; the hold action can send -1. */
     std::int8_t selector{};
-    friend constexpr bool operator==(const Request&, const Request&) = default;
 };
 
-/** Complete fixed descriptor codec; inventory action validation belongs to the caller.
- * Decode failure clears request. Encoding failure clears written and preserves output.
+/** Decodes the fixed descriptor; inventory action validation belongs to the caller.
+ * A failed parse clears request.
  */
 [[nodiscard]] bool parse_request(const Message& message, Request& request) noexcept;
-[[nodiscard]] bool
-encode_request(const Request& request, std::span<std::byte> output, std::size_t& written) noexcept;
 
-/** Existing tested Character action only. Decodable profile or negative-selector forms must
- * not silently become this one-unit mutation without their producer/ownership semantics.
+/** The Character action only. Profile or negative-selector forms must not silently become
+ * this one-unit mutation without their own producer and ownership semantics.
  */
 [[nodiscard]] constexpr bool supported_character_action(const Request& request) noexcept {
     return request.hasInstance && request.instanceSoid != 0 && request.definitionIndex >= 0

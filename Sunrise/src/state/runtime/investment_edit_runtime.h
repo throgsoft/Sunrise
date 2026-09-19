@@ -1,0 +1,42 @@
+#pragma once
+
+#include <cstddef>
+#include <cstdint>
+
+namespace sunrise::state::investment_edit {
+
+struct Result {
+    bool accepted{};
+    std::size_t changed{};
+    const char* reason{"unavailable"};
+};
+
+/** Sets one objective lane of one held pursuit, preserving other copies and expiry.
+ * Lane zero carries the expiry deadline rather than an objective and is never written.
+ */
+[[nodiscard]] Result set_objective_lane(std::uint64_t instanceSoid,
+                                        std::uint16_t index,
+                                        std::int32_t value,
+                                        std::uint8_t lane) noexcept;
+/** Completes every declared objective of one held installed bounty, preserving its expiry. */
+[[nodiscard]] Result complete_bounty(std::uint16_t index, std::uint32_t expectedHash) noexcept;
+/** Completes the selected character's held, resolved, unexpired bounties; preserves quests. */
+[[nodiscard]] Result complete_bounties() noexcept;
+
+/** Removes held bounties classified by installed metadata; preserves quests, stacks and rewards. */
+[[nodiscard]] Result drop_bounties() noexcept;
+/** Removes the selected character's held Engrams bucket residents without decrypting them. */
+[[nodiscard]] Result drop_engrams() noexcept;
+/** Removes only the selected character's unequipped kinetic, energy and heavy weapons. */
+[[nodiscard]] Result drop_weapons() noexcept;
+/** Removes only the selected character's unequipped helmet, gauntlets, chest, legs and class armor.
+ */
+[[nodiscard]] Result drop_armor() noexcept;
+/** Clears the installed pass's mapped reward claims (all classes) and all lanes of account
+ * progressions 40/41 in one SQLite transaction. Zero XP maps to native rank 1.
+ * Keeps granted items, other ownership, pursuits and artifact state. Incomplete metadata or
+ * failed persistence refuses the whole reset. changed counts unique flags and nonzero lanes.
+ */
+[[nodiscard]] Result drop_season_pass() noexcept;
+// Replication belongs to callers; every edit here commits its own store transaction.
+} // namespace sunrise::state::investment_edit

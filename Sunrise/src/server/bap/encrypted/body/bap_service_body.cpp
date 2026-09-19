@@ -188,15 +188,6 @@ bool process(const ServiceRoute& route,
     case BodyCodec::webService: {
         middleware::web_service::Message message;
         const bool parsed = middleware::web_service::parse_request(requestBody, message);
-        // Log every action opcode except the two routine polls, so an unrecognized binding is
-        // visible without assuming which opcode family it belongs to.
-        if (parsed && message.opcode != 206 && message.opcode != 701) {
-            core::log::writef(core::log::Channel::server,
-                              core::log::Level::info,
-                              "ev=ws stage=receipt opcode=%u payload_bytes=%zu",
-                              static_cast<unsigned>(message.opcode),
-                              message.payload.size());
-        }
         if (parsed && message.opcode == middleware::web_service::messages::opcode505::kOpcode) {
             auto* changeCharacter = emplace_transaction<queuez::ChangeCharacter>(outcome);
             if (!middleware::web_service::messages::opcode505::parse_request(message)

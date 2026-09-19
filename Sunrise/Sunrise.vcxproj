@@ -900,6 +900,7 @@
     <ClCompile Include="src\server\bap\bap_scriptable_override_route.cpp" />
     <ClCompile Include="src\server\bap\bap_squad_override_route.cpp" />
     <ClCompile Include="src\server\bap\bap_world_reward_queue.cpp" />
+    <ClCompile Include="src\server\bap\bap_item_grant.cpp" />
     <ClCompile Include="src\server\bap\encrypted\queuez\queuez_reward_staging.cpp" />
     <ClCompile Include="src\server\bap\encrypted\push\snapshot\family4_reward_updates.cpp" />
     <ClCompile Include="src\server\bap\encrypted\push\snapshot\family4_socket_updates.cpp" />
@@ -2248,9 +2249,8 @@
     <ClInclude Include="src\state\runtime\dawning_reward_runtime.h" />
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="src\state\runtime\developer_investment_runtime.cpp" />
-    <ClInclude Include="src\state\runtime\developer_investment_runtime.h" />
-    <ClInclude Include="src\server\bap\developer_grant.h" />
+    <ClCompile Include="src\state\runtime\investment_edit_runtime.cpp" />
+    <ClInclude Include="src\state\runtime\investment_edit_runtime.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="src\state\runtime\bounty_redemption_runtime.cpp" />

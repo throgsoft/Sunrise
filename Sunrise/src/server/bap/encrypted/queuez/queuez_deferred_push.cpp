@@ -2,149 +2,20 @@
 
 #include <algorithm>
 #include <limits>
-#include <memory>
-#include <mutex>
-#include <new>
 
 #include "../../../../core/logging/log.h"
 #include "../../../../middleware/secure_channel/runtime.h"
 #include "../../../../state/account/account_state.h"
 #include "../../../../state/activity/destination/definition.h"
 #include "../../../../state/activity/runtime.h"
-#include "../../../../state/runtime/developer_investment_runtime.h"
 #include "../../../../state/runtime/runtime.h"
 #include "../../../../state/runtime/synthesizer_crafting_runtime.h"
-#include "../../developer_grant.h"
 #include "../internal.h"
 #include "../push/activity/activity_keepalive_push.h"
 #include "dawning_pickup_release.h"
 #include "queuez_state_validation.h"
 #include "state/investment/store_internal.h"
 #include "synthesizer_family4_refresh.h"
-
-namespace sunrise::server::bap {
-namespace {
-
-struct DeveloperGrantRequest {
-    DeveloperGrantReceipt receipt{};
-    state::developer::ItemGrantTarget target{};
-    std::uint64_t queuedAt{};
-    std::uint32_t definitionHash{};
-    std::int32_t quantity{};
-    std::uint16_t definitionIndex{};
-};
-constexpr std::uint64_t kDeveloperGrantLifetimeMs = 120'000;
-std::mutex g_developerGrantMutex;
-std::array<DeveloperGrantRequest, 8> g_developerGrants{};
-std::uint64_t g_nextDeveloperGrantId{1};
-
-void expire_developer_grants(std::uint64_t now) noexcept {
-    for (auto& request : g_developerGrants) {
-        if (request.receipt.status == DeveloperGrantStatus::queued
-            && now - request.queuedAt >= kDeveloperGrantLifetimeMs) {
-            request.receipt.status = DeveloperGrantStatus::refused;
-            request.receipt.reason = "grant expired before F4 publication; nothing committed";
-        }
-    }
-}
-
-// Only the BAP owner takes work; the render thread holds this separate lock for copies only.
-bool take_developer_grant(std::uint64_t accountSoid, DeveloperGrantRequest& output) noexcept {
-    const std::lock_guard lock(g_developerGrantMutex);
-    expire_developer_grants(GetTickCount64());
-    DeveloperGrantRequest* first = nullptr;
-    for (auto& request : g_developerGrants)
-        if (request.receipt.status == DeveloperGrantStatus::queued
-            && (!first || request.receipt.id < first->receipt.id))
-            first = &request;
-    if (!first || first->target.accountSoid != accountSoid) return false;
-    first->receipt.status = DeveloperGrantStatus::publishing;
-    first->receipt.reason = "preparing authoritative F4 publication";
-    output = *first;
-    return true;
-}
-
-void finish_developer_grant(const DeveloperGrantRequest& request,
-                            DeveloperGrantReceipt receipt) noexcept {
-    {
-        const std::lock_guard lock(g_developerGrantMutex);
-        for (auto& slot : g_developerGrants) {
-            if (slot.receipt.id == request.receipt.id) {
-                slot.receipt = receipt;
-                break;
-            }
-        }
-    }
-    if (receipt.status == DeveloperGrantStatus::queued) return;
-    core::log::writef(core::log::Channel::server,
-                      receipt.status == DeveloperGrantStatus::refused ? core::log::Level::warn
-                                                                      : core::log::Level::info,
-                      "ev=developer_grant request=%llu item=%u quantity=%d status=%u "
-                      "changed=%zu inventory=%zu postmaster=%zu material=%zu f4=%d reason=%s",
-                      static_cast<unsigned long long>(receipt.id),
-                      unsigned(request.definitionIndex),
-                      request.quantity,
-                      unsigned(receipt.status),
-                      receipt.changed,
-                      receipt.inventoryCount,
-                      receipt.postmasterCount,
-                      receipt.materialCount,
-                      receipt.family4Version,
-                      receipt.reason);
-}
-
-} // namespace
-
-DeveloperGrantReceipt enqueue_developer_item_grant(std::uint16_t index,
-                                                   std::int32_t quantity,
-                                                   std::uint32_t expectedHash) noexcept {
-    DeveloperGrantReceipt refused{};
-    refused.status = DeveloperGrantStatus::refused;
-    if (quantity < 1 || expectedHash == 0) {
-        refused.reason = "positive quantity and installed identity required";
-        return refused;
-    }
-    state::developer::ItemGrantTarget target{};
-    if (!state::developer::read_item_grant_target(target)) {
-        refused.reason = "no selected account/character available";
-        return refused;
-    }
-    const std::lock_guard lock(g_developerGrantMutex);
-    const auto now = GetTickCount64();
-    expire_developer_grants(now);
-    DeveloperGrantRequest* slot = nullptr;
-    for (auto& candidate : g_developerGrants) {
-        if (candidate.receipt.status == DeveloperGrantStatus::queued
-            || candidate.receipt.status == DeveloperGrantStatus::publishing)
-            continue;
-        if (!slot || candidate.receipt.id < slot->receipt.id) slot = &candidate;
-    }
-    if (!slot || g_nextDeveloperGrantId == (std::numeric_limits<std::uint64_t>::max)()) {
-        refused.reason = "developer grant queue full; nothing committed";
-        return refused;
-    }
-    *slot = {};
-    slot->target = target;
-    slot->queuedAt = now;
-    slot->definitionIndex = index;
-    slot->definitionHash = expectedHash;
-    slot->quantity = quantity;
-    slot->receipt.id = g_nextDeveloperGrantId++;
-    slot->receipt.status = DeveloperGrantStatus::queued;
-    slot->receipt.reason = "queued for authoritative acquisition; nothing committed yet";
-    return slot->receipt;
-}
-
-DeveloperGrantReceipt developer_item_grant_receipt(std::uint64_t id) noexcept {
-    if (id == 0) return {};
-    const std::lock_guard lock(g_developerGrantMutex);
-    expire_developer_grants(GetTickCount64());
-    for (const auto& request : g_developerGrants)
-        if (request.receipt.id == id) return request.receipt;
-    return {};
-}
-
-} // namespace sunrise::server::bap
 
 namespace sunrise::server::bap::encrypted {
 namespace {
@@ -182,112 +53,6 @@ selected_character(const state::AccountState& account) noexcept {
         }
     }
     return nullptr;
-}
-
-/** One bounded developer batch uses the same State/default-plug and acquisition-ring path as
- * record rewards. A failed encode or commit never settles it silently into the account.
- */
-[[nodiscard]] bool consume_developer_item_grant(Session& session,
-                                                Scratch& scratch,
-                                                std::span<std::byte> response,
-                                                std::size_t& written,
-                                                bool& touchesScratch) noexcept {
-    if (!session.queuez.family4Active || GetTickCount64() < bap::acquisition_queue_deadline())
-        return false;
-    DeveloperGrantRequest request{};
-    if (!take_developer_grant(session.queuez.family4RootSoid, request)) return false;
-    auto receipt = request.receipt;
-    const auto refuse = [&](const char* reason) noexcept {
-        receipt.status = DeveloperGrantStatus::refused;
-        receipt.reason = reason;
-        finish_developer_grant(request, receipt);
-        return false;
-    };
-    state::investment::store::Transaction transaction;
-    if (!transaction.ready())
-        return refuse("investment transaction unavailable; nothing committed");
-    const std::unique_ptr<state::PendingRecordRewardGrant> pending(
-        new (std::nothrow) state::PendingRecordRewardGrant);
-    if (!pending) return refuse("grant allocation failed; nothing committed");
-    const auto result = state::developer::prepare_item_grant(request.definitionIndex,
-                                                             request.quantity,
-                                                             request.definitionHash,
-                                                             request.target,
-                                                             *pending);
-    if (!result.accepted) return refuse(result.reason);
-    if (!pending->prepared) {
-        receipt.status = DeveloperGrantStatus::unchanged;
-        receipt.reason = result.reason;
-        finish_developer_grant(request, receipt);
-        return false;
-    }
-    std::array<std::uint64_t, state::kRecordRewardGrantCapacity> residents{};
-    std::size_t residentCount = 0;
-    for (std::size_t i = 0; i < pending->rewardCount; ++i) {
-        const auto& reward = pending->rewards[i];
-        if (reward.kind == state::RecordRewardKind::characterInstance
-            || reward.appendedProfileResident)
-            residents[residentCount++] = reward.instanceSoid;
-    }
-    queuez::RecordRewardGrant update{};
-    if (!queuez::stage_record_reward_grant(session.queuez,
-                                           pending->accountSoid,
-                                           pending->characterSoid,
-                                           std::span(residents).first(residentCount),
-                                           update))
-        return refuse("F4 resident staging refused; nothing committed");
-    touchesScratch = true;
-    auto nextSendNonce = session.sendNonce;
-    std::size_t framedSize = 0;
-    if (!push::append_record_reward_notification(scratch,
-                                                 session.queuez,
-                                                 update,
-                                                 *pending,
-                                                 active_acquisition_presentation_rows(session),
-                                                 session.sessionKey,
-                                                 nextSendNonce,
-                                                 scratch.framed,
-                                                 framedSize)
-        || framedSize == 0)
-        return refuse("F4 acquisition encoding refused; nothing committed");
-    if (framedSize > response.size()) {
-        receipt.status = DeveloperGrantStatus::queued;
-        receipt.reason = "waiting for a complete BAP response buffer; nothing committed";
-        finish_developer_grant(request, receipt);
-        return false;
-    }
-    const bool changesMoteOwnership = state::runtime::detail::synthesizer::mote_ownership_changed(
-        pending->beforeProfileItems, pending->afterProfileItems);
-    receipt.changed = pending->rewardCount;
-    for (std::size_t i = 0; i < pending->rewardCount; ++i) {
-        const auto& reward = pending->rewards[i];
-        if (reward.kind == state::RecordRewardKind::accountMaterial)
-            ++receipt.materialCount;
-        else if (reward.kind == state::RecordRewardKind::characterInstance
-                 && pending->afterCharacter.inventory.values[reward.stateIndex].placement
-                        == state::account::inventory::ItemPlacement::postmaster)
-            ++receipt.postmasterCount;
-        else
-            ++receipt.inventoryCount;
-    }
-    if (!state::commit_record_reward(*pending) || !transaction.commit()) {
-        receipt.changed = receipt.inventoryCount = receipt.postmasterCount = receipt.materialCount =
-            0;
-        return refuse("State commit failed; whole batch rolled back");
-    }
-    std::copy_n(scratch.framed.begin(), framedSize, response.begin());
-    written = framedSize;
-    middleware::secure_channel::advance_nonce(nextSendNonce);
-    session.sendNonce = nextSendNonce;
-    session.queuez = update.after;
-    bap::arm_account_resync_elsewhere(session);
-    bap::arm_acquisition_presentation_hold(session);
-    if (changesMoteOwnership) session.family5RefreshArmed = true;
-    receipt.status = DeveloperGrantStatus::published;
-    receipt.family4Version = update.after.family4Version;
-    receipt.reason = "grant committed and F4 acquisition published";
-    finish_developer_grant(request, receipt);
-    return true;
 }
 
 /** Publishes and commits one character-inventory world reward. */
@@ -551,7 +316,7 @@ selected_character(const state::AccountState& account) noexcept {
     session.sendNonce = nextSendNonce;
     session.queuez = currentQueuez;
     session.accountResyncArmed = false;
-    // Console grants/discards and mutations on other peers reach this path. Their
+    // Grants, discards and mutations on other peers all reach this path. Their
     // inventory-derived Mote flags must follow the newly published account view.
     session.family5RefreshArmed = true;
     if (auxiliaryRefreshFailed) {
@@ -948,9 +713,6 @@ bool consume_deferred(Session& session,
         return false;
     }
     if (consume_dawning_pickup_release(session, scratch, response, written, touchesScratch)) {
-        return true;
-    }
-    if (consume_developer_item_grant(session, scratch, response, written, touchesScratch)) {
         return true;
     }
     WorldRewardRequest reward{};

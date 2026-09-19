@@ -1,4 +1,4 @@
-#include "developer_investment_runtime.h"
+#include "investment_edit_runtime.h"
 
 #include <algorithm>
 #include <array>
@@ -17,7 +17,7 @@
 #include "runtime.h"
 #include "state_account_transaction_helpers.h"
 
-namespace sunrise::state::developer {
+namespace sunrise::state::investment_edit {
 namespace {
 namespace data = build_data;
 namespace inventory = account::inventory;
@@ -52,69 +52,6 @@ bool objectives(const data::items::details::Definition& detail,
 
 // Match the existing Items allowlist at the authority boundary as well. The UI additionally
 // checks the localized bounty type; neither layer treats a missing dummy flag as permission.
-bool supported_item_grant(const data::items::Definition& item,
-                          const data::items::details::Definition& detail) noexcept {
-    namespace bounty = runtime::detail::bounty;
-    namespace bountyPolicy = runtime::detail::bounty_policy;
-    namespace pass = progression::season_pass;
-    namespace dawning = inventory::dawning;
-    namespace buckets = data::inventory::buckets;
-    std::uint32_t markerHash{};
-    if (bounty::reward_marker(item.definitionIndex, markerHash) != bounty::RewardMarker::none
-        || markerHash != item.definitionHash)
-        return false;
-    if (data::collectibles::grants_item(item.definitionIndex)) return true;
-    // Bounties expire and quests do not; both are pursuits this path can grant, and the commit
-    // seeds a quest's authored first step so it lands with an active, trackable step.
-    if (detail.bucketId == data::items::kPursuitBucketId && detail.maxStackSize <= 1
-        && detail.objectiveCount > 0)
-        return true;
-    for (const auto& reward : bounty::kScaledPursuitRewards)
-        if (reward.paidIndex == item.definitionIndex) return true;
-    const auto ingredient = dawning::ingredient(item.definitionHash);
-    if ((ingredient < dawning::kIngredientCount
-         && item.definitionHash == dawning::kIngredients[ingredient].pickupHash)
-        || dawning::cookie(item.definitionHash) || item.definitionHash == dawning::kEssenceHash)
-        return true;
-    buckets::Descriptor bucket{};
-    if (detail.equipmentSlot || detail.objectiveCount || detail.maxStackSize <= 0
-        || !data::find_inventory_bucket_descriptor(item.bucketId, bucket)
-        || bucket.bucketId != item.bucketId)
-        return false;
-    const bool engram = item.bucketId == buckets::kEngramBucketId
-                        && bucket.arraySelector == buckets::ArraySelector::character;
-    // Materials sit in their own profile bucket beside consumables; both hold granted resources.
-    const bool consumable = (item.bucketId == buckets::kConsumableBucketId
-                             || item.bucketId == buckets::kMaterialBucketId)
-                            && bucket.arraySelector == buckets::ArraySelector::profile
-                            && detail.instancedDefinitionState
-                                   == data::items::details::InstancedDefinitionState::stackable;
-    if (!engram && !consumable) return false;
-    if (engram
-        && detail.instancedDefinitionState
-               == data::items::details::InstancedDefinitionState::instanced
-        && bounty::contains(bountyPolicy::kArrivalsUmbralEngrams, item.definitionHash))
-        return true;
-    if (consumable && pass::contains(pass::kDestinationResourceHashes, item.definitionHash))
-        return true;
-    data::season_pass::Package package{};
-    if (item.definitionHash == pass::kDestinationResourceBundleHash
-        || item.definitionHash == pass::kLegendaryEngramHash
-        || item.definitionHash == pass::kExoticEngramHash
-        || data::find_season_pass_package(item.definitionHash, package))
-        return false;
-    const auto count =
-        (std::min)(data::season_pass_reward_count(), data::season_pass::kRewardCapacity);
-    for (std::size_t row = 0; row < count; ++row) {
-        data::season_pass::Reward reward{};
-        if (data::find_season_pass_reward(static_cast<std::uint16_t>(row), reward)
-            && reward.quantity > 0 && reward.itemIndex == item.definitionIndex
-            && reward.itemHash == item.definitionHash)
-            return true;
-    }
-    return false;
-}
-
 const char* editable(const inventory::Item& held,
                      std::uint16_t index,
                      const data::items::details::Definition& detail) noexcept {
@@ -334,195 +271,27 @@ Result drop(std::uint16_t index, DropScope scope) noexcept {
 
 } // namespace
 
-bool read_item_grant_target(ItemGrantTarget& target) noexcept {
-    target = {};
-    const std::unique_ptr<AccountState> snapshot(new (std::nothrow) AccountState);
-    if (!snapshot || !store::read_account(*snapshot) || !account::valid(*snapshot)) return false;
-    const auto* character = selected(*snapshot);
-    if (!character) return false;
-    target = {snapshot->primarySoid, character->soid, character->signInSeconds};
-    return target.accountSoid != 0 && target.characterSoid != 0;
-}
-
-Result prepare_item_grant(std::uint16_t index,
-                          std::int32_t quantity,
-                          std::uint32_t expectedHash,
-                          ItemGrantTarget target,
-                          PendingRecordRewardGrant& pending) noexcept {
-    pending.prepared = false;
-    if (quantity < 1) return {false, 0, "quantity must be positive"};
-    data::items::Definition item{};
-    data::items::details::Definition detail{};
-    if (expectedHash == 0 || !resolve(index, item, detail) || detail.definitionIndex != index
-        || item.definitionHash != expectedHash)
-        return {false, 0, "installed item identity/detail unavailable or changed"};
-    if (!supported_item_grant(item, detail))
-        return {false, 0, "unsupported or dummy item; no positive installed grant classification"};
-    const bool instanced = detail.instancedDefinitionState
-                           == data::items::details::InstancedDefinitionState::instanced;
-    static_assert(kItemGrantCopyLimit <= kRecordRewardGrantCapacity);
-    if (instanced && quantity > static_cast<std::int32_t>(kItemGrantCopyLimit))
-        return {false, 0, "one published batch is limited to nine instanced copies"};
-    if (!instanced && quantity > (std::max)(1, detail.maxStackSize))
-        return {false, 0, "quantity exceeds the installed stack size"};
-    const std::unique_ptr<AccountState> snapshot(new (std::nothrow) AccountState);
-    if (!snapshot || !store::read_account(*snapshot) || !account::valid(*snapshot))
-        return {false, 0, "investment database unavailable"};
-    const auto* character = selected(*snapshot);
-    if (!character || target.accountSoid == 0 || target.characterSoid == 0
-        || snapshot->primarySoid != target.accountSoid || character->soid != target.characterSoid
-        || character->signInSeconds != target.signInSeconds)
-        return {false, 0, "selected account, character or sign-in changed; grant cancelled"};
-    if (detail.objectiveCount != 0) {
-        std::array<std::int32_t, inventory::kItemObjectiveLaneCount> thresholds{};
-        if (!objectives(detail, thresholds)) return {false, 0, "objective thresholds unavailable"};
-        if (quantity != 1) return {false, 0, "pursuits require quantity one"};
-        for (std::size_t i = 0; i < character->inventory.count; ++i) {
-            const auto& held = character->inventory.values[i];
-            if (held.definitionHash != item.definitionHash) continue;
-            if (const auto* reason = editable(held, index, detail)) return {false, 0, reason};
-            return {true, 0, "already held; expiry and progress preserved"};
-        }
-    }
-    std::array<DirectRecordReward, kItemGrantCopyLimit> rewards{};
-    const auto count = instanced ? static_cast<std::size_t>(quantity) : 1;
-    std::fill_n(rewards.begin(), count, DirectRecordReward{index, instanced ? 1 : quantity});
-    if (!runtime::detail::stage_record_reward_grant(
-            *snapshot, std::span(rewards).first(count), kUnclaimedRecordIndex, pending))
-        return {false, 0, "State grant policy refused support, ownership, capacity or quantity"};
-    return {true, 0, "prepared; awaiting F4 encoding and commit"};
-}
-
-Result grant_item(std::uint16_t index, std::int32_t quantity, std::uint32_t expectedHash) noexcept {
-    if (quantity < 1) return {false, 0, "quantity must be positive"};
-    data::items::Definition item{};
-    data::items::details::Definition detail{};
-    if (!resolve(index, item, detail) || (expectedHash != 0 && item.definitionHash != expectedHash))
-        return {false, 0, "installed item identity/detail unavailable or changed"};
-    const bool instanced = detail.instancedDefinitionState
-                           == data::items::details::InstancedDefinitionState::instanced;
-    if (instanced && quantity > 64) return {false, 0, "instanced grants are limited to 64 copies"};
-    if (!instanced && quantity > (std::max)(1, detail.maxStackSize))
-        return {false, 0, "quantity exceeds the installed stack size"};
-    std::unique_ptr<AccountState> account(new (std::nothrow) AccountState);
-    std::unique_ptr<PendingRecordRewardGrant> pending(new (std::nothrow) PendingRecordRewardGrant);
-    if (!account || !pending) return {false, 0, "allocation failed"};
-    store::Transaction transaction;
-    if (!transaction.ready() || !store::read_account(*account) || !account::valid(*account))
-        return {false, 0, "investment database unavailable"};
-    auto* character = selected(*account);
-    if (!character) return {false, 0, "no selected character"};
-    if (detail.objectiveCount != 0) {
-        std::array<std::int32_t, inventory::kItemObjectiveLaneCount> thresholds{};
-        if (!objectives(detail, thresholds)) return {false, 0, "objective thresholds unavailable"};
-        if (quantity != 1) return {false, 0, "pursuits require quantity one"};
-        for (std::size_t i = 0; i < character->inventory.count; ++i) {
-            const auto& held = character->inventory.values[i];
-            if (held.definitionHash != item.definitionHash) continue;
-            if (const auto* reason = editable(held, index, detail)) return {false, 0, reason};
-            return {true, 0, "already held; expiry and progress preserved"};
-        }
-    }
-    const auto requests = instanced ? quantity : 1;
-    const std::array rewards{DirectRecordReward{index, instanced ? 1 : quantity}};
-    for (std::int32_t request = 0; request < requests; ++request) {
-        if (!prepare_record_reward_grant(rewards, kUnclaimedRecordIndex, *pending))
-            return {false,
-                    0,
-                    "State grant policy refused (item support, ownership, capacity or quantity); "
-                    "request rolled back"};
-        if (!commit_record_reward(*pending))
-            return {false, 0, "State grant commit failed; request rolled back"};
-    }
-    if (!transaction.commit()) return {false, 0, "transaction commit failed; request rolled back"};
-    return {true,
-            static_cast<std::size_t>(requests),
-            "grant committed through State acquisition/reward policy"};
-}
-
-Result grant_chalice_runes(std::uint8_t rune, std::int32_t quantity) noexcept {
-    // Developer binding for this build: value slots 5512..5523 map to account rows
-    // 2371..2382. All three socket variants of each rune read the same mapped row.
-    // The per-command limit is a developer bound, not a claimed native counter cap.
-    constexpr std::size_t runeCount = 12;
-    if (rune > runeCount || quantity < 1 || quantity > 1000)
-        return {false, 0, "rune must be 0..11 or all; quantity must be 1..1000"};
-    data::items::Definition chalice{};
-    data::items::details::Definition detail{};
-    if (!resolve(7937, chalice, detail) || chalice.definitionHash != 1115550924U
-        || detail.ordinarySocketCount != 8)
-        return {false, 0, "installed Chalice identity unavailable"};
-    const std::size_t first = rune == runeCount ? 0 : rune;
-    const std::size_t end = rune == runeCount ? runeCount : first + 1;
-    store::Transaction transaction;
-    if (!transaction.ready()) return {false, 0, "investment database unavailable"};
-    for (std::size_t i = first; i < end; ++i) {
-        for (std::size_t lane = 0; lane < 3; ++lane) {
-            data::items::Definition plug{};
-            const auto index = static_cast<std::uint16_t>(7949 + i + lane * runeCount);
-            if (!data::find_item_definition_index(index, plug)
-                || !data::is_socket_plug_allowed(7937, static_cast<std::uint8_t>(4 + lane), index))
-                return {false, 0, "installed rune socket bindings unavailable; rolled back"};
-        }
-        const auto row = static_cast<std::uint16_t>(2371 + i);
-        std::int32_t before = 0;
-        if (!store::read_unlock(store::Bank::objectiveValues, row, before) || before < 0
-            || before > (std::numeric_limits<std::int32_t>::max)() - quantity
-            || !store::write_unlock(store::Bank::objectiveValues, row, before + quantity))
-            return {false, 0, "rune balance unavailable or overflow; rolled back"};
-    }
-    if (!transaction.commit()) return {false, 0, "rune transaction failed; rolled back"};
-    return {true, end - first, "rune counters granted; slot and upgrade gates unchanged"};
-}
-
-Result set_quest(std::uint16_t index, std::int32_t value, std::uint8_t lane) noexcept {
-    // Lane zero is the expiry deadline, not an objective; writing it would corrupt the item.
-    if (value < 0 || lane == 0 || lane > inventory::kItemObjectiveLaneCount)
-        return {false, 0, "objective lane must be 1..7 and value must not be negative"};
-    return edit(index, value, lane, false);
-}
-
-Result complete_pursuits() noexcept {
-    return edit(0, 0, 0, true);
-}
-
 Result complete_bounties() noexcept {
     return edit(0, 0, 0, true, false, true);
 }
 
-Result set_bounty_lane(std::uint64_t instanceSoid,
-                       std::uint16_t index,
-                       std::int32_t value,
-                       std::uint8_t lane) noexcept {
+Result set_objective_lane(std::uint64_t instanceSoid,
+                          std::uint16_t index,
+                          std::int32_t value,
+                          std::uint8_t lane) noexcept {
     if (instanceSoid == 0 || value < 0 || lane == 0 || lane > inventory::kItemObjectiveLaneCount)
         return {false, 0, "invalid bounty instance, value or lane"};
     return edit(index, value, lane, false, false, true, instanceSoid);
 }
 
-Result grant_complete_bounty(std::uint16_t index, std::uint32_t expectedHash) noexcept {
+Result complete_bounty(std::uint16_t index, std::uint32_t expectedHash) noexcept {
     data::items::Definition item{};
     data::items::details::Definition detail{};
     if (!resolve(index, item, detail) || item.definitionHash != expectedHash
         || detail.bucketId != data::items::kPursuitBucketId || detail.objectiveCount == 0
         || detail.lifetimeSeconds <= 0)
         return {false, 0, "installed expiring bounty unavailable"};
-    store::Transaction transaction;
-    if (!transaction.ready()) return {false, 0, "investment database unavailable"};
-    const auto grant = grant_item(index, 1, expectedHash);
-    if (!grant.accepted) return grant;
-    const auto completion = edit(index, 0, 0, false, true);
-    if (!completion.accepted) return {false, 0, completion.reason};
-    if (!transaction.commit()) return {false, 0, "transaction commit failed"};
-    return {true,
-            grant.changed != 0 || completion.changed != 0 ? 1U : 0U,
-            grant.changed != 0 ? "granted and completed"
-                               : "held bounty completed; expiry preserved"};
-}
-Result drop_item(std::uint16_t index) noexcept {
-    return drop(index, DropScope::item);
-}
-Result drop_pursuits() noexcept {
-    return drop(0, DropScope::pursuits);
+    return edit(index, 0, 0, false, true);
 }
 Result drop_bounties() noexcept {
     return drop(0, DropScope::bounties);
@@ -613,4 +382,4 @@ Result drop_season_pass() noexcept {
                            "items and artifact preserved"};
 }
 
-} // namespace sunrise::state::developer
+} // namespace sunrise::state::investment_edit

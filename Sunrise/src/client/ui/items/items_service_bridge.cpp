@@ -5,14 +5,13 @@
 #include <memory>
 
 #include "../../../core/runtime/wall_clock.h"
-#include "../../../server/bap/developer_grant.h"
 #include "../../../server/bap/runtime.h"
 #include "../../../state/build_data/collectibles/collectible_catalog.h"
 #include "../../../state/build_data/items/quest_initialization.h"
 #include "../../../state/build_data/pursuits/pursuit_progress.h"
 #include "../../../state/build_data/runtime.h"
 #include "../../../state/runtime/bounty_reward_policy.h"
-#include "../../../state/runtime/developer_investment_runtime.h"
+#include "../../../state/runtime/investment_edit_runtime.h"
 #include "../../../state/runtime/runtime.h"
 
 namespace sunrise::client::ui::items::service {
@@ -66,7 +65,7 @@ bool direct_runtime_reward(const data::items::Definition& identity,
     return false;
 }
 
-Feedback report(const state::developer::Result& result) noexcept {
+Feedback report(const state::investment_edit::Result& result) noexcept {
     // Every service has released SQLite before returning; publication uses the normal protocol.
     if (result.changed) server::bap::request_account_resync();
     Feedback output{result.accepted};
@@ -75,30 +74,6 @@ Feedback report(const state::developer::Result& result) noexcept {
     return output;
 }
 
-Feedback report_grant(const server::bap::DeveloperGrantReceipt& receipt) noexcept {
-    using Status = server::bap::DeveloperGrantStatus;
-    Feedback output{};
-    output.requestId = receipt.id;
-    output.pending = receipt.status == Status::queued || receipt.status == Status::publishing;
-    output.accepted = output.pending || receipt.status == Status::published
-                      || receipt.status == Status::unchanged;
-    if (receipt.status == Status::published)
-        std::snprintf(output.text.data(),
-                      output.text.size(),
-                      "%s; inventory=%zu, Postmaster=%zu, material credits=%zu, F4=%d",
-                      receipt.reason,
-                      receipt.inventoryCount,
-                      receipt.postmasterCount,
-                      receipt.materialCount,
-                      receipt.family4Version);
-    else
-        std::snprintf(output.text.data(),
-                      output.text.size(),
-                      "%s; request=%llu",
-                      receipt.reason,
-                      static_cast<unsigned long long>(receipt.id));
-    return output;
-}
 } // namespace
 
 Inventory inventory() noexcept {
@@ -177,10 +152,11 @@ GrantPolicy classify(const Entry& entry) noexcept {
         return GrantPolicy::legitimate;
     for (const auto& reward : bounty::kScaledPursuitRewards)
         if (reward.paidIndex == identity.definitionIndex) return GrantPolicy::legitimate;
-    const auto ingredient = dawning::ingredient(identity.definitionHash);
-    if ((ingredient < dawning::kIngredientCount
-         && identity.definitionHash == dawning::kIngredients[ingredient].pickupHash)
-        || dawning::cookie(identity.definitionHash)
+    // Ingredients are pickup-only: State refuses them on both acquisition gates, so the oven
+    // reaches them through the Dawning pickup path rather than a grant.
+    if (dawning::ingredient(identity.definitionHash) < dawning::kIngredientCount)
+        return GrantPolicy::unknown;
+    if (dawning::cookie(identity.definitionHash)
         || identity.definitionHash == dawning::kEssenceHash)
         return GrantPolicy::legitimate;
     return GrantPolicy::unknown;
@@ -191,21 +167,28 @@ Feedback grant(const Entry& entry, std::int32_t quantity) noexcept {
     if (policy == GrantPolicy::dummy) return report({false, 0, "Dummy minting is disabled"});
     if (policy != GrantPolicy::legitimate)
         return report({false, 0, "No positive installed grant classification; item is read-only"});
-    return report_grant(server::bap::enqueue_developer_item_grant(
-        entry.identity.definitionIndex, quantity, entry.identity.definitionHash));
-}
-Feedback grant_receipt(std::uint64_t requestId) noexcept {
-    return report_grant(server::bap::developer_item_grant_receipt(requestId));
+    if (quantity < 1) return report({false, 0, "Quantity must be positive"});
+    // The queue owns placement, overflow and duplicate refusal, and republishes the account.
+    const bool granted =
+        server::bap::grant_installed_item(entry.identity.definitionIndex, quantity);
+    Feedback output{granted};
+    if (granted)
+        std::snprintf(output.text.data(), output.text.size(), "granted; quantity=%d", quantity);
+    else
+        std::snprintf(output.text.data(),
+                      output.text.size(),
+                      "State acquisition policy refused the grant; nothing committed");
+    return output;
 }
 Feedback set_lane(std::uint64_t instance,
                   std::uint16_t item,
                   std::uint8_t lane,
                   std::int32_t value) noexcept {
     if (lane == 0 || lane > 7) return report({false, 0, "Choose objective lane 1..7"});
-    return report(state::developer::set_bounty_lane(instance, item, value, lane));
+    return report(state::investment_edit::set_objective_lane(instance, item, value, lane));
 }
 Feedback complete_bounties() noexcept {
-    return report(state::developer::complete_bounties());
+    return report(state::investment_edit::complete_bounties());
 }
 
 /** An installed bounty: a character-bucket pursuit that expires. */
@@ -240,7 +223,7 @@ Feedback grant_bounty_page(std::size_t page) noexcept {
     if (page == 0 || page > pages.count)
         return report({false, 0, "Page is outside the installed bounty range"});
     // Discard first so a reused resident cannot be mistaken for one this page granted.
-    const auto dropped = state::developer::drop_bounties();
+    const auto dropped = state::investment_edit::drop_bounties();
     if (!dropped.accepted) return report(dropped);
     const auto account = state::account_snapshot();
     const state::CharacterState* character = nullptr;
@@ -271,8 +254,9 @@ Feedback grant_bounty_page(std::size_t page) noexcept {
             ++reused;
             continue;
         }
+        if (!held) (void)server::bap::grant_installed_item(item.definitionIndex, 1);
         const auto result =
-            state::developer::grant_complete_bounty(item.definitionIndex, item.definitionHash);
+            state::investment_edit::complete_bounty(item.definitionIndex, item.definitionHash);
         changed += result.changed;
         granted += result.accepted && !held;
         reused += held;
@@ -293,21 +277,22 @@ Feedback grant_bounty_page(std::size_t page) noexcept {
 
 Feedback page_bounty(const Entry& entry) noexcept {
     if (!entry.bounty) return report({false, 0, "Not an installed bounty"});
-    return report(state::developer::grant_complete_bounty(entry.identity.definitionIndex,
+    (void)server::bap::grant_installed_item(entry.identity.definitionIndex, 1);
+    return report(state::investment_edit::complete_bounty(entry.identity.definitionIndex,
                                                           entry.identity.definitionHash));
 }
 Feedback clear(Clear category) noexcept {
     switch (category) {
     case Clear::weapons:
-        return report(state::developer::drop_weapons());
+        return report(state::investment_edit::drop_weapons());
     case Clear::armor:
-        return report(state::developer::drop_armor());
+        return report(state::investment_edit::drop_armor());
     case Clear::bounties:
-        return report(state::developer::drop_bounties());
+        return report(state::investment_edit::drop_bounties());
     case Clear::engrams:
-        return report(state::developer::drop_engrams());
+        return report(state::investment_edit::drop_engrams());
     case Clear::seasonPass:
-        return report(state::developer::drop_season_pass());
+        return report(state::investment_edit::drop_season_pass());
     }
     return report({false, 0, "Unknown Clear category"});
 }

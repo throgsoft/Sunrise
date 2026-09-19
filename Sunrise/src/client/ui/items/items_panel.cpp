@@ -429,9 +429,9 @@ void catalog_tab(const std::shared_ptr<const Catalog>& data) {
                             data->entries.size(),
                             data->classified);
     }
-    if (g_category == static_cast<int>(Category::dummies))
-        ImGui::TextWrapped("Only identified dummies are listed here. Items this build cannot "
-                           "classify remain read-only.");
+    if (g_category == static_cast<int>(Category::typeless))
+        ImGui::TextWrapped("The installed strings give these rows no item type, so nothing "
+                           "installs them anywhere. They are read-only.");
     if (!wideFilters)
         ImGui::TextDisabled("%zu matches / %zu installed / %zu grantable",
                             g_filtered.size(),

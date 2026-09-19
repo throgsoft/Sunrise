@@ -17,6 +17,7 @@
 #include "bounty_redemption_runtime.h"
 #include "character_encoding_preflight.h"
 #include "dawning_reward_runtime.h"
+#include "profile_stack_credit.h"
 #include "runtime.h"
 #include "state_account_transaction_helpers.h"
 #include "storage/internal.h"
@@ -257,6 +258,7 @@ bool runtime::detail::stage_record_reward_grant(const AccountState& account,
     }
 
     AccountState working = account;
+    std::size_t rewardCount = 0;
     for (std::size_t index = 0; index < rewards.size(); ++index) {
         const DirectRecordReward& requested = rewards[index];
         PreparedRecordReward material{};
@@ -264,7 +266,8 @@ bool runtime::detail::stage_record_reward_grant(const AccountState& account,
             working.characters[characterIndex], requested, mutation, material);
         if (materialResult == dawning::MaterialReward::refused) return false;
         if (materialResult == dawning::MaterialReward::staged) {
-            mutation.rewards[index] = material;
+            if (rewardCount >= mutation.rewards.size()) return false;
+            mutation.rewards[rewardCount++] = material;
             continue;
         }
         build_data::items::Definition item{};
@@ -290,33 +293,20 @@ bool runtime::detail::stage_record_reward_grant(const AccountState& account,
         prepared.definitionHash = item.definitionHash;
         prepared.quantity = requested.quantity;
         if (bucket.arraySelector == inventory_buckets::ArraySelector::profile) {
-            if (detail.instancedDefinitionState
-                != item_details::InstancedDefinitionState::stackable) {
+            // The same planner the earned reward path uses: saturate a full row, spread to
+            // another while the bucket owns a slot, and report every row it credited.
+            std::int32_t credited = 0;
+            if (!bounty::credit_profile_stacks(working,
+                                               item,
+                                               detail,
+                                               bucket,
+                                               requested.quantity,
+                                               mutation,
+                                               rewardCount,
+                                               credited)) {
                 return false;
             }
-            PendingProfileItemAcquisition staged{};
-            const bool actionSource =
-                build_data::is_profile_action_source(item.definitionIndex, item.bucketId);
-            if (!finalize_profile_item_acquisition(working,
-                                                   working,
-                                                   item.definitionHash,
-                                                   detail,
-                                                   actionSource,
-                                                   requested.quantity,
-                                                   {.direct = true},
-                                                   staged)) {
-                return false;
-            }
-            working.profileItems = staged.afterItems;
-            working.profileItemCount = staged.afterItemCount;
-            // A wallet row saturates at its cap, so the reward reports what it actually credited.
-            prepared.quantity = staged.acquiredQuantity - staged.previousQuantity;
-            prepared.instanceSoid = staged.acquiredInstanceSoid;
-            prepared.stateIndex = staged.profileIndex;
-            prepared.afterQuantity = staged.acquiredQuantity;
-            prepared.mutationSerial = staged.acquiredMutationSerial;
-            prepared.kind = RecordRewardKind::profileStack;
-            prepared.appendedProfileResident = staged.appended && staged.actionSource;
+            continue;
         } else if (bucket.arraySelector == inventory_buckets::ArraySelector::character
                    && detail.instancedDefinitionState
                           == item_details::InstancedDefinitionState::instanced) {
@@ -380,7 +370,8 @@ bool runtime::detail::stage_record_reward_grant(const AccountState& account,
         } else {
             return false;
         }
-        mutation.rewards[index] = prepared;
+        if (rewardCount >= mutation.rewards.size()) return false;
+        mutation.rewards[rewardCount++] = prepared;
     }
 
     family4_loadout::ResolvedLoadout loadout{};
@@ -406,7 +397,7 @@ bool runtime::detail::stage_record_reward_grant(const AccountState& account,
     mutation.characterIndex = characterIndex;
     mutation.beforeProfileItemCount = account.profileItemCount;
     mutation.afterProfileItemCount = working.profileItemCount;
-    mutation.rewardCount = rewards.size();
+    mutation.rewardCount = rewardCount;
     mutation.prepared = true;
     return true;
 }

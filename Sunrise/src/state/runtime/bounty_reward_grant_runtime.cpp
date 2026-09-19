@@ -9,6 +9,7 @@
 #include "bounty_stack_reward_plan.h"
 #include "character_encoding_preflight.h"
 #include "dawning_reward_runtime.h"
+#include "profile_stack_credit.h"
 #include "state_account_transaction_helpers.h"
 
 namespace sunrise::state::runtime::detail::bounty {
@@ -56,63 +57,16 @@ bool stage_rewards(const AccountState& account,
             for (std::size_t i = 0; i < rewardCount; ++i)
                 if (mutation.rewards[i].definitionHash == definition.definitionHash) return false;
         if (bucket.arraySelector == buckets::ArraySelector::profile) {
-            if (detail.instancedDefinitionState
-                    != items::details::InstancedDefinitionState::stackable
-                || build_data::is_profile_action_source(definition.definitionIndex,
-                                                        definition.bucketId))
+            std::int32_t credited = 0;
+            if (!credit_profile_stacks(working,
+                                       definition,
+                                       detail,
+                                       bucket,
+                                       request.quantity,
+                                       mutation,
+                                       rewardCount,
+                                       credited))
                 return false;
-            std::array<StackRow, inventory::kProfileItemCapacity> matching{};
-            std::size_t matchingCount = 0, used = 0;
-            std::int32_t serial = 0;
-            for (std::size_t i = 0; i < working.profileItemCount; ++i) {
-                const auto& row = working.profileItems[i];
-                items::Definition held{};
-                if (!build_data::find_item_definition_hash(row.definitionHash, held)) return false;
-                used += held.bucketId == definition.bucketId;
-                serial = (std::max)(serial, row.mutationSerial);
-                if (row.definitionHash == definition.definitionHash) {
-                    if (row.instanceSoid != 0) return false;
-                    matching[matchingCount++] = {i, row.quantity};
-                }
-            }
-            if (used > bucket.slotCount) return false;
-            const auto free = (std::min)(working.profileItems.size() - working.profileItemCount,
-                                         static_cast<std::size_t>(bucket.slotCount) - used);
-            std::array<StackCredit, kRecordRewardGrantCapacity> credits{};
-            std::size_t count{};
-            std::int32_t credited{};
-            const bool multiStack =
-                definition.definitionHash == bounty_policy::kEnhancementCoreHash;
-            if (!plan_stack_reward(std::span(matching).first(matchingCount),
-                                   request.quantity,
-                                   detail.maxStackSize,
-                                   multiStack,
-                                   working.profileItemCount,
-                                   free,
-                                   std::span(credits).first(mutation.rewards.size() - rewardCount),
-                                   count,
-                                   credited)
-                || count > static_cast<std::size_t>((std::numeric_limits<std::int32_t>::max)()
-                                                    - serial))
-                return false;
-            for (std::size_t i = 0; i < count; ++i) {
-                const auto& credit = credits[i];
-                auto& row = working.profileItems[credit.index];
-                if (credit.appended) {
-                    row = {0, definition.definitionHash, credit.after, ++serial};
-                    ++working.profileItemCount;
-                } else {
-                    row.quantity = credit.after;
-                    row.mutationSerial = ++serial;
-                }
-                auto& reward = mutation.rewards[rewardCount++];
-                reward.definitionHash = definition.definitionHash;
-                reward.stateIndex = credit.index;
-                reward.quantity = credit.credited;
-                reward.afterQuantity = credit.after;
-                reward.mutationSerial = row.mutationSerial;
-                reward.kind = RecordRewardKind::profileStack;
-            }
             if (credited != request.quantity) {
                 // Retain the prior saturation policy. No Postmaster resident is established.
                 core::log::writef(

@@ -30,6 +30,18 @@ namespace runtime::detail {
 
 using Quest = build_data::items::QuestInitialization;
 
+/** Removes one instanced row by identity, compacting the rows that follow it. */
+bool drop_instance(CharacterState& character, std::uint64_t instanceSoid) noexcept {
+    for (std::size_t index = 0; index < character.inventory.count; ++index) {
+        if (character.inventory.values[index].instanceSoid != instanceSoid) continue;
+        for (std::size_t next = index + 1; next < character.inventory.count; ++next)
+            character.inventory.values[next - 1] = character.inventory.values[next];
+        character.inventory.values[--character.inventory.count] = {};
+        return true;
+    }
+    return false;
+}
+
 /**
  * The plan must already be valid and nonempty before selecting a save bank.
  * @param quest First-step plan with account or character scope.
@@ -123,7 +135,7 @@ using Quest = build_data::items::QuestInitialization;
     }
 
     CharacterState after = before;
-    const std::size_t inventoryIndex = after.inventory.count;
+    std::size_t inventoryIndex = after.inventory.count;
     authored_inventory::Item acquired{};
     acquired.instanceSoid = instanceSoid;
     acquired.definitionHash = definitionHash;
@@ -141,8 +153,15 @@ using Quest = build_data::items::QuestInitialization;
     }
     // Direct earned grants alone can overflow, and only after proving authored-bucket capacity.
     // A failed socket/detail/character validation is never a Postmaster admission signal.
-    if (source.direct && !place_instanced_reward(chargedAccount, characterIndex, acquired))
+    std::uint64_t evictedInstanceSoid = 0;
+    if (source.direct
+        && !place_instanced_reward(chargedAccount, characterIndex, acquired, evictedInstanceSoid))
         return false;
+    // The FIFO drops before the arrival lands, so the new row takes the freed index.
+    if (evictedInstanceSoid != 0) {
+        if (!drop_instance(after, evictedInstanceSoid)) return false;
+        inventoryIndex = after.inventory.count;
+    }
     after.inventory.values[inventoryIndex] = acquired;
     ++after.inventory.count;
 
@@ -172,6 +191,8 @@ using Quest = build_data::items::QuestInitialization;
     mutation.expectedProfileItemCount = account.profileItemCount;
     mutation.afterProfileItemCount = chargedAccount.profileItemCount;
     mutation.inventoryIndex = inventoryIndex;
+    mutation.evictedInstanceSoid = evictedInstanceSoid;
+    mutation.evictedCount = evictedInstanceSoid != 0 ? 1U : 0U;
     mutation.collectibleIndex = source.collectibleIndex;
     mutation.inventoryRow = inventoryRow;
     mutation.equipmentSlot = equipmentSlot;
@@ -354,7 +375,9 @@ bool prepare_direct_item_bundle(std::uint32_t sourceDefinitionHash,
         granted.quantity = 1;
         granted.mutationSerial = static_cast<std::int32_t>(after.nextInventorySerial++);
         candidate.characters[characterIndex] = after;
-        if (!place_instanced_reward(candidate, characterIndex, granted)) return false;
+        std::uint64_t evicted = 0;
+        if (!place_instanced_reward(candidate, characterIndex, granted, evicted)) return false;
+        if (evicted != 0 && !drop_instance(after, evicted)) return false;
         after.inventory.values[after.inventory.count++] = granted;
     }
 
@@ -425,8 +448,12 @@ valid_item_acquisition_source(const PendingItemAcquisition& mutation) noexcept {
         || mutation.acquiredDefinitionHash == authored_inventory::kNoDefinitionHash
         || mutation.characterIndex >= kCharacterCapacity
         || mutation.expectedInventoryCount >= authored_inventory::kCharacterItemCapacity
-        || mutation.inventoryIndex != mutation.expectedInventoryCount
-        || mutation.afterCharacter.inventory.count != mutation.expectedInventoryCount + 1U
+        || mutation.evictedCount > 1U
+        || (mutation.evictedCount != 0) != (mutation.evictedInstanceSoid != 0)
+        || mutation.evictedCount > mutation.expectedInventoryCount
+        || mutation.inventoryIndex != mutation.expectedInventoryCount - mutation.evictedCount
+        || mutation.afterCharacter.inventory.count
+               != mutation.expectedInventoryCount + 1U - mutation.evictedCount
         || mutation.inventoryIndex >= mutation.afterCharacter.inventory.count
         || mutation.afterCharacter.inventory.values[mutation.inventoryIndex].instanceSoid
                != mutation.acquiredInstanceSoid
@@ -497,8 +524,9 @@ valid_item_acquisition_source(const PendingItemAcquisition& mutation) noexcept {
     const auto expectedPlacement = acquired.placement;
     acquired.placement = authored_inventory::ItemPlacement::inventory;
     if (mutation.directGrant) {
-        if (!place_instanced_reward(current, mutation.characterIndex, acquired)
-            || acquired.placement != expectedPlacement)
+        std::uint64_t evicted = 0;
+        if (!place_instanced_reward(current, mutation.characterIndex, acquired, evicted)
+            || acquired.placement != expectedPlacement || evicted != mutation.evictedInstanceSoid)
             return false;
     } else if (expectedPlacement != authored_inventory::ItemPlacement::inventory)
         return false;
@@ -570,7 +598,9 @@ valid_item_acquisition_source(const PendingItemAcquisition& mutation) noexcept {
         granted.quantity = 1;
         granted.mutationSerial = static_cast<std::int32_t>(canonical.nextInventorySerial++);
         after.characters[mutation.characterIndex] = canonical;
-        if (!place_instanced_reward(after, mutation.characterIndex, granted)) return false;
+        std::uint64_t evicted = 0;
+        if (!place_instanced_reward(after, mutation.characterIndex, granted, evicted)) return false;
+        if (evicted != 0 && !drop_instance(canonical, evicted)) return false;
         canonical.inventory.values[canonical.inventory.count++] = granted;
     }
     if (!same_character(canonical, mutation.afterCharacter)) {

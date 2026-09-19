@@ -39,10 +39,19 @@ struct PendingPostmasterClaim {
 [[nodiscard]] bool commit_postmaster_claim(PendingPostmasterClaim& mutation) noexcept;
 
 namespace runtime::detail {
-/** Only an actually full authored bucket may redirect an ordinary instanced reward. */
+/**
+ * Only an actually full authored bucket may redirect an ordinary instanced reward.
+ * Lost Items is installed kFifo, so a full one names its oldest resident for eviction rather
+ * than refusing the arrival. Nothing is removed here; the caller owns the mutable character.
+ * @param before Account the capacity decision reads.
+ * @param characterIndex Character receiving the reward.
+ * @param item Reward whose placement is decided.
+ * @param evictedInstanceSoid Receives the resident the caller must drop, or zero.
+ */
 [[nodiscard]] bool place_instanced_reward(const AccountState& before,
                                           std::size_t characterIndex,
-                                          account::inventory::Item& item) noexcept;
+                                          account::inventory::Item& item,
+                                          std::uint64_t& evictedInstanceSoid) noexcept;
 } // namespace runtime::detail
 
 } // namespace sunrise::state

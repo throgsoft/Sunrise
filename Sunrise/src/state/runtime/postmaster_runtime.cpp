@@ -197,7 +197,9 @@ bool commit_postmaster_claim(PendingPostmasterClaim& mutation) noexcept {
 namespace runtime::detail {
 bool place_instanced_reward(const AccountState& before,
                             std::size_t characterIndex,
-                            inventory::Item& item) noexcept {
+                            inventory::Item& item,
+                            std::uint64_t& evictedInstanceSoid) noexcept {
+    evictedInstanceSoid = 0;
     if (!account::valid(before) || characterIndex >= before.characterCount
         || item.placement != inventory::ItemPlacement::inventory)
         return false;
@@ -230,9 +232,20 @@ bool place_instanced_reward(const AccountState& before,
         return false;
     std::size_t postmasterCount = 0;
     const auto& held = before.characters[characterIndex].inventory;
-    for (std::size_t i = 0; i < held.count; ++i)
-        postmasterCount += held.values[i].placement == inventory::ItemPlacement::postmaster;
-    if (postmasterCount >= inventory::kPostmasterItemCapacity) return false;
+    std::size_t oldest = held.count;
+    for (std::size_t i = 0; i < held.count; ++i) {
+        if (held.values[i].placement != inventory::ItemPlacement::postmaster) continue;
+        ++postmasterCount;
+        if (oldest == held.count
+            || held.values[i].mutationSerial < held.values[oldest].mutationSerial)
+            oldest = i;
+    }
+    if (postmasterCount >= inventory::kPostmasterItemCapacity) {
+        if ((postmaster.policyFlags & buckets::kFifo) == 0 || oldest == held.count
+            || held.values[oldest].instanceSoid == 0)
+            return false;
+        evictedInstanceSoid = held.values[oldest].instanceSoid;
+    }
     item.placement = inventory::ItemPlacement::postmaster;
     return true;
 }

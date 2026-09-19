@@ -132,6 +132,9 @@ struct PendingItemAcquisition {
     std::size_t expectedProfileItemCount{};
     std::size_t afterProfileItemCount{};
     std::size_t inventoryIndex{};
+    /** Lost Items resident the FIFO dropped to admit this arrival, or zero. */
+    std::uint64_t evictedInstanceSoid{};
+    std::size_t evictedCount{};
     std::uint16_t collectibleIndex{};
     std::uint16_t inventoryRow{};
     std::uint8_t equipmentSlot{};

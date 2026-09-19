@@ -701,9 +701,23 @@ finalize_profile_item_acquisition(const AccountState& account,
         greatestMutationSerial =
             (std::max)(greatestMutationSerial, account.profileItems[index].mutationSerial);
     }
+    // A bucket owns a fixed slot range, so a new stack needs a free slot in that range and not
+    // just a free row in the shared profile array. Without this a one-slot bucket silently takes
+    // a second row that the Client has nowhere to show.
+    inventory_buckets::Descriptor bucket{};
+    if (!build_data::find_inventory_bucket_descriptor(detail.bucketId, bucket)
+        || bucket.bucketId != detail.bucketId) {
+        return false;
+    }
+    std::size_t bucketRows = 0;
     for (std::size_t index = 0; index < chargedAccount.profileItemCount; ++index) {
         const authored_inventory::ProfileItem& existing = chargedAccount.profileItems[index];
         greatestMutationSerial = (std::max)(greatestMutationSerial, existing.mutationSerial);
+        build_data::items::Definition held{};
+        if (!build_data::find_item_definition_hash(existing.definitionHash, held)) {
+            return false;
+        }
+        bucketRows += held.bucketId == detail.bucketId;
         if (existing.definitionHash != definitionHash) {
             continue;
         }
@@ -719,6 +733,7 @@ finalize_profile_item_acquisition(const AccountState& account,
     }
     if (greatestMutationSerial == (std::numeric_limits<std::int32_t>::max)()
         || (appended && chargedAccount.profileItemCount >= chargedAccount.profileItems.size())
+        || (appended && bucketRows >= bucket.slotCount)
         || quantity > detail.maxStackSize - previousQuantity) {
         return false;
     }

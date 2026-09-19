@@ -13,12 +13,10 @@ namespace identity = account::inventory::dawning;
 namespace buckets = build_data::inventory::buckets;
 namespace {
 
-bool pickup_bucket(std::uint32_t hash, buckets::Descriptor& bucket) noexcept {
+bool delivery_lane(std::uint32_t hash, buckets::Descriptor& bucket) noexcept {
     build_data::items::Definition item{};
     build_data::items::details::Definition detail{};
-    const auto index = identity::ingredient(hash);
-    return index < identity::kIngredientCount && hash == identity::kIngredients[index].pickupHash
-           && build_data::find_item_definition_hash(hash, item)
+    return build_data::find_item_definition_hash(hash, item)
            && build_data::find_configured_item_detail(item.definitionIndex, detail)
            && detail.definitionHash == hash && detail.bucketId == item.bucketId
            && detail.instancedDefinitionState
@@ -28,6 +26,12 @@ bool pickup_bucket(std::uint32_t hash, buckets::Descriptor& bucket) noexcept {
            && bucket.arraySelector == buckets::ArraySelector::character && bucket.slotCount > 0
            && bucket.slotCount <= account::inventory::kCharacterStackCapacity
            && bucket.policyFlags == (buckets::kFifo | buckets::kNoTransferOnEviction);
+}
+
+bool pickup_bucket(std::uint32_t hash, buckets::Descriptor& bucket) noexcept {
+    const auto index = identity::ingredient(hash);
+    return index < identity::kIngredientCount && hash == identity::kIngredients[index].pickupHash
+           && delivery_lane(hash, bucket);
 }
 
 bool pickup_space(const CharacterState& character,
@@ -265,11 +269,8 @@ bool drain_pickups(std::uint64_t characterSoid, std::size_t& removed) noexcept {
     std::size_t retained = 0;
     for (std::size_t i = 0; i < rows.count; ++i) {
         const auto& row = rows.values[i];
-        const auto ingredient = identity::ingredient(row.definitionHash);
-        if (ingredient < identity::kIngredientCount
-            && row.definitionHash == identity::kIngredients[ingredient].pickupHash) {
-            buckets::Descriptor bucket{};
-            if (!pickup_bucket(row.definitionHash, bucket) || row.quantity != 1) return false;
+        buckets::Descriptor bucket{};
+        if (delivery_lane(row.definitionHash, bucket) && row.quantity == 1) {
             ++removed;
         } else {
             rows.values[retained++] = row;

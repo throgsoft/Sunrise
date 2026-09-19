@@ -152,15 +152,7 @@ Feedback grantable(const Entry& entry) noexcept {
     const std::array rewards{state::DirectRecordReward{entry.identity.definitionIndex, 1}};
     output.accepted =
         state::prepare_record_reward_grant(rewards, state::kUnclaimedRecordIndex, *probe);
-    if (output.accepted) return output;
-    data::inventory::buckets::Descriptor bucket{};
-    std::snprintf(output.text.data(),
-                  output.text.size(),
-                  "Reward policy has nowhere to place this; bucket=%u array=%u",
-                  unsigned(entry.identity.bucketId),
-                  data::find_inventory_bucket_descriptor(entry.identity.bucketId, bucket)
-                      ? unsigned(bucket.arraySelector)
-                      : 0xFFU);
+    if (!output.accepted) std::snprintf(output.text.data(), output.text.size(), "Unable to grant");
     return output;
 }
 
@@ -184,17 +176,8 @@ Feedback grant(const Entry& entry, std::int32_t quantity) noexcept {
     const auto result = state::investment_edit::grant_item(
         entry.identity.definitionIndex, quantity, entry.identity.definitionHash);
     if (result.accepted) return report(result);
-    // Name the bucket on refusal: an unplaceable definition and a full array read alike here.
-    data::inventory::buckets::Descriptor bucket{};
     Feedback output{};
-    std::snprintf(output.text.data(),
-                  output.text.size(),
-                  "%s; bucket=%u array=%u",
-                  result.reason,
-                  unsigned(entry.identity.bucketId),
-                  data::find_inventory_bucket_descriptor(entry.identity.bucketId, bucket)
-                      ? unsigned(bucket.arraySelector)
-                      : 0xFFU);
+    std::snprintf(output.text.data(), output.text.size(), "Unable to grant");
     return output;
 }
 Feedback set_lane(std::uint64_t instance,

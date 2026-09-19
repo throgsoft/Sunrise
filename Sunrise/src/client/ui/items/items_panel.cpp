@@ -500,10 +500,8 @@ void selected_item(const std::shared_ptr<const Catalog>& data) {
     if (!allowed) {
         if (!g_inventory.ready)
             ImGui::TextDisabled("Select a character to grant items");
-        else if (!detailReady)
-            ImGui::TextDisabled("Cannot be granted: item details unavailable");
         else
-            ImGui::TextDisabled("Cannot be granted: %s", g_probe.text.data());
+            ImGui::TextDisabled("Unable to grant");
     }
     // Where an item lands is derived from installed data, so the panel reports it rather than
     // leaving the bucket a number to look up elsewhere.

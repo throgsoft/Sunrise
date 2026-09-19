@@ -111,10 +111,15 @@ GrantPolicy classify(const Entry& entry) noexcept {
     if (bounty::reward_marker(identity.definitionIndex, identity.definitionHash)
         != bounty::RewardMarker::none)
         return GrantPolicy::dummy;
-    // A bucket that cannot transfer what it evicts is a delivery lane, not somewhere an item
-    // lives: acquiring from it is a side effect elsewhere, such as a weapon gaining a plug.
-    // Minting the row would show an item the account does not really own.
-    if ((bucket.policyFlags & buckets::kNoTransferOnEviction) != 0) return GrantPolicy::unknown;
+    // A bucket that cannot transfer what it evicts is a delivery lane. It carries stack rows,
+    // which the reward policy places and the bucket evicts in turn. An instanced row there is
+    // not a resident at all: it stands for a side effect elsewhere, such as a weapon gaining a
+    // plug, and minting it shows an item the account does not really own and never leaves.
+    if ((bucket.policyFlags & buckets::kNoTransferOnEviction) != 0
+        && detail.instancedDefinitionState
+               != data::items::details::InstancedDefinitionState::stackable) {
+        return GrantPolicy::unknown;
+    }
     // Reward policy owns support, ownership, capacity and quantity, and refuses with its own
     // reason. This mirrors only the placements that policy implements, so a definition naming
     // no bucket it can fill never offers a grant it cannot honour.

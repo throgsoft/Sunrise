@@ -36,13 +36,13 @@ namespace {
 /**
  * Proves the reward commits before the queue saves it.
  * A queued reward whose commit fails is retained for a later attempt, and the oldest is always
- * read first, so one that can never commit would hold every reward behind it. This prepares
- * through the same function the deferred pump commits with, and discards the result.
+ * read first, so one that can never commit would hold every reward behind it.
  *
- * Several copies are proven together, not one at a time. The reward preparer threads one
- * working account image through every row, so it sees what the earlier copies did: an item the
- * account may hold only once refuses its second copy here rather than in the queue, where it
- * would never commit and would hold every later reward behind it.
+ * An instanced reward is proven twice. The reward preparer threads one working account image
+ * through every copy, so an item the account may hold only once refuses its second copy here
+ * rather than in the queue. The pump commits through a different preparer, so that one is asked
+ * as well: a definition only the reward path can place, such as a stack row in a delivery lane,
+ * is refused here and granted through the reward path instead of jamming the queue.
  */
 [[nodiscard]] bool
 commits(std::uint16_t itemDefinitionIndex, std::int32_t quantity, WorldRewardKind kind) noexcept {
@@ -60,8 +60,13 @@ commits(std::uint16_t itemDefinitionIndex, std::int32_t quantity, WorldRewardKin
     const auto count = static_cast<std::size_t>(quantity);
     std::array<state::DirectRecordReward, state::kRecordRewardGrantCapacity> rows{};
     std::fill_n(rows.begin(), count, state::DirectRecordReward{itemDefinitionIndex, 1});
-    return state::prepare_record_reward_grant(
-        std::span(rows).first(count), state::kUnclaimedRecordIndex, *probe);
+    if (!state::prepare_record_reward_grant(
+            std::span(rows).first(count), state::kUnclaimedRecordIndex, *probe)) {
+        return false;
+    }
+    const std::unique_ptr<state::PendingItemAcquisition> pumped(new (std::nothrow)
+                                                                    state::PendingItemAcquisition);
+    return pumped && state::prepare_item_acquisition_for_item(itemDefinitionIndex, *pumped);
 }
 
 } // namespace

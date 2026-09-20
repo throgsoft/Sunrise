@@ -2234,9 +2234,7 @@
     <ClInclude Include="src\state\runtime\bounty_redemption_runtime.h" />
     <ClInclude Include="src\state\runtime\bounty_reward_policy.h" />
     <ClInclude Include="src\state\runtime\bounty_reward_policy_data.h" />
-    <ClInclude Include="src\state\runtime\bounty_stack_reward_plan.h" />
     <ClInclude Include="src\state\runtime\fifo_bucket_eviction.h" />
-    <ClInclude Include="src\state\runtime\profile_stack_credit.h" />
     <ClCompile Include="src\state\runtime\dawning_oven_persistence.cpp" />
 
     <ClCompile Include="src\state\runtime\dawning_oven_runtime.cpp" />
@@ -2265,8 +2263,6 @@
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ItemGroup>
-    <ClCompile Include="src\state\runtime\synthesizer_upgrade_runtime.cpp" />
-    <ClInclude Include="src\state\runtime\synthesizer_upgrade_runtime.h" />
     <ClCompile Include="src\state\runtime\synthesizer_crafting_runtime.cpp" />
     <ClInclude Include="src\state\runtime\synthesizer_crafting_runtime.h" />
     <ClCompile Include="src\state\runtime\chalice_crafting_runtime.cpp" />

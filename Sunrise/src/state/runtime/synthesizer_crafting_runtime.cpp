@@ -6,7 +6,6 @@
 #include <mutex>
 
 #include "../../core/logging/log.h"
-#include "../../middleware/datagen/family4/account/layout.h"
 #include "state_account_transaction_helpers.h"
 
 namespace sunrise::state::runtime::detail::synthesizer {
@@ -95,23 +94,6 @@ bool multiplier(std::size_t tier,
     return false;
 }
 
-bool profile_stack(std::uint32_t hash,
-                   items::Definition& definition,
-                   items::details::Definition& detail) noexcept {
-    buckets::Descriptor bucket{};
-    return build_data::find_item_definition_hash(hash, definition)
-           && definition.definitionHash == hash
-           && build_data::find_configured_item_detail(definition.definitionIndex, detail)
-           && detail.definitionHash == hash && detail.definitionIndex == definition.definitionIndex
-           && detail.bucketId == definition.bucketId && detail.maxStackSize > 0
-           && detail.instancedDefinitionState == items::details::InstancedDefinitionState::stackable
-           && !detail.equipmentSlot.has_value()
-           && build_data::find_inventory_bucket_descriptor(definition.bucketId, bucket)
-           && bucket.arraySelector == buckets::ArraySelector::profile
-           && !build_data::is_profile_action_source(definition.definitionIndex,
-                                                    definition.bucketId);
-}
-
 struct ExchangePair {
     items::Definition recipe{}, recycle{}, synth{}, mote{};
     items::details::Definition synthDetail{}, moteDetail{};
@@ -139,8 +121,9 @@ bool single_cost(const items::Definition& plug,
 bool resolve_pair(const Role& role, std::size_t tier, ExchangePair& pair) noexcept {
     items::Definition reference{};
     items::details::Definition referenceDetail{};
-    if (tier >= kContainers.size() || !profile_stack(role.synth, pair.synth, pair.synthDetail)
-        || !profile_stack(role.motes[tier], pair.mote, pair.moteDetail)
+    if (tier >= kContainers.size()
+        || !resolve_profile_stack(role.synth, pair.synth, pair.synthDetail)
+        || !resolve_profile_stack(role.motes[tier], pair.mote, pair.moteDetail)
         || pair.synth.bucketId != pair.mote.bucketId || pair.moteDetail.maxStackSize != 1
         || !build_data::find_item_definition_hash(role.plugs[tier], pair.recipe)
         || pair.recipe.definitionHash != role.plugs[tier]
@@ -235,26 +218,84 @@ bool exchange_profile(const AccountState& snapshot,
     return true;
 }
 
-bool initialize_sockets(const items::details::Definition& detail,
-                        inventory::Sockets& sockets) noexcept {
-    if (sockets.policy == inventory::SocketPolicy::nativeDefaults) {
-        sockets = {};
-        sockets.policy = inventory::SocketPolicy::authored;
-        sockets.plugCount = detail.ordinarySocketCount;
-        for (std::size_t lane = 0; lane < sockets.plugCount; ++lane) {
-            if (detail.initialPlugIndices[lane] == items::details::kUnavailableItemIndex) {
-                continue;
-            }
-            items::Definition initial{};
-            if (!build_data::find_item_definition_index(detail.initialPlugIndices[lane], initial)
-                || initial.definitionIndex != detail.initialPlugIndices[lane]) {
-                return false;
-            }
-            sockets.plugs[lane] = initial.definitionHash;
+std::size_t tier(std::uint32_t hash) noexcept {
+    for (std::size_t i = 0; i < kContainers.size(); ++i) {
+        if (hash == kContainers[i]) {
+            return i + 1;
         }
     }
-    return sockets.policy == inventory::SocketPolicy::authored
-           && sockets.plugCount == detail.ordinarySocketCount && inventory::valid(sockets);
+    return 0;
+}
+
+bool resolve_upgrade_container(std::uint32_t hash, items::details::Definition& detail) noexcept {
+    items::Definition definition{};
+    buckets::Descriptor bucket{};
+    return build_data::find_item_definition_hash(hash, definition)
+           && definition.definitionHash == hash
+           && build_data::find_configured_item_detail(definition.definitionIndex, detail)
+           && detail.definitionIndex == definition.definitionIndex && detail.definitionHash == hash
+           && detail.bucketId == definition.bucketId
+           && build_data::find_inventory_bucket_descriptor(definition.bucketId, bucket)
+           && bucket.arraySelector == buckets::ArraySelector::character
+           && detail.instancedDefinitionState == items::details::InstancedDefinitionState::instanced
+           && detail.maxStackSize == 1 && !detail.equipmentSlot.has_value()
+           && detail.objectiveCount == 0 && detail.lifetimeSeconds == 0
+           && detail.ordinarySocketState == items::details::OrdinarySocketState::present
+           && detail.ordinarySocketCount > 0
+           && detail.ordinarySocketCount <= inventory::kPlugCapacity;
+}
+
+/** Retain existing recipe choices; initialize only a previously undeclared socket lane. */
+bool upgrade_sockets(const items::details::Definition& before,
+                     const items::details::Definition& after,
+                     inventory::Sockets& sockets) noexcept {
+    if (before.ordinarySocketCount != after.ordinarySocketCount) {
+        return false;
+    }
+    const bool authored = sockets.policy == inventory::SocketPolicy::authored;
+    if ((!authored && sockets.policy != inventory::SocketPolicy::nativeDefaults)
+        || (authored && sockets.plugCount != before.ordinarySocketCount)) {
+        return false;
+    }
+    std::size_t opened = 0;
+    for (std::size_t lane = 0; lane < before.ordinarySocketCount; ++lane) {
+        const auto oldType = before.socketTypes[lane];
+        const auto newType = after.socketTypes[lane];
+        if (oldType == newType) {
+            if (before.initialPlugIndices[lane] != after.initialPlugIndices[lane]) {
+                return false;
+            }
+            if (authored && sockets.plugs[lane]) {
+                items::Definition plug{};
+                if (!build_data::find_item_definition_hash(*sockets.plugs[lane], plug)
+                    || plug.definitionHash != *sockets.plugs[lane]
+                    || (plug.definitionIndex != after.initialPlugIndices[lane]
+                        && !build_data::is_socket_plug_allowed(after.definitionIndex,
+                                                               static_cast<std::uint8_t>(lane),
+                                                               plug.definitionIndex))) {
+                    return false;
+                }
+            }
+            continue;
+        }
+        if (oldType != items::details::kUnavailableSocketType
+            || before.initialPlugIndices[lane] != items::details::kUnavailableItemIndex
+            || newType == items::details::kUnavailableSocketType
+            || after.initialPlugIndices[lane] == items::details::kUnavailableItemIndex
+            || (authored && sockets.plugs[lane])) {
+            return false;
+        }
+        items::Definition plug{};
+        if (!build_data::find_item_definition_index(after.initialPlugIndices[lane], plug)
+            || plug.definitionIndex != after.initialPlugIndices[lane]) {
+            return false;
+        }
+        if (authored) {
+            sockets.plugs[lane] = plug.definitionHash;
+        }
+        ++opened;
+    }
+    return opened == 1;
 }
 } // namespace
 
@@ -363,7 +404,7 @@ bool project_mote_output_flags(const AccountState& account,
             items::Definition definition{};
             items::details::Definition detail{};
             if (item.instanceSoid != 0 || item.quantity != 1
-                || !profile_stack(hash, definition, detail) || detail.maxStackSize != 1) {
+                || !resolve_profile_stack(hash, definition, detail) || detail.maxStackSize != 1) {
                 return false;
             }
             held = true;
@@ -422,167 +463,6 @@ bool project_mote_output_flags(const AccountState& account,
         }
     }
     family = after;
-    return true;
-}
-
-bool project_exchange(const PendingSocketPlug& mutation,
-                      const AccountState& after,
-                      std::uint16_t previousMoteMask,
-                      middleware::datagen::family4::account::layout::Object& object) noexcept {
-    if (!mutation.prepared || !mutation.profileChanged
-        || !is_container(mutation.targetDefinitionHash)
-        || mutation.accountSoid != object.accountSoid || mutation.accountSoid != after.primarySoid
-        || mutation.expectedProfileItemCount > mutation.beforeProfileItems.size()
-        || mutation.afterProfileItemCount > mutation.afterProfileItems.size()
-        || object.profileItemCount != mutation.afterProfileItemCount
-        || !same_profile_inventory(
-            after, mutation.afterProfileItems, mutation.afterProfileItemCount)) {
-        return false;
-    }
-    std::size_t projectedFlagCount = 0;
-    // Staging has no connection history. This second preflight belongs before the socket
-    // frame/SQLite commit, so a required old clear cannot make the deferred push overflow
-    // only after a Mote has already been spent. Preserve every authored/catalyst capability.
-    if (mote_output_flags_ready()) {
-        InvestmentState investment{};
-        if (!investment_snapshot(investment, previousMoteMask)
-            || !project_mote_output_flags(after, investment.family5, previousMoteMask)) {
-            core::log::writef(core::log::Channel::state,
-                              core::log::Level::warn,
-                              "ev=synthesizer_visibility stage=preflight result=fail "
-                              "previous_mask=0x%03X flags=%zu capacity=%zu",
-                              static_cast<unsigned>(previousMoteMask),
-                              investment.family5.flagCount,
-                              investment.family5.flags.size());
-            return false;
-        }
-        projectedFlagCount = investment.family5.flagCount;
-    }
-    const bool recycling = mutation.socketLane == 4;
-    if (!recycling && mutation.socketLane >= 3) {
-        return false;
-    }
-    ExchangePair pair{};
-    bool found = false;
-    for (const auto& role : kRoles) {
-        for (std::size_t tier = 0; tier < kContainers.size(); ++tier) {
-            items::Definition requested{};
-            if (!build_data::find_item_definition_hash(
-                    recycling ? role.recyclePlugs[tier] : role.plugs[tier], requested)
-                || requested.definitionIndex != mutation.requestedPlugDefinitionIndex) {
-                continue;
-            }
-            if (found || (!recycling && tier != mutation.socketLane)
-                || !resolve_pair(role, tier, pair)) {
-                return false;
-            }
-            found = true;
-        }
-    }
-    if (!found) {
-        return false;
-    }
-    const auto& debit = recycling ? pair.mote : pair.synth;
-    const auto& credit = recycling ? pair.synth : pair.mote;
-    buckets::Descriptor bucket{};
-    if (!build_data::find_inventory_bucket_descriptor(credit.bucketId, bucket)
-        || bucket.arraySelector != buckets::ArraySelector::profile
-        || bucket.firstSlot > object.profileItems.size()
-        || bucket.slotCount > object.profileItems.size() - bucket.firstSlot) {
-        return false;
-    }
-    const auto amount = static_cast<std::int32_t>(pair.synthesisCost.requirements[0].quantity);
-    const std::int32_t spent = recycling ? 1 : amount;
-    const std::int32_t gained = recycling ? amount : 1;
-    std::int64_t debitBefore = 0, debitAfter = 0, creditBefore = 0, creditAfter = 0;
-    std::int32_t greatestSerial = 0;
-    const inventory::ProfileItem* gain = nullptr;
-    for (std::size_t i = 0; i < mutation.expectedProfileItemCount; ++i) {
-        const auto& item = mutation.beforeProfileItems[i];
-        greatestSerial = (std::max)(greatestSerial, item.mutationSerial);
-        if (item.definitionHash == debit.definitionHash) {
-            debitBefore += item.quantity;
-        }
-        if (item.definitionHash == credit.definitionHash) {
-            creditBefore += item.quantity;
-        }
-    }
-    for (std::size_t i = 0; i < mutation.afterProfileItemCount; ++i) {
-        const auto& item = mutation.afterProfileItems[i];
-        if (item.definitionHash == debit.definitionHash) {
-            debitAfter += item.quantity;
-        }
-        if (item.definitionHash != credit.definitionHash) {
-            continue;
-        }
-        if (gain || item.instanceSoid != 0 || item.quantity <= 0
-            || item.mutationSerial <= greatestSerial) {
-            return false;
-        }
-        gain = &item;
-        creditAfter += item.quantity;
-    }
-    if (!gain || debitBefore - debitAfter != spent || creditAfter - creditBefore != gained
-        || (recycling && (debitBefore != 1 || debitAfter != 0))) {
-        return false;
-    }
-    // Account encoding owns deletion: the entire profile bank is replaced. Check both
-    // balances in that bank before naming the gain; a stale quantity-0 Mote is invalid.
-    std::int64_t encodedDebit = 0, encodedCredit = 0;
-    std::size_t gains = 0;
-    std::size_t gainSlot = object.profileItems.size();
-    for (std::size_t slot = 0; slot < object.profileItems.size(); ++slot) {
-        const auto& row = object.profileItems[slot];
-        // State's packed position is not the native profile slot. Both exchange
-        // balances must occupy the authored bucket window the native reader uses.
-        if ((row.definitionIndex == debit.definitionIndex
-             || row.definitionIndex == credit.definitionIndex)
-            && (slot < bucket.firstSlot || slot - bucket.firstSlot >= bucket.slotCount)) {
-            return false;
-        }
-        if (row.definitionIndex == debit.definitionIndex) {
-            if (row.instanceSoid != 0 || row.quantity <= 0) {
-                return false;
-            }
-            encodedDebit += row.quantity;
-        }
-        if (row.definitionIndex != credit.definitionIndex) {
-            continue;
-        }
-        if (row.instanceSoid != 0 || row.quantity != gain->quantity
-            || row.mutationSerial != gain->mutationSerial) {
-            return false;
-        }
-        encodedCredit += row.quantity;
-        gainSlot = slot;
-        ++gains;
-    }
-    auto& ring = object.profileInventoryChanges;
-    if (encodedDebit != debitAfter || encodedCredit != creditAfter || gains != 1
-        || ring.writeSlot != 0 || ring.nextSequence != 0
-        || !std::all_of(ring.records.begin(), ring.records.end(), [](const auto& row) {
-               return row.sequence == 0 && row.reserved == 0 && row.mutationSerial == 0
-                      && row.kind == 0 && row.reservedKind == 0 && row.flags == 0;
-           })) {
-        return false;
-    }
-    ring.records.front() = {0, 0, gain->mutationSerial, 1, 0, 0};
-    ring.writeSlot = ring.nextSequence = 1;
-    core::log::writef(
-        core::log::Channel::state,
-        core::log::Level::info,
-        "ev=synthesizer_projection stage=preflight result=ok recycle=%u "
-        "credit_index=%u quantity=%d serial=%d profile_slot=%zu bucket=%u "
-        "held_mask=0x%03X history_mask=0x%03X flags=%zu",
-        unsigned(recycling),
-        unsigned(credit.definitionIndex),
-        gain->quantity,
-        gain->mutationSerial,
-        gainSlot,
-        unsigned(bucket.bucketId),
-        unsigned(mote_ownership_mask(std::span(after.profileItems).first(after.profileItemCount))),
-        unsigned(previousMoteMask),
-        projectedFlagCount);
     return true;
 }
 
@@ -692,7 +572,7 @@ bool stage_exchange(const AccountState& snapshot,
         }
     }
     auto sockets = target->sockets;
-    if (!initialize_sockets(detail, sockets)) {
+    if (!resolve_socket_choices(detail, sockets)) {
         return false;
     }
     sockets.plugs[socketLane] = initial.definitionHash;
@@ -717,42 +597,16 @@ bool stage_exchange(const AccountState& snapshot,
             return false;
         }
     }
-    middleware::datagen::family4::loadout::ResolvedLoadout beforeLoadout{}, afterLoadout{};
-    ResolvedPosition beforePosition{}, afterPosition{};
-    if (!account::valid(candidate) || !valid_profile_inventory(candidate)
-        || !middleware::datagen::family4::loadout::resolve(snapshot, characterIndex, beforeLoadout)
-        || !middleware::datagen::family4::loadout::resolve(candidate, characterIndex, afterLoadout)
-        || !find_resolved_position(beforeLoadout, targetInstanceSoid, beforePosition)
-        || !find_resolved_position(afterLoadout, targetInstanceSoid, afterPosition)
-        || !same_position(beforePosition, afterPosition)) {
+    if (!finalize_socket_plug(snapshot,
+                              candidate,
+                              characterIndex,
+                              location,
+                              socketLane,
+                              plugDefinitionIndex,
+                              costs,
+                              mutation)) {
         return false;
     }
-
-    mutation.beforeCharacter = character;
-    mutation.afterCharacter = candidate.characters[characterIndex];
-    mutation.beforeProfileItems = snapshot.profileItems;
-    mutation.afterProfileItems = candidate.profileItems;
-    mutation.accountSoid = snapshot.primarySoid;
-    mutation.characterSoid = character.soid;
-    mutation.targetInstanceSoid = targetInstanceSoid;
-    mutation.targetDefinitionHash = container.definitionHash;
-    mutation.plugDefinitionHash = initial.definitionHash;
-    mutation.materialRequirementSetHash = costs.requirementSetHash;
-    mutation.characterIndex = characterIndex;
-    mutation.expectedProfileItemCount = snapshot.profileItemCount;
-    mutation.afterProfileItemCount = candidate.profileItemCount;
-    mutation.itemIndex = location.index;
-    mutation.targetDefinitionIndex = container.definitionIndex;
-    mutation.plugDefinitionIndex = initial.definitionIndex;
-    mutation.requestedPlugDefinitionIndex = plugDefinitionIndex;
-    mutation.materialRequirementSetIndex = costs.requirementSetIndex;
-    mutation.socketLane = socketLane;
-    mutation.targetBucketId = container.bucketId;
-    mutation.plugBucketId = initial.bucketId;
-    mutation.materialRequirementCount = costs.requirementCount;
-    mutation.profileChanged = true;
-    mutation.targetEquipped = false;
-    mutation.prepared = true;
     if (recycling) {
         core::log::writef(core::log::Channel::state,
                           core::log::Level::info,
@@ -767,4 +621,69 @@ bool stage_exchange(const AccountState& snapshot,
     }
     return true;
 }
+bool stage_upgrade(CharacterState& character) noexcept {
+    if (character.inventory.count > character.inventory.values.size()
+        || character.gambitPrimeSynthesizerTier > GambitPrimeSynthesizerTier::powerful) {
+        return false;
+    }
+    // These containers have no equipment slot. Refuse an ambiguous or malformed save instead
+    // of moving equipment, selecting one duplicate, or granting a second container.
+    for (const auto& item : character.equipment.slots) {
+        if (item && tier(item->definitionHash) != 0) {
+            return false;
+        }
+    }
+    std::size_t heldIndex = character.inventory.count;
+    std::size_t heldTier = 0;
+    for (std::size_t i = 0; i < character.inventory.count; ++i) {
+        const auto candidateTier = tier(character.inventory.values[i].definitionHash);
+        if (candidateTier == 0) {
+            continue;
+        }
+        if (heldTier != 0) {
+            return false;
+        }
+        heldIndex = i;
+        heldTier = candidateTier;
+    }
+    if (heldTier == 0) {
+        return false;
+    }
+    const auto& held = character.inventory.values[heldIndex];
+    items::details::Definition before{};
+    if (held.instanceSoid == 0 || held.quantity != 1
+        || !resolve_upgrade_container(held.definitionHash, before)
+        || held.objectiveDefinitionIndex != items::details::kUnavailableItemIndex) {
+        return false;
+    }
+    for (const auto value : held.objectiveValues) {
+        if (value != 0) {
+            return false;
+        }
+    }
+    if (heldTier == kContainers.size()) {
+        character.gambitPrimeSynthesizerTier = GambitPrimeSynthesizerTier::powerful;
+        return true;
+    }
+    if (character.nextInventorySerial
+        >= static_cast<std::uint32_t>((std::numeric_limits<std::int32_t>::max)())) {
+        return false;
+    }
+    items::details::Definition after{};
+    auto replacement = held;
+    if (!resolve_upgrade_container(kContainers[heldTier], after)
+        || before.bucketId != after.bucketId
+        || !upgrade_sockets(before, after, replacement.sockets)) {
+        return false;
+    }
+    replacement.definitionHash = after.definitionHash;
+    replacement.mutationSerial = static_cast<std::int32_t>(character.nextInventorySerial);
+    // The held definition is authoritative: the previous reward implementation could advance
+    // this selector without replacing the item. One redemption must open exactly one tier.
+    character.inventory.values[heldIndex] = replacement;
+    ++character.nextInventorySerial;
+    character.gambitPrimeSynthesizerTier = static_cast<GambitPrimeSynthesizerTier>(heldTier + 1);
+    return true;
+}
+
 } // namespace sunrise::state::runtime::detail::synthesizer

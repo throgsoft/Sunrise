@@ -85,20 +85,6 @@ bool resolve_recipe(std::size_t index, bool discounted, Recipe& result) noexcept
     return true;
 }
 
-bool profile_stack(std::uint32_t hash,
-                   items::Definition& item,
-                   items::details::Definition& detail) noexcept {
-    buckets::Descriptor bucket{};
-    return build_data::find_item_definition_hash(hash, item) && item.definitionHash == hash
-           && build_data::find_configured_item_detail(item.definitionIndex, detail)
-           && detail.definitionIndex == item.definitionIndex && detail.definitionHash == hash
-           && detail.bucketId == item.bucketId && detail.maxStackSize > 0
-           && detail.instancedDefinitionState == items::details::InstancedDefinitionState::stackable
-           && !detail.equipmentSlot.has_value()
-           && build_data::find_inventory_bucket_descriptor(item.bucketId, bucket)
-           && bucket.arraySelector == buckets::ArraySelector::profile
-           && !build_data::is_profile_action_source(item.definitionIndex, item.bucketId);
-}
 } // namespace
 
 bool stage(const AccountState& snapshot,
@@ -135,14 +121,11 @@ bool stage(const AccountState& snapshot,
     }
     auto sockets = target->sockets;
     account::inventory::Sockets defaults{};
-    defaults.policy = account::inventory::SocketPolicy::authored;
-    defaults.plugCount = detail.ordinarySocketCount;
-    for (std::size_t lane = 0; lane < defaults.plugCount; ++lane) {
-        items::Definition plug{};
-        if (!build_data::find_item_definition_index(detail.initialPlugIndices[lane], plug)) {
-            return false;
-        }
-        defaults.plugs[lane] = plug.definitionHash;
+    if (!resolve_socket_choices(detail, defaults)
+        || !std::all_of(defaults.plugs.begin(),
+                        defaults.plugs.begin() + detail.ordinarySocketCount,
+                        [](const auto& plug) { return plug.has_value(); })) {
+        return false;
     }
     if (sockets.policy == account::inventory::SocketPolicy::nativeDefaults) {
         sockets = defaults;
@@ -267,8 +250,8 @@ bool stage(const AccountState& snapshot,
                                     ? identity::kBurntCookieHash
                                     : identity::kRecipes[chosen].cookieHash;
         bool charged = false;
-        if (!profile_stack(identity::kEssenceHash, essence, essenceDetail)
-            || !profile_stack(cookieHash, cookie, cookieDetail)
+        if (!resolve_profile_stack(identity::kEssenceHash, essence, essenceDetail)
+            || !resolve_profile_stack(cookieHash, cookie, cookieDetail)
             || !apply_action_materials(snapshot, charge, candidate, charged) || !charged) {
             return false;
         }
@@ -320,50 +303,18 @@ bool stage(const AccountState& snapshot,
     // observer reloads held-item definitions; an unchanged character upsert is ignored,
     // leaving a newly baked cookie unavailable to the shared unlock evaluator.
     changed->mutationSerial = static_cast<std::int32_t>(afterCharacter.nextInventorySerial++);
-    middleware::datagen::family4::loadout::ResolvedLoadout beforeLoadout{}, afterLoadout{};
-    ResolvedPosition beforePosition{}, afterPosition{};
-    if (!account::valid(candidate) || !valid_profile_inventory(candidate)
-        || !middleware::datagen::family4::loadout::resolve(snapshot, characterIndex, beforeLoadout)
-        || !middleware::datagen::family4::loadout::resolve(candidate, characterIndex, afterLoadout)
-        || !find_resolved_position(beforeLoadout, targetInstanceSoid, beforePosition)
-        || !find_resolved_position(afterLoadout, targetInstanceSoid, afterPosition)
-        || !same_position(beforePosition, afterPosition)) {
-        return false;
-    }
-    items::Definition result{};
-    if (!build_data::find_item_definition_hash(sockets.plugs[socketLane].value_or(0), result)) {
-        return false;
-    }
-    mutation.beforeCharacter = character;
-    mutation.afterCharacter = candidate.characters[characterIndex];
-    mutation.beforeProfileItems = snapshot.profileItems;
-    mutation.afterProfileItems = candidate.profileItems;
     mutation.beforeDawning = before;
     mutation.afterDawning = after;
-    mutation.accountSoid = snapshot.primarySoid;
-    mutation.characterSoid = character.soid;
-    mutation.targetInstanceSoid = targetInstanceSoid;
-    mutation.targetDefinitionHash = oven.definitionHash;
-    mutation.plugDefinitionHash = result.definitionHash;
-    mutation.materialRequirementSetHash = costs.requirementSetHash;
-    mutation.characterIndex = characterIndex;
-    mutation.expectedProfileItemCount = snapshot.profileItemCount;
-    mutation.afterProfileItemCount = candidate.profileItemCount;
-    mutation.itemIndex = location.index;
-    mutation.targetDefinitionIndex = oven.definitionIndex;
-    mutation.plugDefinitionIndex = result.definitionIndex;
-    mutation.requestedPlugDefinitionIndex = plugDefinitionIndex;
-    mutation.materialRequirementSetIndex = costs.requirementSetIndex;
-    mutation.socketLane = socketLane;
-    mutation.targetBucketId = oven.bucketId;
-    mutation.plugBucketId = result.bucketId;
-    mutation.materialRequirementCount = costs.requirementCount;
-    mutation.profileChanged = !same_profile_views(snapshot.profileItems,
-                                                  snapshot.profileItemCount,
-                                                  candidate.profileItems,
-                                                  candidate.profileItemCount);
-    mutation.targetEquipped = location.equipped;
-    mutation.prepared = true;
+    if (!finalize_socket_plug(snapshot,
+                              candidate,
+                              characterIndex,
+                              location,
+                              socketLane,
+                              plugDefinitionIndex,
+                              costs,
+                              mutation)) {
+        return false;
+    }
     return true;
 }
 } // namespace sunrise::state::runtime::detail::dawning

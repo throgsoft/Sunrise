@@ -16,6 +16,11 @@ inline constexpr std::uint16_t kRuneValueBase = 2371;
 inline constexpr std::uint16_t kUpgradeFlagBase = 5427;
 /** Account objective row for the Chalice introduction quest. */
 inline constexpr std::uint16_t kQuestValue = 5662;
+/** Expression source slots, distinct from the account bank rows above. */
+inline constexpr std::uint16_t kFirstRuneValueSlot = 5512;
+inline constexpr std::uint16_t kFirstSelectedRuneSlot = 5503;
+inline constexpr std::uint16_t kQuestValueSlot = 12823;
+inline constexpr std::size_t kRuneCount = 12;
 /** Unlock-slot identities corresponding to the contiguous upgrade bank above. */
 inline constexpr std::array<std::uint16_t, 13> kChaliceFlagSlots{
     8698, 8699, 8700, 8703, 8704, 8705, 8706, 8707, 8708, 8709, 8710, 8711, 8712};

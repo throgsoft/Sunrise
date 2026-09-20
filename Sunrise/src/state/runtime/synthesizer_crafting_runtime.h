@@ -8,10 +8,6 @@
 #include "../investment/investment.h"
 #include "runtime.h"
 
-namespace sunrise::middleware::datagen::family4::account::layout {
-struct Object;
-}
-
 namespace sunrise::state::runtime::detail::synthesizer {
 
 /** Installs decoded socket costs for the three crafting tiers and recycling lane. */
@@ -42,16 +38,6 @@ mote_ownership_mask(std::span<const account::inventory::ProfileItem> rows) noexc
 mote_publication_mask(std::span<const account::inventory::ProfileItem> rows,
                       std::uint16_t previousMoteMask) noexcept;
 
-/** Preflight the ownership replacement with this connection's cumulative history before
- * committing payment, then name the actual gain in the account acquisition ring. after is
- * the canonical preview already used by the socket publisher. A spent Mote is absent from
- * the encoded inventory, never a zero-quantity row or a resident-object deletion. */
-[[nodiscard]] bool
-project_exchange(const PendingSocketPlug& mutation,
-                 const AccountState& after,
-                 std::uint16_t previousMoteMask,
-                 middleware::datagen::family4::account::layout::Object& object) noexcept;
-
 /** Detects a change to the owned Mote set, ignoring compaction, serials and seen bits. */
 [[nodiscard]] bool
 mote_ownership_changed(std::span<const account::inventory::ProfileItem> before,
@@ -69,5 +55,8 @@ mote_ownership_changed(std::span<const account::inventory::ProfileItem> before,
                                   std::uint8_t socketLane,
                                   std::uint16_t plugDefinitionIndex,
                                   PendingSocketPlug& mutation) noexcept;
+
+/** Replaces the uniquely held Synthesizer by its next tier in the caller's redemption view. */
+[[nodiscard]] bool stage_upgrade(CharacterState& character) noexcept;
 
 } // namespace sunrise::state::runtime::detail::synthesizer

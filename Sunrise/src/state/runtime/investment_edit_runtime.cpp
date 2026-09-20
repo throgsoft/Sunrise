@@ -57,8 +57,7 @@ bool objectives(const data::items::details::Definition& detail,
     return true;
 }
 
-// Match the existing Items allowlist at the authority boundary as well. The UI additionally
-// checks the localized bounty type; neither layer treats a missing dummy flag as permission.
+// Editing progress preserves the installed objective identity and the saved expiry.
 const char* editable(const inventory::Item& held,
                      std::uint16_t index,
                      const data::items::details::Definition& detail) noexcept {
@@ -79,8 +78,6 @@ Result edit(std::uint16_t index,
             std::int32_t value,
             std::uint8_t lane,
             bool completeAll,
-            bool completeTarget = false,
-            bool bountiesOnly = false,
             std::uint64_t instanceSoid = 0) noexcept {
     std::unique_ptr<AccountState> account(new (std::nothrow) AccountState);
     if (!account) {
@@ -119,9 +116,8 @@ Result edit(std::uint16_t index,
         if (completeAll && detail.objectiveCount == 0) {
             continue;
         }
-        if (bountiesOnly
-            && (detail.bucketId != data::items::kPursuitBucketId || detail.lifetimeSeconds <= 0
-                || detail.maxStackSize > 1)) {
+        if (detail.bucketId != data::items::kPursuitBucketId || detail.lifetimeSeconds <= 0
+            || detail.maxStackSize > 1) {
             continue;
         }
         std::array<std::int32_t, inventory::kItemObjectiveLaneCount> thresholds{};
@@ -155,7 +151,7 @@ Result edit(std::uint16_t index,
         for (std::size_t ordinal = 0; ordinal < detail.objectiveCount; ++ordinal) {
             const auto targetLane = ordinal + inventory::kItemObjectiveLaneBase;
             if (lane == 0 || lane == targetLane) {
-                after[targetLane] = completeAll || completeTarget ? thresholds[ordinal] : value;
+                after[targetLane] = completeAll ? thresholds[ordinal] : value;
             }
         }
         if (after == held.objectiveValues
@@ -183,7 +179,7 @@ Result edit(std::uint16_t index,
             : changed == 0 ? "already at requested values"
                            : "objective values committed; no rewards claimed"};
 }
-enum class DropScope { item, pursuits, bounties, engrams, weapons, armor };
+enum class DropScope { bounties, engrams, weapons, armor };
 
 bool matches_gear(const data::items::details::Definition& detail, DropScope scope) noexcept {
     if (detail.instancedDefinitionState != data::items::details::InstancedDefinitionState::instanced
@@ -212,11 +208,7 @@ bool matches_gear(const data::items::details::Definition& detail, DropScope scop
     }
 }
 
-Result drop(std::uint16_t index, DropScope scope) noexcept {
-    data::items::Definition requested{};
-    if (scope == DropScope::item && !data::find_item_definition_index(index, requested)) {
-        return {false, 0, "installed item identity unavailable"};
-    }
+Result drop(DropScope scope) noexcept {
     std::unique_ptr<AccountState> snapshot(new (std::nothrow) AccountState);
     if (!snapshot) {
         return {false, 0, "allocation failed"};
@@ -233,68 +225,61 @@ Result drop(std::uint16_t index, DropScope scope) noexcept {
     const auto beforeCount = character->inventory.count;
     for (std::size_t i = 0; i < beforeCount; ++i) {
         const auto held = character->inventory.values[i];
-        bool remove = held.definitionHash == requested.definitionHash;
-        if (scope != DropScope::item) {
-            data::items::Definition item{};
-            data::items::details::Definition detail{};
-            if (!data::find_item_definition_hash(held.definitionHash, item)
-                || !resolve(item.definitionIndex, item, detail)) {
-                return {false,
-                        0,
-                        "held metadata unavailable; use item.drop for a known identity; no changes "
-                        "committed"};
-            }
-            remove = detail.objectiveCount != 0 && !detail.equipmentSlot.has_value();
-            if (scope == DropScope::weapons || scope == DropScope::armor) {
-                remove = item.definitionHash == held.definitionHash
-                         && detail.definitionIndex == item.definitionIndex
-                         && matches_gear(detail, scope);
-                if (remove) {
-                    data::inventory::buckets::Descriptor bucket{};
-                    if (!data::find_inventory_bucket_descriptor(detail.bucketId, bucket)) {
-                        return {false, 0, "held gear bucket unavailable; no changes committed"};
-                    }
-                    remove = bucket.bucketId == detail.bucketId
-                             && bucket.arraySelector
-                                    == data::inventory::buckets::ArraySelector::character
-                             && bucket.equipmentSlot == *detail.equipmentSlot;
+        bool remove = false;
+        data::items::Definition item{};
+        data::items::details::Definition detail{};
+        if (!data::find_item_definition_hash(held.definitionHash, item)
+            || !resolve(item.definitionIndex, item, detail)) {
+            return {false, 0, "held metadata unavailable; no changes committed"};
+        }
+        remove = detail.objectiveCount != 0 && !detail.equipmentSlot.has_value();
+        if (scope == DropScope::weapons || scope == DropScope::armor) {
+            remove = item.definitionHash == held.definitionHash
+                     && detail.definitionIndex == item.definitionIndex
+                     && matches_gear(detail, scope);
+            if (remove) {
+                data::inventory::buckets::Descriptor bucket{};
+                if (!data::find_inventory_bucket_descriptor(detail.bucketId, bucket)) {
+                    return {false, 0, "held gear bucket unavailable; no changes committed"};
                 }
-                // Inventory is unequipped storage; also exclude any equipped identity explicitly.
-                for (std::size_t c = 0; remove && c < snapshot->characterCount; ++c) {
-                    for (const auto& equipped : snapshot->characters[c].equipment.slots) {
-                        if (equipped && equipped->instanceSoid == held.instanceSoid) {
-                            remove = false;
-                        }
+                remove =
+                    bucket.bucketId == detail.bucketId
+                    && bucket.arraySelector == data::inventory::buckets::ArraySelector::character
+                    && bucket.equipmentSlot == *detail.equipmentSlot;
+            }
+            // Inventory is unequipped storage; also exclude any equipped identity explicitly.
+            for (std::size_t c = 0; remove && c < snapshot->characterCount; ++c) {
+                for (const auto& equipped : snapshot->characters[c].equipment.slots) {
+                    if (equipped && equipped->instanceSoid == held.instanceSoid) {
+                        remove = false;
                     }
                 }
             }
-            if (scope == DropScope::engrams) {
-                // Installed Engrams bucket (hash 375726501). Packages in Consumables are not
-                // engrams merely because they can be opened.
-                remove = detail.bucketId == 31 && !detail.equipmentSlot.has_value();
-                if (remove) {
-                    data::inventory::buckets::Descriptor bucket{};
-                    if (!data::find_inventory_bucket_descriptor(detail.bucketId, bucket)) {
-                        return {false, 0, "held engram bucket unavailable; no changes committed"};
-                    }
-                    remove =
-                        bucket.arraySelector == data::inventory::buckets::ArraySelector::character;
+        }
+        if (scope == DropScope::engrams) {
+            // Installed Engrams bucket (hash 375726501). Packages in Consumables are not
+            // engrams merely because they can be opened.
+            remove = detail.bucketId == 31 && !detail.equipmentSlot.has_value();
+            if (remove) {
+                data::inventory::buckets::Descriptor bucket{};
+                if (!data::find_inventory_bucket_descriptor(detail.bucketId, bucket)) {
+                    return {false, 0, "held engram bucket unavailable; no changes committed"};
                 }
+                remove = bucket.arraySelector == data::inventory::buckets::ArraySelector::character;
             }
-            // Match bounty.page's installed classification, regardless of saved expiry/progress.
-            if (scope == DropScope::bounties) {
-                remove = remove && detail.bucketId == data::items::kPursuitBucketId
-                         && detail.lifetimeSeconds > 0
-                         && detail.objectiveCount <= detail.objectiveIndices.size()
-                         && detail.maxStackSize <= 1;
-                if (remove) {
-                    data::inventory::buckets::Descriptor bucket{};
-                    if (!data::find_inventory_bucket_descriptor(detail.bucketId, bucket)) {
-                        return {false, 0, "held bounty bucket unavailable; no changes committed"};
-                    }
-                    remove =
-                        bucket.arraySelector == data::inventory::buckets::ArraySelector::character;
+        }
+        // Match bounty.page's installed classification, regardless of saved expiry/progress.
+        if (scope == DropScope::bounties) {
+            remove = remove && detail.bucketId == data::items::kPursuitBucketId
+                     && detail.lifetimeSeconds > 0
+                     && detail.objectiveCount <= detail.objectiveIndices.size()
+                     && detail.maxStackSize <= 1;
+            if (remove) {
+                data::inventory::buckets::Descriptor bucket{};
+                if (!data::find_inventory_bucket_descriptor(detail.bucketId, bucket)) {
+                    return {false, 0, "held bounty bucket unavailable; no changes committed"};
                 }
+                remove = bucket.arraySelector == data::inventory::buckets::ArraySelector::character;
             }
         }
         if (remove) {
@@ -414,7 +399,7 @@ Result grant_item(std::uint16_t index, std::int32_t quantity, std::uint32_t expe
 }
 
 Result complete_bounties() noexcept {
-    return edit(0, 0, 0, true, false, true);
+    return edit(0, 0, 0, true);
 }
 
 Result set_objective_lane(std::uint64_t instanceSoid,
@@ -424,7 +409,7 @@ Result set_objective_lane(std::uint64_t instanceSoid,
     if (instanceSoid == 0 || value < 0 || lane == 0 || lane > inventory::kItemObjectiveLaneCount) {
         return {false, 0, "invalid bounty instance, value or lane"};
     }
-    return edit(index, value, lane, false, false, true, instanceSoid);
+    return edit(index, value, lane, false, instanceSoid);
 }
 
 namespace {
@@ -480,10 +465,6 @@ Result set_held_quantity(std::uint64_t instanceSoid,
     if (!transaction.ready() || !store::read_account(*snapshot) || !account::valid(*snapshot)) {
         return {false, 0, "investment database unavailable"};
     }
-    const auto apply = [&](std::int32_t& held) noexcept {
-        held = quantity;
-        return true;
-    };
     std::size_t changed = 0;
     if (bucket.arraySelector == data::inventory::buckets::ArraySelector::profile) {
         for (std::size_t i = 0; i < snapshot->profileItemCount; ++i) {
@@ -497,7 +478,7 @@ Result set_held_quantity(std::uint64_t instanceSoid,
                 }
                 snapshot->profileItems[--snapshot->profileItemCount] = {};
             } else {
-                (void)apply(row.quantity);
+                row.quantity = quantity;
             }
             ++changed;
             break;
@@ -521,7 +502,7 @@ Result set_held_quantity(std::uint64_t instanceSoid,
                 }
                 character->inventory.values[--character->inventory.count] = {};
             } else {
-                (void)apply(row.quantity);
+                row.quantity = quantity;
             }
             ++changed;
         }
@@ -536,7 +517,7 @@ Result set_held_quantity(std::uint64_t instanceSoid,
                 }
                 character->stacks.values[--character->stacks.count] = {};
             } else {
-                (void)apply(row.quantity);
+                row.quantity = quantity;
             }
             ++changed;
         }
@@ -626,16 +607,16 @@ Result drop_bucket(std::uint8_t bucketId) noexcept {
 }
 
 Result drop_bounties() noexcept {
-    return drop(0, DropScope::bounties);
+    return drop(DropScope::bounties);
 }
 Result drop_engrams() noexcept {
-    return drop(0, DropScope::engrams);
+    return drop(DropScope::engrams);
 }
 Result drop_weapons() noexcept {
-    return drop(0, DropScope::weapons);
+    return drop(DropScope::weapons);
 }
 Result drop_armor() noexcept {
-    return drop(0, DropScope::armor);
+    return drop(DropScope::armor);
 }
 
 Result drop_season_pass() noexcept {

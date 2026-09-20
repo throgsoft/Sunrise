@@ -14,7 +14,7 @@
 #include "dawning_reward_runtime.h"
 #include "record_reward_placement.h"
 #include "state_account_transaction_helpers.h"
-#include "synthesizer_upgrade_runtime.h"
+#include "synthesizer_crafting_runtime.h"
 
 namespace sunrise::state::runtime::detail::bounty {
 namespace inventory = account::inventory;

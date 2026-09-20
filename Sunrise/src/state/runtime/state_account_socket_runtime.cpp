@@ -1,4 +1,4 @@
-﻿/** Socket-plug and item-state staging, which both mutate one character-owned item. */
+/** Socket-plug and item-state staging, which both mutate one character-owned item. */
 
 #include <Windows.h>
 
@@ -99,6 +99,105 @@ void report_socket_plug(std::string_view stage,
     return authored_inventory::valid(sockets);
 }
 
+/** Preserves authored choices or resolves the installed defaults for each socket lane. */
+bool resolve_socket_choices(const item_details::Definition& detail,
+                            authored_inventory::Sockets& sockets) noexcept {
+    if (sockets.policy == authored_inventory::SocketPolicy::nativeDefaults) {
+        return materialize_native_sockets(detail, sockets);
+    }
+    return sockets.policy == authored_inventory::SocketPolicy::authored
+           && sockets.plugCount == detail.ordinarySocketCount && authored_inventory::valid(sockets);
+}
+
+/** Validates the resulting loadout and records one socket transaction for prepare/commit. */
+bool finalize_socket_plug(const AccountState& before,
+                          const AccountState& after,
+                          std::size_t characterIndex,
+                          const CharacterItemLocation& location,
+                          std::uint8_t socketLane,
+                          std::uint16_t requestedPlugIndex,
+                          const build_data::material_requirements::Definition& costs,
+                          PendingSocketPlug& mutation) noexcept {
+    if (!account::valid(after) || !valid_profile_inventory(after)
+        || characterIndex >= before.characterCount || characterIndex >= after.characterCount
+        || socketLane >= authored_inventory::kPlugCapacity) {
+        return false;
+    }
+    const auto& character = before.characters[characterIndex];
+    const auto* target = character_item_at(character, location);
+    const auto* changed = character_item_at(after.characters[characterIndex], location);
+    build_data::items::Definition container{}, result{};
+    if (!target || !changed || target->instanceSoid != changed->instanceSoid
+        || target->definitionHash != changed->definitionHash
+        || !build_data::find_item_definition_hash(target->definitionHash, container)
+        || !build_data::find_item_definition_hash(changed->sockets.plugs[socketLane].value_or(0),
+                                                  result)) {
+        return false;
+    }
+    family4_loadout::ResolvedLoadout beforeLoadout{}, afterLoadout{};
+    ResolvedPosition beforePosition{}, afterPosition{};
+    if (!family4_loadout::resolve(before, characterIndex, beforeLoadout)
+        || !family4_loadout::resolve(after, characterIndex, afterLoadout)
+        || !find_resolved_position(beforeLoadout, target->instanceSoid, beforePosition)
+        || !find_resolved_position(afterLoadout, target->instanceSoid, afterPosition)
+        || !same_position(beforePosition, afterPosition)) {
+        return false;
+    }
+    for (std::size_t i = 0; i < beforeLoadout.itemCount; ++i) {
+        const auto& item = beforeLoadout.items[i].instance;
+        if (item.instanceSoid == target->instanceSoid
+            && item.baseDefinitionIndex != container.definitionIndex) {
+            return false;
+        }
+    }
+    std::size_t matches = 0;
+    for (std::size_t i = 0; i < afterLoadout.itemCount; ++i) {
+        const auto& item = afterLoadout.items[i].instance;
+        if (item.instanceSoid != target->instanceSoid) {
+            continue;
+        }
+        if (item.baseDefinitionIndex != container.definitionIndex
+            || item.ordinarySockets.state
+                   != middleware::datagen::family4::instance::OrdinarySocketBlockState::present
+            || item.ordinarySockets.plugs[socketLane] != result.definitionIndex) {
+            return false;
+        }
+        ++matches;
+    }
+    if (matches != 1) {
+        return false;
+    }
+    mutation.beforeCharacter = character;
+    mutation.afterCharacter = after.characters[characterIndex];
+    mutation.beforeProfileItems = before.profileItems;
+    mutation.afterProfileItems = after.profileItems;
+    mutation.accountSoid = before.primarySoid;
+    mutation.characterSoid = character.soid;
+    mutation.targetInstanceSoid = target->instanceSoid;
+    mutation.targetDefinitionHash = container.definitionHash;
+    mutation.plugDefinitionHash = result.definitionHash;
+    mutation.materialRequirementSetHash = costs.requirementSetHash;
+    mutation.characterIndex = characterIndex;
+    mutation.expectedProfileItemCount = before.profileItemCount;
+    mutation.afterProfileItemCount = after.profileItemCount;
+    mutation.itemIndex = location.index;
+    mutation.targetDefinitionIndex = container.definitionIndex;
+    mutation.plugDefinitionIndex = result.definitionIndex;
+    mutation.requestedPlugDefinitionIndex = requestedPlugIndex;
+    mutation.materialRequirementSetIndex = costs.requirementSetIndex;
+    mutation.socketLane = socketLane;
+    mutation.targetBucketId = container.bucketId;
+    mutation.plugBucketId = result.bucketId;
+    mutation.materialRequirementCount = costs.requirementCount;
+    // Rune reservations change the account's native banks without changing profile stack rows.
+    mutation.profileChanged =
+        !same_profile_inventory(after, before.profileItems, before.profileItemCount)
+        || mutation.beforeChalice != mutation.afterChalice;
+    mutation.targetEquipped = location.equipped;
+    mutation.prepared = true;
+    return true;
+}
+
 /** Stages the canonical socket-only after-image over one already validated account snapshot. */
 [[nodiscard]] bool stage_socket_plug(const AccountState& snapshot,
                                      std::size_t characterIndex,
@@ -138,9 +237,7 @@ void report_socket_plug(std::string_view stage,
         return fail("selected_character");
     }
 
-    family4_loadout::ResolvedLoadout beforeLoadout{};
-    if (!find_character_item_location(before, targetInstanceSoid, location)
-        || !family4_loadout::resolve(snapshot, characterIndex, beforeLoadout)) {
+    if (!find_character_item_location(before, targetInstanceSoid, location)) {
         return fail("target_or_before_loadout");
     }
     const authored_inventory::Item* target = character_item_at(before, location);
@@ -225,20 +322,10 @@ void report_socket_plug(std::string_view stage,
     if (consumesStack && !spend_plug_source(chargedAccount, plugDefinition.definitionHash)) {
         return fail("plug_stack");
     }
-    profileChanged = profileChanged || consumesStack;
 
-    authored_inventory::Sockets authoredSockets{};
-    if (target->sockets.policy == authored_inventory::SocketPolicy::nativeDefaults) {
-        if (!materialize_native_sockets(detail, authoredSockets)) {
-            return fail("native_sockets");
-        }
-    } else {
-        authoredSockets = target->sockets;
-        if (authoredSockets.policy != authored_inventory::SocketPolicy::authored
-            || authoredSockets.plugCount != detail.ordinarySocketCount
-            || !authored_inventory::valid(authoredSockets)) {
-            return fail("authored_sockets");
-        }
+    auto authoredSockets = target->sockets;
+    if (!resolve_socket_choices(detail, authoredSockets)) {
+        return fail("socket_choices");
     }
     if (authoredSockets.plugs[socketLane].has_value()
         && *authoredSockets.plugs[socketLane] == plugDefinition.definitionHash) {
@@ -327,70 +414,15 @@ void report_socket_plug(std::string_view stage,
 
     AccountState candidate = chargedAccount;
     candidate.characters[characterIndex] = after;
-    family4_loadout::ResolvedLoadout afterLoadout{};
-    ResolvedPosition beforePosition{};
-    ResolvedPosition afterPosition{};
-    const family4_loadout::ResolvedItem* resolvedTarget = nullptr;
-    for (std::size_t index = 0; index < beforeLoadout.itemCount; ++index) {
-        const auto& resolved = beforeLoadout.items[index];
-        if (resolved.instance.instanceSoid == targetInstanceSoid
-            && resolved.instance.baseDefinitionIndex != targetDefinition.definitionIndex) {
-            return fail("before_definition");
-        }
-    }
-    if (!account::valid(candidate)
-        || !family4_loadout::resolve(candidate, characterIndex, afterLoadout)
-        || !find_resolved_position(beforeLoadout, targetInstanceSoid, beforePosition)
-        || !find_resolved_position(afterLoadout, targetInstanceSoid, afterPosition)
-        || !same_position(beforePosition, afterPosition)) {
-        return fail("candidate_or_position");
-    }
-    for (std::size_t index = 0; index < afterLoadout.itemCount; ++index) {
-        const auto& resolved = afterLoadout.items[index];
-        if (resolved.instance.instanceSoid != targetInstanceSoid) {
-            continue;
-        }
-        if (resolvedTarget != nullptr) {
-            return fail("duplicate_target");
-        }
-        resolvedTarget = &resolved;
-    }
-    if (resolvedTarget == nullptr
-        || resolvedTarget->instance.baseDefinitionIndex != targetDefinition.definitionIndex
-        || resolvedTarget->instance.ordinarySockets.state
-               != middleware::datagen::family4::instance::OrdinarySocketBlockState::present
-        || !resolvedTarget->instance.ordinarySockets.plugs[socketLane].has_value()
-        || *resolvedTarget->instance.ordinarySockets.plugs[socketLane]
-               != grantedDefinition.definitionIndex) {
-        return fail("after_socket");
-    }
-
-    mutation.beforeCharacter = before;
-    mutation.afterCharacter = after;
-    mutation.beforeProfileItems = snapshot.profileItems;
-    mutation.afterProfileItems = chargedAccount.profileItems;
-    mutation.accountSoid = snapshot.primarySoid;
-    mutation.characterSoid = before.soid;
-    mutation.targetInstanceSoid = targetInstanceSoid;
-    mutation.targetDefinitionHash = targetDefinition.definitionHash;
-    mutation.plugDefinitionHash = grantedDefinition.definitionHash;
-    mutation.materialRequirementSetHash = materialSet.requirementSetHash;
-    mutation.characterIndex = characterIndex;
-    mutation.expectedProfileItemCount = snapshot.profileItemCount;
-    mutation.afterProfileItemCount = chargedAccount.profileItemCount;
-    mutation.itemIndex = location.index;
-    mutation.targetDefinitionIndex = targetDefinition.definitionIndex;
-    mutation.plugDefinitionIndex = grantedDefinition.definitionIndex;
-    mutation.requestedPlugDefinitionIndex = plugDefinitionIndex;
-    mutation.materialRequirementSetIndex = materialSetIndex;
-    mutation.socketLane = socketLane;
-    mutation.targetBucketId = targetDefinition.bucketId;
-    mutation.plugBucketId = grantedDefinition.bucketId;
-    mutation.materialRequirementCount = materialSet.requirementCount;
-    mutation.profileChanged = profileChanged;
-    mutation.targetEquipped = location.equipped;
-    mutation.prepared = true;
-    return true;
+    return finalize_socket_plug(snapshot,
+                                candidate,
+                                characterIndex,
+                                location,
+                                socketLane,
+                                plugDefinitionIndex,
+                                materialSet,
+                                mutation)
+           || fail("candidate_or_position");
 }
 
 /** Stages one complete accumulated item-state value without moving or recreating the item. */

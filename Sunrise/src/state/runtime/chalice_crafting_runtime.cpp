@@ -71,6 +71,7 @@ bool resolve_plug(std::uint16_t index, items::Definition& definition, Plug& meta
 }
 
 int rune_index(std::uint16_t plug, std::size_t lane) noexcept {
+    // Each of the three rune sockets has its own contiguous set of twelve plug definitions.
     const auto first = 7949 + lane * 12;
     return plug >= first && plug < first + 12 ? static_cast<int>(plug - first) : -1;
 }
@@ -99,6 +100,7 @@ bool evaluate(const Expression& expr,
     std::size_t size = 0;
     for (std::size_t i = 0; i < expr.count; ++i) {
         const auto [op, operand] = expr.code[i];
+        // Package opcodes 1, 10 and 11 read an acquired flag, a value slot and a literal.
         if (op == 1 || op == 10 || op == 11) {
             if (size == stack.size()) {
                 return false;
@@ -111,13 +113,16 @@ bool evaluate(const Expression& expr,
                 }
                 value = state.upgrades[static_cast<std::size_t>(at - kFlagSlots.begin())] == 2;
             } else if (op == 10) {
-                if (operand == 12823) {
+                if (operand == crafting::kQuestValueSlot) {
                     value = state.questProgress;
-                } else if (operand >= 5512 && operand < 5524) {
-                    value = state.runes[operand - 5512];
-                } else if (operand == 5503 || operand == 5504) {
+                } else if (operand >= crafting::kFirstRuneValueSlot
+                           && operand < crafting::kFirstRuneValueSlot + crafting::kRuneCount) {
+                    value = state.runes[operand - crafting::kFirstRuneValueSlot];
+                } else if (operand >= crafting::kFirstSelectedRuneSlot
+                           && operand < crafting::kFirstSelectedRuneSlot + 2) {
                     int rune{};
-                    if (!installed_rune(sockets, operand - 5503, rune)) {
+                    if (!installed_rune(
+                            sockets, operand - crafting::kFirstSelectedRuneSlot, rune)) {
                         return false;
                     }
                     value = rune >= 0 ? rune + 1 : 0;
@@ -190,24 +195,7 @@ bool initialize_sockets(const items::details::Definition& detail,
     if (!inventory::valid(sockets)) {
         return false;
     }
-    if (sockets.policy == inventory::SocketPolicy::nativeDefaults) {
-        sockets = {};
-        sockets.policy = inventory::SocketPolicy::authored;
-        sockets.plugCount = 8;
-        for (std::size_t lane = 0; lane < 8; ++lane) {
-            const auto index = detail.initialPlugIndices[lane];
-            if (index == items::details::kUnavailableItemIndex) {
-                continue;
-            }
-            items::Definition plug{};
-            Plug metadata{};
-            if (!resolve_plug(index, plug, metadata)) {
-                return false;
-            }
-            sockets.plugs[lane] = plug.definitionHash;
-        }
-    }
-    if (sockets.policy != inventory::SocketPolicy::authored || sockets.plugCount != 8) {
+    if (!resolve_socket_choices(detail, sockets)) {
         return false;
     }
     for (std::size_t lane = 0; lane < 8; ++lane) {
@@ -218,7 +206,9 @@ bool initialize_sockets(const items::details::Definition& detail,
             continue;
         }
         items::Definition plug{};
+        Plug metadata{};
         if (!build_data::find_item_definition_hash(*sockets.plugs[lane], plug)
+            || !resolve_plug(plug.definitionIndex, plug, metadata)
             || (plug.definitionIndex != detail.initialPlugIndices[lane]
                 && !build_data::is_socket_plug_allowed(
                     kChaliceIndex, static_cast<std::uint8_t>(lane), plug.definitionIndex))) {
@@ -482,48 +472,21 @@ bool stage(const AccountState& snapshot,
         return fail("target_copy");
     }
     changed->sockets = sockets;
-    middleware::datagen::family4::loadout::ResolvedLoadout beforeLoadout{}, afterLoadout{};
-    ResolvedPosition beforePosition{}, afterPosition{};
-    if (!valid_state(after) || !account::valid(candidate) || !valid_profile_inventory(candidate)
-        || !middleware::datagen::family4::loadout::resolve(snapshot, characterIndex, beforeLoadout)
-        || !middleware::datagen::family4::loadout::resolve(candidate, characterIndex, afterLoadout)
-        || !find_resolved_position(beforeLoadout, targetInstanceSoid, beforePosition)
-        || !find_resolved_position(afterLoadout, targetInstanceSoid, afterPosition)
-        || !same_position(beforePosition, afterPosition)) {
+    if (!valid_state(after)) {
         return fail("after_image");
     }
-    items::Definition result{};
-    if (!build_data::find_item_definition_hash(sockets.plugs[socketLane].value_or(0), result)) {
-        return fail("result");
-    }
-    mutation.beforeCharacter = character;
-    mutation.afterCharacter = candidate.characters[characterIndex];
-    mutation.beforeProfileItems = snapshot.profileItems;
-    mutation.afterProfileItems = candidate.profileItems;
     mutation.beforeChalice = before;
     mutation.afterChalice = after;
-    mutation.accountSoid = snapshot.primarySoid;
-    mutation.characterSoid = character.soid;
-    mutation.targetInstanceSoid = targetInstanceSoid;
-    mutation.targetDefinitionHash = kChaliceHash;
-    mutation.plugDefinitionHash = result.definitionHash;
-    mutation.materialRequirementSetHash = costs.requirementSetHash;
-    mutation.characterIndex = characterIndex;
-    mutation.expectedProfileItemCount = snapshot.profileItemCount;
-    mutation.afterProfileItemCount = candidate.profileItemCount;
-    mutation.itemIndex = location.index;
-    mutation.targetDefinitionIndex = kChaliceIndex;
-    mutation.plugDefinitionIndex = result.definitionIndex;
-    mutation.requestedPlugDefinitionIndex = plugDefinitionIndex;
-    mutation.materialRequirementSetIndex = costs.requirementSetIndex;
-    mutation.socketLane = socketLane;
-    mutation.targetBucketId = container.bucketId;
-    mutation.plugBucketId = result.bucketId;
-    mutation.materialRequirementCount = costs.requirementCount;
-    // This flag requests the account object for native counter/flag changes as well as stacks.
-    mutation.profileChanged = true;
-    mutation.targetEquipped = false;
-    mutation.prepared = true;
+    if (!finalize_socket_plug(snapshot,
+                              candidate,
+                              characterIndex,
+                              location,
+                              socketLane,
+                              plugDefinitionIndex,
+                              costs,
+                              mutation)) {
+        return false;
+    }
     return true;
 }
 } // namespace sunrise::state::runtime::detail::chalice

@@ -21,6 +21,25 @@ namespace authored_inventory = account::inventory;
 namespace item_details = build_data::items::details;
 namespace inventory_buckets = build_data::inventory::buckets;
 
+/** Resolves a non-resident profile stack usable as an exchange material or output. */
+bool resolve_profile_stack(std::uint32_t hash,
+                           build_data::items::Definition& definition,
+                           build_data::items::details::Definition& detail) noexcept {
+    inventory_buckets::Descriptor bucket{};
+    return build_data::find_item_definition_hash(hash, definition)
+           && definition.definitionHash == hash
+           && build_data::find_configured_item_detail(definition.definitionIndex, detail)
+           && detail.definitionHash == hash && detail.definitionIndex == definition.definitionIndex
+           && detail.bucketId == definition.bucketId && detail.maxStackSize > 0
+           && detail.instancedDefinitionState
+                  == build_data::items::details::InstancedDefinitionState::stackable
+           && !detail.equipmentSlot.has_value()
+           && build_data::find_inventory_bucket_descriptor(definition.bucketId, bucket)
+           && bucket.arraySelector == inventory_buckets::ArraySelector::profile
+           && !build_data::is_profile_action_source(definition.definitionIndex,
+                                                    definition.bucketId);
+}
+
 /** @return True when two profile stack rows carry identical authored values. */
 [[nodiscard]] static bool same_profile_item(const authored_inventory::ProfileItem& left,
                                             const authored_inventory::ProfileItem& right) noexcept {

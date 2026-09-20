@@ -200,7 +200,8 @@ Feedback set_lane(std::uint64_t instance,
                   std::uint16_t item,
                   std::uint8_t lane,
                   std::int32_t value) noexcept {
-    if (lane == 0 || lane > 7) {
+    if (lane < state::account::inventory::kItemObjectiveLaneBase
+        || lane >= state::account::inventory::kItemObjectiveCapacity) {
         return report({false, 0, "Choose objective lane 1..7"});
     }
     return report(state::investment_edit::set_objective_lane(instance, item, value, lane));
@@ -216,7 +217,7 @@ bool installed_bounty(std::uint16_t index,
     data::inventory::buckets::Descriptor bucket{};
     // Zero lanes measure the sources only. A pursuit whose objectives are shared or unsupported
     // cannot be finished by writing its own lanes, so the module has no way to exercise it.
-    const std::array<std::int32_t, state::account::inventory::kItemObjectiveLaneCount> unset{};
+    const std::array<std::int32_t, state::account::inventory::kItemObjectiveCapacity> unset{};
     const auto progress = data::pursuits::measure(index, unset);
     return progress.resolved && progress.itemBacked && data::find_item_definition_index(index, item)
            && data::find_configured_item_detail(index, detail)
@@ -307,9 +308,91 @@ std::size_t grant_bounty_page(std::span<const std::uint16_t> indices, Feedback& 
     return held;
 }
 
+namespace {
+std::vector<BucketItem> bucket_items(const state::AccountState& account, std::uint8_t bucketId) {
+    std::vector<BucketItem> output;
+    data::inventory::buckets::Descriptor bucket{};
+    if (!data::find_inventory_bucket_descriptor(bucketId, bucket) || bucket.bucketId != bucketId) {
+        return output;
+    }
+    if (!state::account::valid(account)) {
+        return output;
+    }
+    const auto describe = [&](std::uint64_t instance,
+                              std::uint32_t hash,
+                              std::int32_t quantity,
+                              std::int32_t serial,
+                              bool resident,
+                              state::account::inventory::ItemPlacement placement) {
+        data::items::Definition identity{};
+        data::items::details::Definition detail{};
+        if (!data::find_item_definition_hash(hash, identity)
+            || !(resident ? state::investment_edit::resident_in_bucket(
+                                bucketId, identity.bucketId, placement)
+                          : identity.bucketId == bucketId)
+            || !data::find_configured_item_detail(identity.definitionIndex, detail)) {
+            return;
+        }
+        BucketItem row{};
+        row.instance = instance;
+        row.hash = hash;
+        row.index = identity.definitionIndex;
+        row.quantity = quantity;
+        row.maxStack = detail.maxStackSize;
+        row.mutationSerial = serial;
+        for (std::size_t c = 0; c < account.characterCount && !row.equipped; ++c) {
+            for (const auto& slot : account.characters[c].equipment.slots) {
+                if (slot && instance != 0 && slot->instanceSoid == instance) {
+                    row.equipped = true;
+                }
+            }
+        }
+        output.push_back(row);
+    };
+    if (bucket.arraySelector == data::inventory::buckets::ArraySelector::profile) {
+        for (std::size_t i = 0; i < account.profileItemCount; ++i) {
+            const auto& item = account.profileItems[i];
+            describe(item.instanceSoid,
+                     item.definitionHash,
+                     item.quantity,
+                     item.mutationSerial,
+                     false,
+                     state::account::inventory::ItemPlacement::inventory);
+        }
+        return output;
+    }
+    for (std::size_t c = 0; c < account.characterCount; ++c) {
+        const auto& character = account.characters[c];
+        if (!character.selected) {
+            continue;
+        }
+        for (std::size_t i = 0; i < character.inventory.count; ++i) {
+            const auto& item = character.inventory.values[i];
+            describe(item.instanceSoid,
+                     item.definitionHash,
+                     item.quantity,
+                     item.mutationSerial,
+                     true,
+                     item.placement);
+        }
+        for (std::size_t i = 0; i < character.stacks.count; ++i) {
+            const auto& row = character.stacks.values[i];
+            describe(0,
+                     row.definitionHash,
+                     row.quantity,
+                     row.mutationSerial,
+                     false,
+                     state::account::inventory::ItemPlacement::inventory);
+        }
+    }
+    return output;
+}
+} // namespace
+
 std::vector<BucketSummary> buckets() noexcept {
     std::vector<BucketSummary> output;
     try {
+        const auto account = std::make_unique<state::AccountState>(state::account_snapshot());
         for (std::size_t id = 0; id <= 0xFFU; ++id) {
             data::inventory::buckets::Descriptor bucket{};
             const auto bucketId = static_cast<std::uint8_t>(id);
@@ -324,7 +407,7 @@ std::vector<BucketSummary> buckets() noexcept {
             summary.slotCount = bucket.slotCount;
             summary.policyFlags = bucket.policyFlags;
             summary.equipmentSlot = static_cast<std::int8_t>(bucket.equipmentSlot);
-            summary.held = bucket_items(bucketId).size();
+            summary.held = bucket_items(*account, bucketId).size();
             output.push_back(summary);
         }
     } catch (...) {
@@ -334,89 +417,12 @@ std::vector<BucketSummary> buckets() noexcept {
 }
 
 std::vector<BucketItem> bucket_items(std::uint8_t bucketId) noexcept {
-    std::vector<BucketItem> output;
     try {
-        data::inventory::buckets::Descriptor bucket{};
-        if (!data::find_inventory_bucket_descriptor(bucketId, bucket)
-            || bucket.bucketId != bucketId) {
-            return output;
-        }
-        const std::unique_ptr<state::AccountState> account(
-            new state::AccountState(state::account_snapshot()));
-        if (!state::account::valid(*account)) {
-            return output;
-        }
-        const auto describe = [&](std::uint64_t instance,
-                                  std::uint32_t hash,
-                                  std::int32_t quantity,
-                                  std::int32_t serial,
-                                  bool resident,
-                                  state::account::inventory::ItemPlacement placement) {
-            data::items::Definition identity{};
-            data::items::details::Definition detail{};
-            if (!data::find_item_definition_hash(hash, identity)
-                || !(resident ? state::investment_edit::resident_in_bucket(
-                                    bucketId, identity.bucketId, placement)
-                              : identity.bucketId == bucketId)
-                || !data::find_configured_item_detail(identity.definitionIndex, detail)) {
-                return;
-            }
-            BucketItem row{};
-            row.instance = instance;
-            row.hash = hash;
-            row.index = identity.definitionIndex;
-            row.quantity = quantity;
-            row.maxStack = detail.maxStackSize;
-            row.mutationSerial = serial;
-            for (std::size_t c = 0; c < account->characterCount && !row.equipped; ++c) {
-                for (const auto& slot : account->characters[c].equipment.slots) {
-                    if (slot && instance != 0 && slot->instanceSoid == instance) {
-                        row.equipped = true;
-                    }
-                }
-            }
-            output.push_back(row);
-        };
-        if (bucket.arraySelector == data::inventory::buckets::ArraySelector::profile) {
-            for (std::size_t i = 0; i < account->profileItemCount; ++i) {
-                const auto& item = account->profileItems[i];
-                describe(item.instanceSoid,
-                         item.definitionHash,
-                         item.quantity,
-                         item.mutationSerial,
-                         false,
-                         state::account::inventory::ItemPlacement::inventory);
-            }
-            return output;
-        }
-        for (std::size_t c = 0; c < account->characterCount; ++c) {
-            const auto& character = account->characters[c];
-            if (!character.selected) {
-                continue;
-            }
-            for (std::size_t i = 0; i < character.inventory.count; ++i) {
-                const auto& item = character.inventory.values[i];
-                describe(item.instanceSoid,
-                         item.definitionHash,
-                         item.quantity,
-                         item.mutationSerial,
-                         true,
-                         item.placement);
-            }
-            for (std::size_t i = 0; i < character.stacks.count; ++i) {
-                const auto& row = character.stacks.values[i];
-                describe(0,
-                         row.definitionHash,
-                         row.quantity,
-                         row.mutationSerial,
-                         false,
-                         state::account::inventory::ItemPlacement::inventory);
-            }
-        }
+        const auto account = std::make_unique<state::AccountState>(state::account_snapshot());
+        return bucket_items(*account, bucketId);
     } catch (...) {
         return {};
     }
-    return output;
 }
 
 Feedback clear_bucket(std::uint8_t bucketId) noexcept {

@@ -70,8 +70,6 @@
   <ItemGroup>
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="src\state\runtime\synthesizer_upgrade_runtime.cpp" />
-    <ClInclude Include="src\state\runtime\synthesizer_upgrade_runtime.h" />
     <ClCompile Include="src\state\runtime\synthesizer_crafting_runtime.cpp" />
     <ClCompile Include="src\server\bap\encrypted\queuez\dawning_pickup_release.cpp" />
     <ClInclude Include="src\server\bap\encrypted\queuez\dawning_pickup_release.h" />

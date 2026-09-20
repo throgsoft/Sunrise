@@ -16,7 +16,11 @@ using data::kChaliceFlagSlots;
 using data::kChaliceHash;
 using data::kChaliceIndex;
 using data::kChaliceSocketTypes;
+using data::kFirstRuneValueSlot;
+using data::kFirstSelectedRuneSlot;
 using data::kQuestValue;
+using data::kQuestValueSlot;
+using data::kRuneCount;
 using data::kRuneValueBase;
 using data::kUpgradeFlagBase;
 using data::SynthesizerCosts;
@@ -43,11 +47,6 @@ constexpr std::size_t kItemUnlockPointer = 144;
 // The two subsequent unlock lists must be empty: only emitted flags are handled here.
 constexpr std::size_t kItemUnlockSecondList = 16;
 constexpr std::size_t kItemUnlockThirdList = 32;
-// Chalice source slots: twelve rune quantities, two selected-rune values, and quest progress.
-constexpr std::uint16_t kFirstRuneValueSlot = 5512;
-constexpr std::uint16_t kFirstSelectedRuneSlot = 5503;
-constexpr std::uint16_t kQuestValueSlot = 12823;
-constexpr std::size_t kRuneCount = 12;
 // This build's supported emitted-flag slot range is checked before Family-5 projection.
 constexpr std::uint16_t kEmittedFlagSlotLimit = 23500;
 

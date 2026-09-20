@@ -32,6 +32,11 @@ bool project_material_gains(const state::PendingSocketPlug& mutation,
         || object.profileItemCount != mutation.afterProfileItemCount) {
         return false;
     }
+    if ((mutation.beforeDawning || mutation.afterDawning)
+        && (!mutation.beforeDawning || !mutation.afterDawning
+            || !dawning::project_banks(*mutation.afterDawning, object))) {
+        return false;
+    }
     auto& ring = object.profileInventoryChanges;
     if (ring.writeSlot != 0 || ring.nextSequence != 0
         || !std::all_of(ring.records.begin(), ring.records.end(), [](const auto& row) {
@@ -143,6 +148,19 @@ bool prepare_socket_plug(Scratch& scratch,
         return report_failure("socket_plug_selection");
     }
 
+    // Connection history can require old Mote clears in the next Family-5 replacement.
+    // Reserve that capacity before accepting the socket payment and its Family-4 reply.
+    namespace synthesizer = state::runtime::detail::synthesizer;
+    if (synthesizer::is_container(mutation.targetDefinitionHash)
+        && synthesizer::mote_output_flags_ready()) {
+        state::InvestmentState investment{};
+        if (!state::investment_snapshot(investment, socketPlug.after.publishedMoteMask)
+            || !synthesizer::project_mote_output_flags(
+                account, investment.family5, socketPlug.after.publishedMoteMask)) {
+            return report_failure("socket_plug_mote_overrides");
+        }
+    }
+
     family4_datagen::loadout::ResolvedInstances changed{};
     for (std::size_t index = 0; index < selected.loadout.itemCount; ++index) {
         const family4_datagen::loadout::ResolvedItem& item = selected.loadout.items[index];
@@ -203,22 +221,9 @@ bool prepare_socket_plug(Scratch& scratch,
     if (socketPlug.updatesAccount) {
         const auto accountBytes = rawStorage.first(family4_datagen::account::layout::kObjectSize);
         if (!family4_datagen::account::encode(account, accountBytes)
-            || !(mutation.beforeDawning || mutation.afterDawning
-                     ? dawning::project_socket_result(
-                           mutation,
-                           *reinterpret_cast<family4_datagen::account::layout::Object*>(
-                               accountBytes.data()))
-                 : state::runtime::detail::synthesizer::is_container(mutation.targetDefinitionHash)
-                     ? state::runtime::detail::synthesizer::project_exchange(
-                           mutation,
-                           account,
-                           socketPlug.after.publishedMoteMask,
-                           *reinterpret_cast<family4_datagen::account::layout::Object*>(
-                               accountBytes.data()))
-                     : project_material_gains(
-                           mutation,
-                           *reinterpret_cast<family4_datagen::account::layout::Object*>(
-                               accountBytes.data())))
+            || !project_material_gains(
+                mutation,
+                *reinterpret_cast<family4_datagen::account::layout::Object*>(accountBytes.data()))
             || objectCount >= staged.objects.size()
             || !append_object(scratch,
                               accountBytes,

@@ -546,11 +546,7 @@ class_pool(CharacterClass characterClass,
     return definitionHash != 0;
 }
 
-/**
- * @param cadence Exact or bounded-fallback cadence of the redeemed pursuit.
- * @param itemIndex Reward slot's item.
- * @return What to pay for a slot the content left at zero, or zero when nothing is chosen.
- */
+/** Resolves an authored payment for a reward slot whose installed quantity is zero. */
 [[nodiscard]] inline bool scaled_reward(BountyCadence cadence,
                                         std::uint16_t itemIndex,
                                         std::uint16_t& paidIndex,

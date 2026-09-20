@@ -94,6 +94,9 @@ same_profile_inventory(const AccountState& account,
     const std::array<account::inventory::ProfileItem, account::inventory::kProfileItemCapacity>&
         right,
     std::size_t rightCount) noexcept;
+[[nodiscard]] bool resolve_profile_stack(std::uint32_t hash,
+                                         build_data::items::Definition& definition,
+                                         build_data::items::details::Definition& detail) noexcept;
 [[nodiscard]] bool valid_profile_inventory(const AccountState& account) noexcept;
 [[nodiscard]] bool
 apply_collection_materials(const AccountState& before,
@@ -236,6 +239,19 @@ apply_action_materials(const AccountState& before,
                        bool& changed) noexcept;
 [[nodiscard]] bool inventory_bucket_id(const account::inventory::Item& item,
                                        std::uint8_t& bucketId) noexcept;
+/** Uses installed defaults only when the saved item has no authored socket choices. */
+[[nodiscard]] bool resolve_socket_choices(const build_data::items::details::Definition& detail,
+                                          account::inventory::Sockets& sockets) noexcept;
+/** Finalizes a socket after-image without changing item identity or placement. */
+[[nodiscard]] bool finalize_socket_plug(const AccountState& before,
+                                        const AccountState& after,
+                                        std::size_t characterIndex,
+                                        const CharacterItemLocation& location,
+                                        std::uint8_t socketLane,
+                                        std::uint16_t requestedPlugIndex,
+                                        const build_data::material_requirements::Definition& costs,
+                                        PendingSocketPlug& mutation) noexcept;
+
 [[nodiscard]] bool same_position(const ResolvedPosition& left,
                                  const ResolvedPosition& right) noexcept;
 [[nodiscard]] bool same_stationary_item(const account::inventory::Item& left,

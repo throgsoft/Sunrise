@@ -14,6 +14,7 @@
 
 #include "../../core/logging/log.h"
 #include "../../middleware/datagen/family4/loadout/loadout_resolver.h"
+#include "../account/inventory/material_identity.h"
 #include "../build_data/runtime.h"
 #include "../investment/store_internal.h"
 #include "../progression/season_pass_reward_catalog.h"
@@ -22,7 +23,6 @@
 #include "character_encoding_preflight.h"
 #include "dawning_reward_runtime.h"
 #include "fifo_bucket_eviction.h"
-#include "profile_stack_credit.h"
 #include "record_reward_placement.h"
 #include "runtime.h"
 #include "state_account_transaction_helpers.h"
@@ -37,6 +37,155 @@ namespace inventory_buckets = build_data::inventory::buckets;
 namespace family4_loadout = middleware::datagen::family4::loadout;
 
 namespace {
+
+struct StackRow {
+    std::size_t index{};
+    std::int32_t quantity{};
+};
+struct StackCredit {
+    std::size_t index{};
+    std::int32_t after{}, credited{};
+    bool appended{};
+};
+
+/** Plans actual credits, saturating at inventory capacity. Output capacity is not a gameplay cap.
+ */
+[[nodiscard]] bool plan_stack_reward(std::span<const StackRow> matching,
+                                     std::int32_t requested,
+                                     std::int32_t maximum,
+                                     bool allowAdditionalStacks,
+                                     std::size_t nextIndex,
+                                     std::size_t freeRows,
+                                     std::span<StackCredit> output,
+                                     std::size_t& count,
+                                     std::int32_t& credited) noexcept {
+    count = 0;
+    credited = 0;
+    if (requested <= 0 || maximum <= 0) {
+        return false;
+    }
+    for (std::size_t i = 0; i < matching.size(); ++i) {
+        if (matching[i].quantity <= 0 || matching[i].quantity > maximum
+            || matching[i].index >= nextIndex) {
+            return false;
+        }
+        for (std::size_t j = 0; j < i; ++j) {
+            if (matching[j].index == matching[i].index) {
+                return false;
+            }
+        }
+    }
+    const auto add = [&](std::size_t index, std::int32_t before, bool appended) {
+        const auto amount = (std::min)(requested - credited, maximum - before);
+        if (amount == 0) {
+            return true;
+        }
+        if (count == output.size()) {
+            return false;
+        }
+        output[count++] = {index, before + amount, amount, appended};
+        credited += amount;
+        return true;
+    };
+    for (const auto& row : matching) {
+        if (!add(row.index, row.quantity, false)) {
+            return false;
+        }
+        if (credited == requested) {
+            return true;
+        }
+    }
+    if (!allowAdditionalStacks && !matching.empty()) {
+        return true;
+    }
+    if (!allowAdditionalStacks) {
+        freeRows = (std::min)(freeRows, std::size_t{1});
+    }
+    while (credited < requested && freeRows != 0) {
+        if (!add(nextIndex++, 0, true)) {
+            return false;
+        }
+        --freeRows;
+    }
+    return true;
+}
+
+/** Credits wallet rows up to their cap and splits eligible rewards into available bucket rows.
+ * Each credited row gets one acquisition record; output capacity must cover the whole grant. */
+[[nodiscard]] bool credit_profile_stacks(AccountState& working,
+                                         const build_data::items::Definition& definition,
+                                         const build_data::items::details::Definition& detail,
+                                         const build_data::inventory::buckets::Descriptor& bucket,
+                                         std::int32_t requested,
+                                         PendingRecordRewardGrant& mutation,
+                                         std::size_t& rewardCount,
+                                         std::int32_t& credited) noexcept {
+    credited = 0;
+    if (detail.instancedDefinitionState
+            != build_data::items::details::InstancedDefinitionState::stackable
+        || build_data::is_profile_action_source(definition.definitionIndex, definition.bucketId)
+        || rewardCount > mutation.rewards.size()) {
+        return false;
+    }
+    std::array<StackRow, account::inventory::kProfileItemCapacity> matching{};
+    std::size_t matchingCount = 0, used = 0;
+    std::int32_t serial = 0;
+    for (std::size_t i = 0; i < working.profileItemCount; ++i) {
+        const auto& row = working.profileItems[i];
+        build_data::items::Definition held{};
+        if (!build_data::find_item_definition_hash(row.definitionHash, held)) {
+            return false;
+        }
+        used += held.bucketId == definition.bucketId;
+        serial = (std::max)(serial, row.mutationSerial);
+        if (row.definitionHash == definition.definitionHash) {
+            if (row.instanceSoid != 0) {
+                return false;
+            }
+            matching[matchingCount++] = {i, row.quantity};
+        }
+    }
+    if (used > bucket.slotCount) {
+        return false;
+    }
+    const auto free = (std::min)(working.profileItems.size() - working.profileItemCount,
+                                 static_cast<std::size_t>(bucket.slotCount) - used);
+    std::array<StackCredit, kRecordRewardGrantCapacity> credits{};
+    std::size_t count{};
+    const bool multiStack = definition.definitionHash == account::inventory::kEnhancementCoreHash;
+    if (!plan_stack_reward(std::span(matching).first(matchingCount),
+                           requested,
+                           detail.maxStackSize,
+                           multiStack,
+                           working.profileItemCount,
+                           free,
+                           std::span(credits).first(mutation.rewards.size() - rewardCount),
+                           count,
+                           credited)
+        || count > static_cast<std::size_t>((std::numeric_limits<std::int32_t>::max)() - serial)) {
+        return false;
+    }
+    for (std::size_t i = 0; i < count; ++i) {
+        const auto& credit = credits[i];
+        auto& row = working.profileItems[credit.index];
+        if (credit.appended) {
+            row = {0, definition.definitionHash, credit.after, ++serial};
+            ++working.profileItemCount;
+        } else {
+            row.quantity = credit.after;
+            row.mutationSerial = ++serial;
+        }
+        auto& reward = mutation.rewards[rewardCount++];
+        reward = {};
+        reward.definitionHash = definition.definitionHash;
+        reward.stateIndex = credit.index;
+        reward.quantity = credit.credited;
+        reward.afterQuantity = credit.after;
+        reward.mutationSerial = row.mutationSerial;
+        reward.kind = RecordRewardKind::profileStack;
+    }
+    return true;
+}
 
 [[nodiscard]] bool materialize_record_reward(const AccountState& current,
                                              const PendingRecordRewardGrant& mutation,
@@ -338,14 +487,14 @@ bool runtime::detail::stage_reward_placement(const AccountState& account,
             // The same planner the earned reward path uses: saturate a full row, spread to
             // another while the bucket owns a slot, and report every row it credited.
             std::int32_t credited = 0;
-            if (!bounty::credit_profile_stacks(working,
-                                               item,
-                                               detail,
-                                               bucket,
-                                               requested.quantity,
-                                               mutation,
-                                               rewardCount,
-                                               credited)) {
+            if (!credit_profile_stacks(working,
+                                       item,
+                                       detail,
+                                       bucket,
+                                       requested.quantity,
+                                       mutation,
+                                       rewardCount,
+                                       credited)) {
                 return false;
             }
             if (bountyRedemption && credited != requested.quantity) {

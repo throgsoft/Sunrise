@@ -308,11 +308,18 @@ bool stage(const AccountState& snapshot,
             sockets.plugs[lane] = defaults.plugs[lane];
         }
     }
-    auto* changed = character_item_at(candidate.characters[characterIndex], location);
-    if (!changed) {
+    auto& afterCharacter = candidate.characters[characterIndex];
+    auto* changed = character_item_at(afterCharacter, location);
+    if (!changed
+        || afterCharacter.nextInventorySerial
+               >= static_cast<std::uint32_t>((std::numeric_limits<std::int32_t>::max)())) {
         return false;
     }
     changed->sockets = sockets;
+    // Publish the completed exchange as an inventory mutation of the oven. The character
+    // observer reloads held-item definitions; an unchanged character upsert is ignored,
+    // leaving a newly baked cookie unavailable to the shared unlock evaluator.
+    changed->mutationSerial = static_cast<std::int32_t>(afterCharacter.nextInventorySerial++);
     middleware::datagen::family4::loadout::ResolvedLoadout beforeLoadout{}, afterLoadout{};
     ResolvedPosition beforePosition{}, afterPosition{};
     if (!account::valid(candidate) || !valid_profile_inventory(candidate)

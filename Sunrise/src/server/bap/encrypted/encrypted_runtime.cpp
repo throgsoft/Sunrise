@@ -412,16 +412,13 @@ bool consume(Session& session,
             && state::runtime::detail::synthesizer::mote_ownership_changed(
                 rewardTransaction->pending->beforeProfileItems,
                 rewardTransaction->pending->afterProfileItems));
-    // Oven and Chalice inputs live in Family 4. Their socket reply already carries the changed
-    // banks; refresh the derived character view without replacing global Family-5 overrides.
+    // Oven exchanges publish their character mutation in the socket reply.
     const bool changesCraftingState =
         (rewardTransaction && rewardTransaction->pending
          && rewardTransaction->pending->beforeDawning != rewardTransaction->pending->afterDawning)
         || (socketTransaction && socketTransaction->pending
-            && (socketTransaction->pending->beforeDawning
-                    != socketTransaction->pending->afterDawning
-                || socketTransaction->pending->beforeChalice
-                       != socketTransaction->pending->afterChalice));
+            && socketTransaction->pending->beforeChalice
+                   != socketTransaction->pending->afterChalice);
     const bool pursuitRedemption = rewardTransaction && rewardTransaction->pending
                                    && rewardTransaction->pending->pursuitRedemption.has_value();
     const bool consumesRewardSource =

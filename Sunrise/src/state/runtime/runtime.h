@@ -8,6 +8,8 @@
 
 #include "../build_data/items/quest_initialization.h"
 #include "../build_data/records/definition.h"
+#include "../build_data/rewards/definition.h"
+#include "../unlocks/definition.h"
 #include "state.h"
 
 namespace sunrise::state::account::settings {
@@ -199,34 +201,23 @@ struct PendingProfileItemAcquisition {
     bool prepared{};
 };
 
-/** Prepared fixed package expansion kept private until every object and response byte fits. */
-struct PendingDirectItemBundle {
-    CharacterState beforeCharacter{};
-    CharacterState afterCharacter{};
-    std::uint64_t accountSoid{};
-    std::uint64_t characterSoid{};
-    std::uint64_t firstInstanceSoid{};
-    std::uint32_t sourceDefinitionHash{};
-    std::size_t characterIndex{};
-    std::size_t expectedInventoryCount{};
-    std::size_t itemCount{};
-    bool prepared{};
-};
-
-/** Shared batch capacity covers both Triumph rewards and the nine-row Season package. */
-inline constexpr std::size_t kRecordRewardGrantCapacity = 9;
+/** Shared batch capacity bounds one reward transaction. */
+inline constexpr std::size_t kRecordRewardGrantCapacity = build_data::rewards::kGrantCapacity;
 static_assert(kRecordRewardGrantCapacity >= build_data::records::kRewardPerRecordCapacity);
 
 /** One direct item requested by a record reward policy. */
 struct DirectRecordReward {
     std::uint16_t itemDefinitionIndex{};
     std::int32_t quantity{};
+    std::span<const build_data::rewards::SocketOverride> sockets{};
+    bool acquireUnlock{};
 };
 
 enum class RecordRewardKind : std::uint8_t {
     characterInstance,
     characterStack,
     profileStack,
+    accountUnlock,
 };
 
 /** Native row identity of one item inside a prepared record-reward batch. */
@@ -240,6 +231,8 @@ struct PreparedRecordReward {
     std::uint16_t inventoryRow{};
     RecordRewardKind kind{};
     bool appendedProfileResident{};
+    std::uint16_t acquiredFlag{build_data::rewards::kAbsent};
+    std::uint8_t previousFlag{};
 };
 
 /** A reward grant that claims no record carries this instead of a record row. */
@@ -267,12 +260,9 @@ struct PendingRecordRewardGrant {
 
 /** One uncommitted Season reward and the exact native row or bundle it will claim. */
 struct PendingSeasonPassReward {
-    std::variant<PendingItemAcquisition,
-                 PendingProfileItemAcquisition,
-                 PendingDirectItemBundle,
-                 PendingRecordRewardGrant>
-        grant{};
+    PendingRecordRewardGrant grant{};
     std::uint32_t sourceDefinitionHash{};
+    std::uint64_t seed{};
     std::uint16_t rewardIndex{};
     bool prepared{};
 };
@@ -533,17 +523,17 @@ set_selected_title(std::uint16_t recordIndex, std::uint64_t& characterSoid, bool
 [[nodiscard]] bool prepare_item_acquisition_for_item(std::uint16_t itemDefinitionIndex,
                                                      PendingItemAcquisition& mutation) noexcept;
 
-/** Prepares one fixed wrapper expansion without changing account State. */
-[[nodiscard]] bool prepare_direct_item_bundle(std::uint32_t sourceDefinitionHash,
-                                              std::span<const std::uint16_t> itemDefinitionIndices,
-                                              PendingDirectItemBundle& mutation) noexcept;
-
-/** Builds the full account after-image while a prepared bundle remains current. */
-[[nodiscard]] bool preview_direct_item_bundle(const PendingDirectItemBundle& mutation,
-                                              AccountState& after) noexcept;
-
 /** Atomically commits one prepared reward grant and its durable Season claim. */
 [[nodiscard]] bool commit_season_pass_reward(PendingSeasonPassReward& mutation) noexcept;
+/** Resolves an installed item or reward wrapper through the shared inventory grant path. */
+[[nodiscard]] bool prepare_item_reward(std::uint16_t itemIndex,
+                                       std::uint32_t quantity,
+                                       PendingRecordRewardGrant& mutation) noexcept;
+
+[[nodiscard]] bool prepare_season_pass_reward(std::uint16_t rewardIndex,
+                                              PendingSeasonPassReward& mutation) noexcept;
+[[nodiscard]] bool preview_reward_unlocks(const PendingRecordRewardGrant& mutation,
+                                          unlocks::Table& after) noexcept;
 
 /** Atomically commits one prepared Triumph reward and its durable record claim. */
 [[nodiscard]] bool commit_record_reward(PendingRecordRewardGrant& mutation) noexcept;

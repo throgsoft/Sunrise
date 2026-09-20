@@ -3,6 +3,7 @@
 #include <limits>
 
 #include "internal.h"
+#include "package_reward_build.h"
 
 namespace sunrise::client::content::items::packages {
 namespace {
@@ -23,51 +24,13 @@ read(std::span<const std::byte> blob, std::size_t offset, Value& value) noexcept
     return true;
 }
 
-/**
- * Reads the item set one reward's wrapper item opens into.
- * @param definition Whole item definition blob.
- * @param itemTable Item index table blob.
- * @param itemRows Located item index array.
- * @param package Receives the wrapper's items, or stays empty when the item opens into nothing.
- * @return True when the item declares no set, or declares one that reads back whole.
- */
-[[nodiscard]] bool read_package(std::span<const std::byte> definition,
-                                std::span<const std::byte> itemTable,
-                                const tables::Array& itemRows,
-                                domain::Package& package) noexcept {
-    tables::Array set{};
-    if (!tables::find_optional_array_at(definition, tables::kGearsetItemField, set)) {
-        return false;
-    }
-    if (set.count == 0) {
-        return true;
-    }
-    if (set.elementClass != tables::kGearsetItemRowClass || set.count > domain::kPackageItemCapacity
-        || set.dataOffset + static_cast<std::size_t>(set.count) * tables::kGearsetItemStride
-               > definition.size()) {
-        return false;
-    }
-    for (std::uint64_t member = 0; member < set.count; ++member) {
-        std::uint16_t itemIndex = 0;
-        tables::IndexRow entry{};
-        if (!read(definition,
-                  set.dataOffset + static_cast<std::size_t>(member) * tables::kGearsetItemStride,
-                  itemIndex)
-            || !tables::index_row(itemTable, itemRows, itemIndex, entry)) {
-            return false;
-        }
-        package.items[package.itemCount++] = entry.definitionHash;
-    }
-    return true;
-}
-
 } // namespace
 
 /**
- * Reads the season pass reward list and the wrapper items it grants.
+ * Reads the season pass reward list and fixed socket overrides.
  * A reward names an item index and a claim flag slot; both become the values a grant needs.
  * @param source Installed package source.
- * @param storage Pass storage receiving the reward rows and the wrapper packages.
+ * @param storage Pass storage receiving the reward rows.
  * @param root Investment root bytes.
  * @return True when the reward list read and produced at least one row.
  */
@@ -75,7 +38,8 @@ bool build_season_pass(const reader::Source& source,
                        Storage& storage,
                        std::span<const std::byte> root) noexcept {
     storage.seasonPassRewardCount = 0;
-    storage.seasonPassPackageCount = 0;
+    RewardConditions conditions;
+    if (!conditions.load(source, storage.scratch, root)) return false;
 
     std::uint32_t itemTableTag = 0;
     tables::Array itemRows{};
@@ -138,31 +102,22 @@ bool build_season_pass(const reader::Source& source,
         reward.itemHash = entry.definitionHash;
         reward.itemIndex = static_cast<std::uint16_t>(itemIndex);
         reward.requiredRank = static_cast<std::uint8_t>(rank);
+        std::size_t socketCount = 0;
+        // Progression reward rows append their socket overrides at byte 40.
+        if (!read_reward_sockets(progressionTable, at + 40, reward.sockets, socketCount)) {
+            return false;
+        }
+        reward.socketCount = static_cast<std::uint8_t>(socketCount);
+        std::size_t conditionCount = 0;
+        if (!conditions.read_list(progressionTable, at + 24, reward.condition, conditionCount))
+            return false;
+        reward.conditionCount = static_cast<std::uint8_t>(conditionCount);
         // A reward with no claim flag carries slot 0.
         if (claimSlot != 0) {
             reward.claimFlagIndex =
                 bank_index(storage.slotMaps.accountFlag, static_cast<std::int32_t>(claimSlot));
         }
 
-        // A wrapper reward opens into a set; a plain reward declares none and keeps zero items.
-        // One wrapper can be granted at several ranks, so it is recorded once.
-        const std::span<const domain::Package> held =
-            std::span(storage.seasonPassPackages).first(storage.seasonPassPackageCount);
-        domain::Package package{};
-        package.definitionHash = entry.definitionHash;
-        if (storage.seasonPassPackageCount < domain::kPackageCapacity
-            && std::none_of(
-                held.begin(),
-                held.end(),
-                [&entry](const domain::Package& row) {
-                    return row.definitionHash == entry.definitionHash;
-                })
-            && reader::read_tag(source, storage.scratch, entry.targetTag, storage.definition)
-            && read_package(
-                std::span<const std::byte>{storage.definition}, itemTable, itemRows, package)
-            && package.itemCount != 0) {
-            storage.seasonPassPackages[storage.seasonPassPackageCount++] = package;
-        }
         ++storage.seasonPassRewardCount;
     }
     return storage.seasonPassRewardCount != 0;

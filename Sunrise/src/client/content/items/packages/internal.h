@@ -158,11 +158,7 @@ struct Storage {
     std::array<state::build_data::season_pass::Reward,
                state::build_data::season_pass::kRewardCapacity>
         seasonPassRewards{};
-    std::array<state::build_data::season_pass::Package,
-               state::build_data::season_pass::kPackageCapacity>
-        seasonPassPackages{};
     std::size_t seasonPassRewardCount{};
-    std::size_t seasonPassPackageCount{};
     /** Repeatable bounty rows, keyed by the item-type pair their pool shares. */
     std::array<state::build_data::bounties::Definition,
                state::build_data::bounties::kDefinitionCapacity>

@@ -20,6 +20,7 @@
 #include "../../nodes/definition.h"
 #include "../../progressions/definition.h"
 #include "../../records/definition.h"
+#include "../../rewards/definition.h"
 #include "../../scenarios/definition.h"
 #include "../../season_pass/definition.h"
 #include "../../sobjects/sobject_catalog.h"
@@ -31,7 +32,7 @@ namespace sunrise::state::build_data::cache::records {
 /** These 8 ASCII bytes mark a Sunrise build-data file. */
 inline constexpr std::array<char, 8> kCacheMagic{'S', 'U', 'N', 'R', 'I', 'S', 'E', 'B'};
 /** Bump when stored layouts or extracted values change; other versions are rebuilt. */
-inline constexpr std::uint32_t kCacheFormatVersion = 65;
+inline constexpr std::uint32_t kCacheFormatVersion = 66;
 /** Signed -1 on disk means there is no equipment slot. */
 inline constexpr std::int8_t kAbsentEquipmentSlot = -1;
 /** The standard 64-bit FNV-1a offset basis starts the payload checksum. */
@@ -102,8 +103,14 @@ struct Header {
     std::uint32_t recordRewardCount{};
     std::uint32_t progressionStepCount{};
     std::uint32_t seasonPassRewardCount{};
-    std::uint32_t seasonPassPackageCount{};
     std::uint32_t bountyCount{};
+    std::uint32_t rewardPoolsCount{};
+    std::uint32_t rewardEntriesCount{};
+    std::uint32_t rewardItemsCount{};
+    std::uint32_t rewardInstructionsCount{};
+    std::uint32_t rewardModifiersCount{};
+    std::uint32_t rewardSocketsCount{};
+
     gameplay::entity_position_profiles::Fingerprint positionFingerprint{};
     InvestmentConstants constants{};
     std::uint64_t payloadChecksum{};
@@ -303,22 +310,30 @@ struct ProgressionStepRecord {
 };
 
 /** Disk form of one season pass reward row. */
+struct RewardSocketOverrideRecord {
+    std::uint16_t socketType{};
+    std::uint16_t plugItem{};
+    std::uint16_t plugSet{};
+    std::uint16_t rollSet{};
+    std::uint32_t selection{};
+};
+
+struct RewardInstructionRecord {
+    std::uint32_t opcode{};
+    std::uint32_t operand{};
+};
+
 struct SeasonPassRewardRecord {
     std::uint32_t itemHash{};
     std::uint32_t quantity{};
     std::uint16_t itemIndex{};
     std::uint16_t claimFlagIndex{season_pass::kUnavailableFlagIndex};
     std::uint8_t requiredRank{};
+    std::array<RewardSocketOverrideRecord, 12> sockets{};
+    std::uint8_t socketCount{};
+    std::array<RewardInstructionRecord, season_pass::kConditionCapacity> condition{};
+    std::uint8_t conditionCount{};
     /** Must be zero, so the packed reward row always matches. */
-    std::array<std::uint8_t, 3> reserved{};
-};
-
-/** Disk form of one season pass wrapper item and the set it opens into. */
-struct SeasonPassPackageRecord {
-    std::uint32_t definitionHash{};
-    std::array<std::uint32_t, season_pass::kPackageItemCapacity> items{};
-    std::uint8_t itemCount{};
-    /** Must be zero, so the packed wrapper row always matches. */
     std::array<std::uint8_t, 3> reserved{};
 };
 
@@ -573,13 +588,61 @@ struct RosterGroupRecord {
     std::array<std::uint16_t, scenarios::kRosterSlotCapacity> slotIndices{};
 };
 
+struct RewardSelectionRecord {
+    std::uint32_t categoryHash{};
+    std::uint32_t count{};
+    std::uint8_t policy{};
+};
+
+struct RewardRangeRecord {
+    std::uint32_t first{};
+    std::uint32_t count{};
+};
+
+struct RewardPoolRecord {
+    std::uint32_t definitionHash{};
+    RewardRangeRecord entries{};
+};
+
+struct RewardEntryRecord {
+    std::uint16_t itemIndex{};
+    std::uint16_t itemType{};
+    std::uint16_t poolIndex{};
+    std::uint16_t mappingIndex{};
+    std::uint16_t adjusterIndex{};
+    std::uint32_t quantity{};
+    std::uint32_t categoryHash{};
+    std::uint32_t bucketHash{};
+    float scale{};
+    float weight{};
+    RewardRangeRecord condition{};
+    RewardRangeRecord modifiers{};
+    RewardRangeRecord sockets{};
+};
+
+struct RewardItemRecord {
+    std::uint32_t definitionHash{};
+    std::uint16_t poolIndex{};
+    std::uint16_t acquiredFlag{};
+    std::uint32_t categoryHash{};
+    std::array<RewardSelectionRecord, rewards::kSelectionCapacity> selections{};
+    std::uint8_t selectionCount{};
+    std::uint32_t flags{};
+};
+
+struct RewardModifierRecord {
+    RewardRangeRecord condition{};
+    std::uint16_t valueIndex{};
+    float value{};
+};
+
 #pragma pack(pop)
 
 static_assert(sizeof(Prefix) == kCacheMagic.size() + sizeof(std::uint32_t));
 static_assert(sizeof(InvestmentConstants)
               == constants::kCharacterStatRowCount + 3 * sizeof(std::uint8_t));
 static_assert(sizeof(Header)
-              == kCacheMagic.size() + 39 * sizeof(std::uint32_t) + 2 * sizeof(std::uint64_t)
+              == kCacheMagic.size() + 44 * sizeof(std::uint32_t) + 2 * sizeof(std::uint64_t)
                      + sizeof(InvestmentConstants)
                      + sizeof(gameplay::entity_position_profiles::Fingerprint));
 static_assert(sizeof(SpawnPointRecord)
@@ -617,10 +680,9 @@ static_assert(sizeof(RosterGroupRecord)
 static_assert(sizeof(ProgressionRecord) == 2 * sizeof(std::uint16_t) + 2 * sizeof(std::uint8_t));
 static_assert(sizeof(ProgressionStepRecord) == sizeof(std::int32_t));
 static_assert(sizeof(SeasonPassRewardRecord)
-              == 2 * sizeof(std::uint32_t) + 2 * sizeof(std::uint16_t) + 4 * sizeof(std::uint8_t));
-static_assert(sizeof(SeasonPassPackageRecord)
-              == (1 + season_pass::kPackageItemCapacity) * sizeof(std::uint32_t)
-                     + 4 * sizeof(std::uint8_t));
+              == 2 * sizeof(std::uint32_t) + 2 * sizeof(std::uint16_t) + 6 * sizeof(std::uint8_t)
+                     + 12 * sizeof(RewardSocketOverrideRecord)
+                     + season_pass::kConditionCapacity * sizeof(RewardInstructionRecord));
 static_assert(sizeof(BountyRecord) == 2 * sizeof(std::uint32_t) + 2 * sizeof(std::uint16_t));
 static_assert(sizeof(RecordDefinitionRecord)
               == sizeof(std::uint32_t) + 10 * sizeof(std::uint16_t) + 5 * sizeof(std::uint8_t));

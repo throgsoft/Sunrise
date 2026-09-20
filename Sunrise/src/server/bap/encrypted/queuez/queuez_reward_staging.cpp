@@ -56,7 +56,7 @@ stage_profile_item_acquisition_push(Scratch& scratch,
     return true;
 }
 
-/** Stages the one grant a season pass rank owes, whichever of the four shapes it carries. */
+/** Stages all rewards of one pass claim in a single account revision. */
 [[nodiscard]] bool
 stage_season_pass_reward(Scratch& scratch,
                          const SessionState& before,
@@ -67,59 +67,19 @@ stage_season_pass_reward(Scratch& scratch,
                          std::span<std::byte> response,
                          std::size_t& written,
                          SessionState& after) noexcept {
-    const auto& pending = *reward.pending;
-    if (const auto* itemUpdate = std::get_if<ItemAcquisition>(&reward.update)) {
-        const auto* itemPending = std::get_if<state::PendingItemAcquisition>(&pending.grant);
-        return itemPending != nullptr
-               && stage_item_acquisition_push(scratch,
-                                              *itemUpdate,
-                                              *itemPending,
-                                              presentationRows,
-                                              key,
-                                              nonce,
-                                              response,
-                                              written,
-                                              after);
-    }
-    if (const auto* profileUpdate = std::get_if<ProfileItemAcquisition>(&reward.update)) {
-        const auto* profilePending =
-            std::get_if<state::PendingProfileItemAcquisition>(&pending.grant);
-        return profilePending != nullptr
-               && stage_profile_item_acquisition_push(
-                   scratch, *profileUpdate, *profilePending, key, nonce, response, written, after);
-    }
-    if (const auto* bundle = std::get_if<state::PendingDirectItemBundle>(&pending.grant)) {
-        if (!push::append_season_pass_package_notification(scratch,
-                                                           before,
-                                                           *bundle,
-                                                           pending.rewardIndex,
-                                                           presentationRows,
-                                                           key,
-                                                           nonce,
-                                                           response,
-                                                           written,
-                                                           after)) {
-            return false;
-        }
-        middleware::secure_channel::advance_nonce(nonce);
-        return true;
-    }
-    const auto* resourceUpdate = std::get_if<RecordRewardGrant>(&reward.update);
-    const auto* resources = std::get_if<state::PendingRecordRewardGrant>(&pending.grant);
-    if (resourceUpdate == nullptr || resources == nullptr
-        || !push::append_record_reward_notification(scratch,
-                                                    before,
-                                                    *resourceUpdate,
-                                                    *resources,
-                                                    presentationRows,
-                                                    key,
-                                                    nonce,
-                                                    response,
-                                                    written)) {
+    if (!push::append_record_reward_notification(scratch,
+                                                 before,
+                                                 reward.update,
+                                                 reward.pending->grant,
+                                                 presentationRows,
+                                                 key,
+                                                 nonce,
+                                                 response,
+                                                 written)) {
         return false;
     }
     middleware::secure_channel::advance_nonce(nonce);
-    after = resourceUpdate->after;
+    after = reward.update.after;
     return true;
 }
 

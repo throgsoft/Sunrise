@@ -758,12 +758,9 @@ inline constexpr std::uint16_t kArtifactUnlockProgressionIndex = 39;
 /** @return Account-wide Power bonus published by the seasonal artifact. */
 [[nodiscard]] std::uint16_t artifact_power_bonus() noexcept;
 
-/**
- * Adds base XP to the seasonal lanes and republishes every value derived from the total.
- * @param amount Positive XP to grant.
- * @return False when the amount is not positive or the total would overflow.
- */
-[[nodiscard]] bool grant_seasonal_experience(std::int32_t amount) noexcept;
+/** Applies personal boosts to base XP; grantedAmount receives the saved gain or zero on failure. */
+[[nodiscard]] bool grant_seasonal_experience(std::int32_t baseAmount,
+                                             std::int32_t& grantedAmount) noexcept;
 
 /** @param rewardIndex Native reward-array index. @return True when the row is claimed. */
 [[nodiscard]] bool season_pass_reward_claimed(std::uint16_t rewardIndex) noexcept;

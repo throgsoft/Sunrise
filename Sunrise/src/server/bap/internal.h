@@ -564,8 +564,8 @@ void arm_acquisition_presentation_hold(Session& session) noexcept;
 /** Commits the queued reward with no flyout once its presentation cannot be built. */
 void settle_world_reward() noexcept;
 
-/** Queues one transient XP item update so the native HUD presents a seasonal XP gain. */
-[[nodiscard]] bool arm_seasonal_experience_presentation(std::int32_t amount) noexcept;
+/** Grants boosted XP and queues the credited amount for the native HUD. */
+[[nodiscard]] bool arm_seasonal_experience_presentation(std::int32_t baseAmount) noexcept;
 
 /**
  * Finds one unambiguous registry identity in a committed connection-local roster map.

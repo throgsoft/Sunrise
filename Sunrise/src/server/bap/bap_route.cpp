@@ -364,13 +364,10 @@ void arm_acquisition_presentation_hold(Session& session) noexcept {
         (std::max)(session.acquisitionPresentationUntilTick, now + kAcquisitionPresentationHoldMs);
 }
 
-/**
- * Grants seasonal XP and queues its HUD notification on the first peer that can show it.
- * @param amount Positive XP to grant.
- * @return True when the XP was granted.
- */
-bool arm_seasonal_experience_presentation(std::int32_t amount) noexcept {
-    if (amount <= 0 || !state::grant_seasonal_experience(amount)) {
+/** The HUD receives the credited XP so its animation matches the persisted total. */
+bool arm_seasonal_experience_presentation(std::int32_t baseAmount) noexcept {
+    std::int32_t amount = 0;
+    if (!state::grant_seasonal_experience(baseAmount, amount)) {
         return false;
     }
     for (auto& peer : g_sessions) {

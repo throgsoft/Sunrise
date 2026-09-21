@@ -8,6 +8,7 @@
 #include <limits>
 #include <span>
 
+#include "../build_data/rewards/reward_catalog.h"
 #include "../build_data/runtime.h"
 #include "../investment/investment.h"
 #include "../investment/store_internal.h"
@@ -38,6 +39,22 @@ constexpr std::int32_t kExperiencePerRank = 100'000;
 constexpr std::uint16_t kMaximumRank = 100;
 constexpr std::int32_t kMaximumPassExperience =
     (static_cast<std::int32_t>(kMaximumRank) - 1) * kExperiencePerRank;
+
+struct ExperienceBoost {
+    std::uint32_t itemHash;
+    std::int32_t percent;
+};
+
+/** Personal Arrivals XP bonuses stack additively. */
+constexpr std::array<ExperienceBoost, 7> kExperienceBoosts{{
+    {1937377668U, 20}, // Rank-one packages reuse this large boost.
+    {1960641613U, 2},
+    {1960641612U, 2},
+    {1960641615U, 2},
+    {1960641614U, 2},
+    {1960641609U, 2},
+    {1960641608U, 2},
+}};
 
 /**
  * Artifact points a mod column needs before its rows unlock, by column.
@@ -331,20 +348,38 @@ std::uint16_t artifact_power_bonus() noexcept {
     return bonus > 0 ? static_cast<std::uint16_t>(bonus) : 0U;
 }
 
-/** Adds base XP to the seasonal lanes and republishes every value derived from the total. */
-bool grant_seasonal_experience(std::int32_t amount) noexcept {
-    if (amount <= 0) {
+/** Applies acquired personal boosts before publishing seasonal XP and artifact progress. */
+bool grant_seasonal_experience(std::int32_t baseAmount, std::int32_t& grantedAmount) noexcept {
+    grantedAmount = 0;
+    if (baseAmount <= 0) {
         return false;
     }
     investment::store::Transaction transaction;
     if (!transaction.ready()) {
         return false;
     }
+    std::int32_t percent = 100;
+    for (const auto& boost : kExperienceBoosts) {
+        build_data::items::Definition item{};
+        build_data::rewards::Item reward{};
+        std::int32_t flag = 0;
+        if (!build_data::find_item_definition_hash(boost.itemHash, item)
+            || !build_data::rewards::find_item(item.definitionIndex, reward)
+            || reward.definitionHash != boost.itemHash
+            || reward.acquiredFlag == build_data::rewards::kAbsent
+            || !investment::store::read_unlock(
+                investment::store::Bank::accountFlags, reward.acquiredFlag, flag)
+            || flag < 0 || flag > unlocks::kFlagSet) {
+            return false;
+        }
+        if (flag == unlocks::kFlagSet) percent += boost.percent;
+    }
+    const std::int64_t amount = static_cast<std::int64_t>(baseAmount) * percent / 100;
     const std::int32_t previous = seasonal_experience();
-    if (previous > (std::numeric_limits<std::int32_t>::max)() - amount) {
+    if (previous < 0 || amount > (std::numeric_limits<std::int32_t>::max)() - previous) {
         return false;
     }
-    const std::int32_t total = previous + amount;
+    const auto total = static_cast<std::int32_t>(previous + amount);
 
     Family5State family;
     if (!transaction.ready() || !investment::store::read_family5(family)) {
@@ -356,6 +391,7 @@ bool grant_seasonal_experience(std::int32_t amount) noexcept {
     const bool saved = publish_experience_lanes(total)
                        && publish_artifact_locked(family, mask, total)
                        && investment::store::write_family5(family) && transaction.commit();
+    if (saved) grantedAmount = static_cast<std::int32_t>(amount);
     return saved;
 }
 

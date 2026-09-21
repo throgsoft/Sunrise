@@ -10,13 +10,14 @@
 #include "../../../middleware/secure_channel/runtime.h"
 #include "../../../state/activity/bubble_authority/runtime.h"
 #include "../../../state/runtime/runtime.h"
+#include "../../../state/runtime/synthesizer_crafting_runtime.h"
 #include "../../activity/host_runtime.h"
 #include "../../gameplay/peer/peer_transport.h"
 #include "../../gameplay/squad_entity_retirement.h"
 #include "../activity_authority_query_owner.h"
 #include "../activity_authority_reset_owner.h"
+#include "../capture/bap_capture.h"
 #include "../internal.h"
-#include "../presentation/material_notifications.h"
 #include "activity_transaction/activity_transaction_notifications.h"
 #include "bap_connection_publication.h"
 #include "internal.h"
@@ -249,11 +250,14 @@ bool consume(Session& session,
     transactions::Publication publication{};
     queuez::SessionState nextQueuez = session.queuez;
     bool publishesQueuez = false;
-    bool handled =
+    const bool parsed =
         middleware::bap::parse_request_payload(std::span(scratch.plaintext).first(plaintextSize),
                                                middleware::bap::FrameType::encrypted,
-                                               frame)
-        && routing::resolve(frame.serviceId, route);
+                                               frame);
+    if (parsed) {
+        capture::record(capture::Kind::request, frame.serviceId, frame.taskId, frame.body);
+    }
+    bool handled = parsed && routing::resolve(frame.serviceId, route);
     if (!handled) {
         core::log::write(core::log::Channel::server,
                          core::log::Level::warn,
@@ -274,7 +278,6 @@ bool consume(Session& session,
                          core::log::Level::warn,
                          "ev=bap stage=web_service result=refuse reason=stale_manifest");
     }
-    presentation::material_notifications::CommitScope materialNotices;
     state::investment::store::Transaction investmentTransaction;
     if (!investmentTransaction.ready()) {
         return false;
@@ -384,16 +387,34 @@ bool consume(Session& session,
         }
     }
     const bool artifactPurchase = transaction_if<ArtifactPurchaseTransaction>(outcome) != nullptr;
+    const auto* socketTransaction = transaction_if<SocketPlugTransaction>(outcome);
+    const auto* profileTransaction = transaction_if<ProfileItemAcquisitionTransaction>(outcome);
     const auto* rewardTransaction = transaction_if<RecordRewardGrantTransaction>(outcome);
+    // Capture before commit consumes pending state. Only ownership changes need this
+    // refresh; profile compaction and Synth debits alone do not change Mote predicates.
+    const bool changesMoteOwnership =
+        (socketTransaction && socketTransaction->pending
+         && state::runtime::detail::synthesizer::mote_ownership_changed(
+             socketTransaction->pending->beforeProfileItems,
+             socketTransaction->pending->afterProfileItems))
+        || (profileTransaction && profileTransaction->pending
+            && state::runtime::detail::synthesizer::mote_ownership_changed(
+                profileTransaction->pending->beforeItems,
+                profileTransaction->pending->afterItems))
+        || (rewardTransaction && rewardTransaction->pending
+            && state::runtime::detail::synthesizer::mote_ownership_changed(
+                rewardTransaction->pending->beforeProfileItems,
+                rewardTransaction->pending->afterProfileItems));
     const bool pursuitRedemption = rewardTransaction && rewardTransaction->pending
                                    && rewardTransaction->pending->pursuitRedemption.has_value();
-    // The State commit consumes its pending grant. Retain only rank evidence until the outer
-    // SQLite transaction succeeds; a released inner savepoint is not a committed award.
-    const auto rankCommit = pursuitRedemption ? *rewardTransaction->pending->pursuitRedemption
-                                              : state::PursuitRedemptionContext{};
+    const bool consumesRewardSource = rewardTransaction && rewardTransaction->pending
+        && state::released_reward_source(*rewardTransaction->pending) != 0;
+    const bool changesOwnership = rewardTransaction && rewardTransaction->pending
+        && state::reward_ownership(*rewardTransaction->pending) != nullptr;
     const bool mutatesAccount =
-        outcome.hasSelectCharacter || outcome.hasRecordClaim || outcome.hasArtifactReset
+        outcome.hasSelectCharacter || outcome.hasRecordClaim || outcome.hasStoreSync || outcome.hasArtifactReset
         || transaction_if<EquipmentSwapTransaction>(outcome) != nullptr
+        || transaction_if<PostmasterClaimTransaction>(outcome) != nullptr
         || transaction_if<SubclassSelectionTransaction>(outcome) != nullptr
         || transaction_if<SocketPlugTransaction>(outcome) != nullptr
         || transaction_if<ItemStateTransaction>(outcome) != nullptr || artifactPurchase
@@ -407,13 +428,16 @@ bool consume(Session& session,
     const bool presentsAcquisition =
         transaction_if<ItemAcquisitionTransaction>(outcome) != nullptr
         || transaction_if<ProfileItemAcquisitionTransaction>(outcome) != nullptr
-        || transaction_if<RecordRewardGrantTransaction>(outcome) != nullptr
+        || (rewardTransaction && rewardTransaction->pending
+            && rewardTransaction->pending->rewardCount != 0)
         || transaction_if<SeasonPassRewardTransaction>(outcome) != nullptr;
     const bool invalidatesAcquisitionPresentation =
         outcome.hasChangeCharacter || outcome.hasSelectCharacter || outcome.hasArtifactReset
-        || transaction_if<ItemDismantleTransaction>(outcome) != nullptr || pursuitRedemption;
+        || transaction_if<PostmasterClaimTransaction>(outcome) != nullptr
+        || transaction_if<ItemDismantleTransaction>(outcome) != nullptr || pursuitRedemption
+        || consumesRewardSource;
     const bool hasPrecommittedAccountAction =
-        outcome.hasRecordClaim || outcome.hasSelectCharacter || outcome.hasArtifactReset;
+        outcome.hasRecordClaim || outcome.hasSelectCharacter || outcome.hasStoreSync || outcome.hasArtifactReset;
     // Commit consumes pending payloads, so retain the connection fields first.
     const ConnectionFields connection = connection_fields(outcome);
     if (handled && processesBody) {
@@ -435,24 +459,10 @@ bool consume(Session& session,
                 frame.serviceId, "commit", fits ? commitReason : "frame_capacity");
         }
         if (handled) {
-            // The inner State grant only released a savepoint. Announce its copied ingredient
-            // credits after the enclosing SQLite commit; every refusal drops the scope instead.
-            static_cast<void>(materialNotices.publish(GetTickCount64()));
-            for (std::size_t i = 0; i < rankCommit.rankCount; ++i) {
-                const auto& credit = rankCommit.ranks[i];
-                core::log::writef(core::log::Channel::state,
-                                  core::log::Level::info,
-                                  "ev=bounty_rank stage=commit result=ok source=0x%08X "
-                                  "instance=0x%016llX progression=%u marker=0x%08X "
-                                  "before=%d after=%d actual_credit=%d",
-                                  rankCommit.sourceDefinitionHash,
-                                  static_cast<unsigned long long>(rankCommit.sourceInstanceSoid),
-                                  static_cast<unsigned>(credit.index),
-                                  credit.markerHash,
-                                  credit.before,
-                                  credit.after,
-                                  credit.after - credit.before);
-            }
+            if (outcome.hasStoreSync)
+                core::log::writef(core::log::Channel::server, core::log::Level::info,
+                                  "ev=store_sync stage=committed revision=%u service=%u",
+                                  outcome.storeSyncRevision, unsigned(frame.serviceId));
             std::copy_n(scratch.framed.begin(), framedSize, response.begin());
             written = framedSize;
             entityLease.release();
@@ -550,13 +560,19 @@ bool consume(Session& session,
                 hasPrecommittedAccountAction && !queuezPublication.hasState;
             // Pursuit XP/rank banks commit after the prepared inventory frame. Republish those
             // committed banks through the ordinary deferred refresh; never grant them again.
-            if (resyncsCommittedAccount || pursuitRedemption) {
+            if (resyncsCommittedAccount || pursuitRedemption || changesOwnership) {
                 bap::arm_account_resync_everywhere();
+            }
+            if (outcome.hasPublishedMoteMask)
+                session.queuez.publishedMoteMask = outcome.publishedMoteMask;
+            if (changesMoteOwnership || outcome.hasSelectCharacter || outcome.hasChangeCharacter) {
+                // A committed synthesis/recycle/discard needs only the evaluated predicates.
+                session.family5RefreshArmed = true;
             }
             if (artifactPurchase || outcome.hasArtifactReset) {
                 // Artifact overrides live in Family 5, so they need their own refresh. A record
                 // claim does not: its Family-4 replacement rearms the client rebuild.
-                session.artifactRefreshArmed = true;
+                session.family5RefreshArmed = true;
                 session.artifactFamily4RefreshDueTick =
                     GetTickCount64() + kArtifactFamily4RefreshDelayMs;
                 session.artifactFamily4RefreshArmed = true;

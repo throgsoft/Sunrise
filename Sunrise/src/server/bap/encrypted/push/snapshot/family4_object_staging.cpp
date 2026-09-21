@@ -5,6 +5,8 @@
 #include "../../../../../middleware/datagen/family4/instance/instance_encoder.h"
 #include "../../../../../middleware/datagen/family4/instance/layout.h"
 #include "../../../../../state/build_data/runtime.h"
+#include "../../../../../state/build_data/eververse/profile_wrapper.h"
+#include "../../../capture/bap_capture.h"
 #include "internal.h"
 
 namespace sunrise::server::bap::encrypted::push::snapshot {
@@ -37,6 +39,7 @@ bool append_object(Scratch& scratch,
         return false;
     }
     compressedExtent += compressedSize;
+    capture::record_account(definitionId, encoded);
     return true;
 }
 
@@ -76,7 +79,7 @@ bool append_items(Scratch& scratch,
     return true;
 }
 
-/** Resolves one source-backed profile stack into the shared Family-4 item-instance schema. */
+/** Resolves one profile socket source or wrapper into the shared Family-4 item-instance schema. */
 bool resolve_profile_item_instance(const state::account::inventory::ProfileItem& profileItem,
                                    family4_datagen::instance::ResolvedInstance& output) noexcept {
     output = {};
@@ -97,18 +100,28 @@ bool resolve_profile_item_instance(const state::account::inventory::ProfileItem&
         || detail.definitionIndex != item.definitionIndex
         || detail.definitionHash != item.definitionHash || detail.bucketId != item.bucketId
         || detail.equipmentSlot.has_value()
-        || detail.instancedDefinitionState
-               != state::build_data::items::details::InstancedDefinitionState::stackable
         || detail.ordinarySocketState
                != state::build_data::items::details::OrdinarySocketState::absent
         || detail.ordinarySocketCount != 0
         || !state::build_data::find_inventory_bucket_descriptor(item.bucketId, bucket)
         || bucket.arraySelector != state::build_data::inventory::buckets::ArraySelector::profile
-        || !state::build_data::is_profile_action_source(item.definitionIndex, item.bucketId)
         || !state::build_data::find_socket_entry_list(detail.socketEntryListIndex, socketList)
         || socketList.definitionIndex != detail.socketEntryListIndex || socketList.entryCount != 0
         || static_cast<std::size_t>(item.definitionIndex) >= itemDefinitionCount
         || static_cast<std::size_t>(socketList.definitionIndex) >= socketEntryListCount) {
+        return false;
+    }
+
+    std::uint16_t containedIndex = family4_datagen::instance::layout::kEmptyDefinitionIndex;
+    if (profileItem.wrappedItemHash != 0) {
+        if (profileItem.quantity != 1
+            || !state::build_data::eververse::resolve_profile_wrapper(
+                item, detail, profileItem.wrappedItemHash, containedIndex)
+            || static_cast<std::size_t>(containedIndex) >= itemDefinitionCount)
+            return false;
+    } else if (detail.instancedDefinitionState
+                   != state::build_data::items::details::InstancedDefinitionState::stackable
+               || !state::build_data::is_profile_action_source(item.definitionIndex, item.bucketId)) {
         return false;
     }
 
@@ -117,6 +130,7 @@ bool resolve_profile_item_instance(const state::account::inventory::ProfileItem&
     candidate.bounds.itemDefinitionCount = static_cast<std::uint32_t>(itemDefinitionCount);
     candidate.bounds.socketEntryListCount = static_cast<std::uint32_t>(socketEntryListCount);
     candidate.baseDefinitionIndex = item.definitionIndex;
+    candidate.creationDefinitionIndex = containedIndex;
     candidate.level = family4_datagen::instance::layout::kMinimumItemLevel;
     candidate.curveSelector = family4_datagen::instance::layout::kInitialLevelCurveX;
     candidate.capSelector = family4_datagen::instance::layout::kInitialLevelCapRow;

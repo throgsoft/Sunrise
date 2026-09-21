@@ -8,10 +8,13 @@
 
 #include "../../../../state/account/inventory/dawning_oven_readiness.h"
 #include "../../../../state/build_data/runtime.h"
+#include "../../../../state/build_data/eververse/profile_wrapper.h"
+#include "../../../../state/runtime/eververse_runtime.h"
 #include "../../../../state/unlocks/unlocks_runtime.h"
 #include "../progression/progression_bank_keys.h"
 #include "layout.h"
 #include "preferences/preferences_encoder.h"
+#include "purchase_receipts.h"
 
 namespace sunrise::middleware::datagen::family4::account {
 namespace {
@@ -40,13 +43,20 @@ constexpr std::size_t kBucketIdentityCapacity = 256;
         || detail.definitionIndex != definition.definitionIndex
         || detail.definitionHash != definition.definitionHash
         || detail.bucketId != definition.bucketId
-        || detail.instancedDefinitionState
-               != state::build_data::items::details::InstancedDefinitionState::stackable
         || !state::build_data::find_inventory_bucket_descriptor(definition.bucketId, bucket)
         || bucket.arraySelector != state::build_data::inventory::buckets::ArraySelector::profile) {
         return false;
     }
-    const bool actionSource = state::build_data::is_profile_action_source(
+    const bool wrapper = item.wrappedItemHash != 0;
+    std::uint16_t containedIndex{};
+    if (wrapper ? (item.quantity != 1
+                   || !state::build_data::eververse::resolve_profile_wrapper(
+                       definition, detail, item.wrappedItemHash, containedIndex))
+                : detail.instancedDefinitionState
+                      != state::build_data::items::details::InstancedDefinitionState::stackable) {
+        return false;
+    }
+    const bool actionSource = wrapper || state::build_data::is_profile_action_source(
         definition.definitionIndex, definition.bucketId);
     if (actionSource != (item.instanceSoid != 0)) {
         return false;
@@ -107,6 +117,11 @@ bool encode(const state::AccountState& state, std::span<std::byte> output) noexc
             return false;
         }
         object.characterUnlocks[index].flags = character.characterFlags;
+        // The supported build maps Synthesizer Tier (value slot 5159) to account A's
+        // per-character value row 4, separately from character B's objective bank.
+        constexpr std::size_t kSynthesizerTierValueRow = 4;
+        object.characterUnlocks[index].values[kSynthesizerTierValueRow] =
+            static_cast<std::int32_t>(state.characters[index].gambitPrimeSynthesizerTier);
     }
     object.publicityExpiries.fill(kSuppressedPublicityDeadline);
     object.seenMessages.fill(kSeenMessageByte);
@@ -141,6 +156,14 @@ bool encode(const state::AccountState& state, std::span<std::byte> output) noexc
         }
     }
     object.profileItemCount = static_cast<std::uint32_t>(state.profileItemCount);
+
+    // A request-driven local reconciliation advances this retained generation. The
+    // native account observer clears its local sync override on that change; state 3
+    // passes the platform-store action gate. Ordinary inventory updates preserve it.
+    if (!state::eververse::read_wallet_sync(state.primarySoid, object.storeSyncRevision))
+        return false;
+    if (object.storeSyncRevision != 0) object.storeSyncState = 3;
+    if (!project_purchase_receipts(state.primarySoid, object)) return false;
 
     // Publish only after every fallible conversion succeeds.
     std::fill(output.begin(), output.end(), std::byte{});

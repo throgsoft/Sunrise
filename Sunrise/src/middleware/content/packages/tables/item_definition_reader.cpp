@@ -30,8 +30,10 @@ constexpr std::int32_t kEquipmentSlotCount = 20;
 /** A socket entry stores its type index first and its initial plug next. */
 constexpr std::size_t kSocketTypeOffset = 0;
 constexpr std::size_t kSocketPlugOffset = 2;
-/** Fixed fields end after the instanced predicate. */
-constexpr std::size_t kFixedFieldEnd = kInstancedOffset + 1;
+/** The item header names the permanent acquired unlock slot here. */
+constexpr std::size_t kAcquiredFlagSlotOffset = 0xDA;
+/** Fixed fields end after the acquired unlock slot. */
+constexpr std::size_t kFixedFieldEnd = kAcquiredFlagSlotOffset + sizeof(std::uint16_t);
 /** Optional plug category used to expand three native reusable plug families. */
 constexpr std::size_t kPlugCategoryOffset = 392;
 /**
@@ -431,10 +433,14 @@ bool read_definition(std::span<const std::byte> definition, Row& row) noexcept {
     if (!read(definition, kBucketIdOffset, row.bucketId)
         || !read(definition, kMaxStackSizeOffset, row.maxStackSize)
         || !read(definition, kTierOffset, row.tier)
-        || !read(definition, kInstancedOffset, instanced)) {
+        || !read(definition, kInstancedOffset, instanced)
+        || !read(definition, kAcquiredFlagSlotOffset, row.acquiredFlagSlot)) {
         return false;
     }
     row.instanced = instanced != 0;
+    std::uint16_t effect{};
+    if (!read(definition, 0xD8, effect)) return false;
+    row.acquireEffectIndex = effect;
     // Short legacy definitions simply do not declare a plug category.
     (void)read(definition, kPlugCategoryOffset, row.plugCategoryHash);
     read_plug_block(definition, row);

@@ -58,6 +58,8 @@ struct ResolvedInstance {
     std::uint64_t instanceSoid{};
     DefinitionBounds bounds{};
     std::uint16_t baseDefinitionIndex{layout::kEmptyDefinitionIndex};
+    /** Stackable contents of a validated wrapper, absent for ordinary item residents. */
+    std::uint16_t creationDefinitionIndex{layout::kEmptyDefinitionIndex};
     std::int32_t level{};
     /** Runtime-scored level curve written into the same native instance prefix. */
     std::uint16_t curveSelector{layout::kInitialLevelCurveX};

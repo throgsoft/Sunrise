@@ -9,6 +9,7 @@
 
 #include "../../core/logging/log.h"
 #include "../../core/runtime/wall_clock.h"
+#include "../../server/bap/capture/bap_capture.h"
 #include "../../server/bap/runtime.h"
 #include "../../state/account/pursuit_hold.h"
 #include "../../state/build_data/progressions/progression_catalog.h"
@@ -16,6 +17,7 @@
 #include "../../state/build_data/runtime.h"
 #include "../../state/build_data/season_pass/season_pass_catalog.h"
 #include "../../state/runtime/developer_investment_runtime.h"
+#include "../../state/runtime/eververse_runtime.h"
 #include "../../state/runtime/runtime.h"
 #include "../../state/unlocks/unlocks_runtime.h"
 #include "../movement/movement_settings_store.h"
@@ -123,6 +125,33 @@ bool item_held(std::span<const Value> arguments, Output& output) noexcept {
     return unresolved == 0;
 }
 
+bool bap_probe(std::span<const Value> arguments, Output& output) noexcept {
+    namespace capture = server::bap::capture;
+    if (!arguments.empty()) capture::set_enabled(arguments[0].boolean);
+    const auto status = capture::status();
+    output.format("bap.probe: %s run=%llu frames=%zu/%zu markers=%zu/%zu objects=%zu/%zu",
+                  status.enabled ? "on" : "off",
+                  static_cast<unsigned long long>(status.run),
+                  status.frames,
+                  capture::kFrameLimit,
+                  status.markers,
+                  capture::kMarkerLimit,
+                  status.objects,
+                  capture::kObjectLimit);
+    output.line("Capture: ev=bap_capture in Sunrise/logs/sunrise.log (when file logging is enabled).");
+    if (!core::log::accepts(core::log::Channel::server, core::log::Level::warn))
+        output.line("Server warn logging is disabled; capture events will not reach the log.");
+    return true;
+}
+
+bool bap_mark(std::span<const Value> arguments, Output& output) noexcept {
+    const auto label = arguments.empty() ? std::string_view{"mark"} : arguments[0].text;
+    const bool marked = server::bap::capture::mark(label);
+    output.line(marked ? "bap.mark: marker recorded."
+                       : "bap.mark: probe is off or its marker budget is exhausted.");
+    return marked;
+}
+
 bool report_mutation(const char* command,
                      const state::developer::Result& result,
                      Output& output) noexcept {
@@ -156,12 +185,57 @@ bool bounties_dropall(std::span<const Value>, Output& output) noexcept {
     return report_mutation("bounties.dropall", state::developer::drop_bounties(), output);
 }
 
+constexpr std::array<const char*, 13> kChaliceRunes{
+    "joy", "beast", "jubilation", "cunning", "gluttony", "ambition", "war",
+    "desire", "pride", "pleasure", "excess", "wealth", "all"};
+
+const char* chalice_rune_name(std::size_t index) noexcept {
+    return index < kChaliceRunes.size() ? kChaliceRunes[index] : nullptr;
+}
+
+bool chalice_runes(std::span<const Value> arguments, Output& output) noexcept {
+    std::size_t rune = 0;
+    while (rune < kChaliceRunes.size() && arguments[0].text != kChaliceRunes[rune]) ++rune;
+    if (rune == kChaliceRunes.size()) {
+        output.line("Unknown rune; use a rune name or all. Tab lists names.");
+        return false;
+    }
+    return report_mutation(
+        "chalice.runes",
+        state::developer::grant_chalice_runes(
+            static_cast<std::uint8_t>(rune),
+            arguments.size() > 1 ? static_cast<std::int32_t>(arguments[1].integer) : 1),
+        output);
+}
+
 bool dropall_bounties(std::span<const Value>, Output& output) noexcept {
     return report_mutation("dropall.bounties", state::developer::drop_bounties(), output);
 }
 
 bool dropall_engrams(std::span<const Value>, Output& output) noexcept {
     return report_mutation("dropall.engrams", state::developer::drop_engrams(), output);
+}
+
+bool dropall_weapons(std::span<const Value>, Output& output) noexcept {
+    return report_mutation("dropall.weapons", state::developer::drop_weapons(), output);
+}
+
+bool dropall_armor(std::span<const Value>, Output& output) noexcept {
+    return report_mutation("dropall.armor", state::developer::drop_armor(), output);
+}
+
+bool dropall_seasonpass(std::span<const Value>, Output& output) noexcept {
+    return report_mutation("dropall.seasonpass", state::developer::drop_season_pass(), output);
+}
+
+bool silver_set(std::span<const Value> arguments, Output& output) noexcept {
+    const auto result = state::eververse::set_silver(arguments[0].integer);
+    if (result.accepted) server::bap::request_account_resync();
+    output.format("silver.set: %s; balance=%d; %s",
+                  result.accepted ? "accepted" : "refused",
+                  result.balance,
+                  result.reason != nullptr ? result.reason : "no details");
+    return result.accepted;
 }
 
 bool quest_set(std::span<const Value> arguments, Output& output) noexcept {
@@ -247,7 +321,7 @@ bool bounty_page(std::span<const Value> arguments, Output& output) noexcept {
         output.line("bounty.page: mode must be complete or give");
         return false;
     }
-    constexpr std::size_t pageSize = 59; // dirty/quest's ordered bounty pages.
+    constexpr std::size_t pageSize = 40;
     const auto definitions = (std::min)(data::item_definition_count(), std::size_t{65536});
     const auto isBounty = [](std::uint16_t index,
                              data::items::Definition& item,
@@ -773,17 +847,37 @@ bool install_commands() noexcept {
               &item_held,
               {Parameter{
                   "all", "Include all character items.", ValueType::boolean, nullptr, 0, 0, true}}},
+        Entry{"bap.probe",
+              "Reports or toggles bounded BAP capture; on starts a new capture.",
+              &bap_probe,
+              {toggle}},
+        Entry{"bap.mark",
+              "Labels the active BAP capture; optional label is capped at 96 characters.",
+              &bap_mark,
+              {Parameter{"label",
+                         "Short capture label; default mark.",
+                         ValueType::text,
+                         nullptr,
+                         0,
+                         0,
+                         true}}},
         Entry{"item.grant",
               "Atomically grants installed items through State acquisition/reward policy.",
               &item_grant,
               {item,
                Parameter{"count",
-                         "Quantity; default one. Pursuits require one.",
+                         "Quantity; default one. Native stack cap applies; instances max 64, pursuits one.",
                          ValueType::integer,
                          nullptr,
                          1,
-                         64,
+                         (std::numeric_limits<std::int32_t>::max)(),
                          true}}},
+        Entry{"chalice.runes",
+              "Grants named or all rune counters; does not unlock Chalice upgrades or slots.",
+              &chalice_runes,
+              {Parameter{"rune", "Rune name or all.", ValueType::text, &chalice_rune_name},
+               Parameter{"count", "Added to each selected rune; default one.",
+                         ValueType::integer, nullptr, 1, 1000, true}}},
         Entry{"pursuit.list",
               "Lists installed objective-bearing pursuits, with a bounded sample.",
               &pursuit_list,
@@ -818,6 +912,24 @@ bool install_commands() noexcept {
         Entry{"dropall.engrams",
               "Removes the selected character's held engrams without decryption or rewards.",
               &dropall_engrams},
+        Entry{"dropall.weapons",
+              "Deletes only the selected character's unequipped weapons; no rewards.",
+              &dropall_weapons},
+        Entry{"dropall.armor",
+              "Deletes only the selected character's unequipped armor; no rewards.",
+              &dropall_armor},
+        Entry{"dropall.seasonpass",
+              "Resets current season pass XP and claim flags; preserves items and artifact progress.",
+              &dropall_seasonpass},
+        Entry{"silver.set",
+              "Sets the local account's persisted Silver balance.",
+              &silver_set,
+              {Parameter{"value",
+                         "Local Silver balance (0..2147483647).",
+                         ValueType::integer,
+                         nullptr,
+                         0,
+                         (std::numeric_limits<std::int32_t>::max)()}}},
         Entry{"pursuit.complete",
               "Completes held objectives atomically; no grants or redemption.",
               &pursuit_complete},
@@ -844,7 +956,7 @@ bool install_commands() noexcept {
                          0,
                          65535}}},
         Entry{"bounty.page",
-              "Lists page bounds, or discards held bounties without rewards and grants a new page; "
+              "Lists 40-bounty page bounds, or discards held bounties without rewards and grants a new page; "
               "complete is the default mode.",
               &bounty_page,
               {Parameter{"page",
@@ -855,7 +967,7 @@ bool install_commands() noexcept {
                          65535,
                          true},
                Parameter{"mode",
-                         "complete or give (preserve progress).",
+                         "complete or give (leave new objectives incomplete).",
                          ValueType::text,
                          &bounty_page_mode,
                          0,

@@ -13,6 +13,7 @@
 #include "../build_data/runtime.h"
 #include "../investment/store_internal.h"
 #include "character_encoding_preflight.h"
+#include "postmaster_runtime.h"
 #include "runtime.h"
 #include "state_account_transaction_helpers.h"
 #include "storage/internal.h"
@@ -94,6 +95,10 @@ namespace runtime::detail {
                 acquired.objectiveValues[authored_inventory::kItemExpiryLane]))
             return false;
     }
+    // Direct earned grants alone can overflow, and only after proving authored-bucket capacity.
+    // A failed socket/detail/character validation is never a Postmaster admission signal.
+    if (source.direct && !place_instanced_reward(chargedAccount, characterIndex, acquired))
+        return false;
     after.inventory.values[inventoryIndex] = acquired;
     ++after.inventory.count;
 
@@ -256,6 +261,7 @@ bool prepare_direct_item_bundle(std::uint32_t sourceDefinitionHash,
 
     CharacterState after = before;
     const std::int32_t level = acquisition_level(before);
+    AccountState candidate = account;
     for (std::size_t index = 0; index < itemDefinitionIndices.size(); ++index) {
         authored_inventory::Item granted{};
         granted.instanceSoid = firstSoid + index;
@@ -263,14 +269,16 @@ bool prepare_direct_item_bundle(std::uint32_t sourceDefinitionHash,
         granted.level = level;
         granted.quantity = 1;
         granted.mutationSerial = static_cast<std::int32_t>(after.nextInventorySerial++);
+        candidate.characters[characterIndex] = after;
+        if (!place_instanced_reward(candidate, characterIndex, granted)) return false;
         after.inventory.values[after.inventory.count++] = granted;
     }
 
-    AccountState candidate = account;
     candidate.characters[characterIndex] = after;
     family4_loadout::ResolvedLoadout resolved{};
     if (!account::valid(candidate)
-        || !family4_loadout::resolve(candidate, characterIndex, resolved)) {
+        || !family4_loadout::resolve(candidate, characterIndex, resolved)
+        || !character_encoding_preflight(candidate, characterIndex, resolved)) {
         return false;
     }
     for (std::size_t index = 0; index < itemDefinitionIndices.size(); ++index) {
@@ -393,6 +401,15 @@ valid_item_acquisition_source(const PendingItemAcquisition& mutation) noexcept {
         return false;
     }
 
+    // Recheck overflow classification at commit as well as the final encodable placement.
+    auto acquired = mutation.afterCharacter.inventory.values[mutation.inventoryIndex];
+    const auto expectedPlacement = acquired.placement;
+    acquired.placement = authored_inventory::ItemPlacement::inventory;
+    if (mutation.directGrant) {
+        if (!place_instanced_reward(current, mutation.characterIndex, acquired)
+            || acquired.placement != expectedPlacement) return false;
+    } else if (expectedPlacement != authored_inventory::ItemPlacement::inventory) return false;
+
     after = current;
     after.profileItems = mutation.afterProfileItems;
     after.profileItemCount = mutation.afterProfileItemCount;
@@ -403,7 +420,8 @@ valid_item_acquisition_source(const PendingItemAcquisition& mutation) noexcept {
     return account::valid(after) && valid_profile_inventory(after)
            && family4_loadout::resolve(after, mutation.characterIndex, resolved)
            && find_unequipped_row(resolved, mutation.acquiredInstanceSoid, row, slot)
-           && row == mutation.inventoryRow && slot == mutation.equipmentSlot;
+           && row == mutation.inventoryRow && slot == mutation.equipmentSlot
+           && character_encoding_preflight(after, mutation.characterIndex, resolved);
 }
 
 /** Rebuilds one package from installed policy and rejects any altered after-image. */
@@ -436,6 +454,7 @@ valid_item_acquisition_source(const PendingItemAcquisition& mutation) noexcept {
 
     CharacterState canonical = mutation.beforeCharacter;
     const std::int32_t level = acquisition_level(canonical);
+    after = current;
     for (std::size_t index = 0; index < mutation.itemCount; ++index) {
         build_data::items::Definition definition{};
         item_details::Definition detail{};
@@ -457,6 +476,8 @@ valid_item_acquisition_source(const PendingItemAcquisition& mutation) noexcept {
         granted.level = level;
         granted.quantity = 1;
         granted.mutationSerial = static_cast<std::int32_t>(canonical.nextInventorySerial++);
+        after.characters[mutation.characterIndex] = canonical;
+        if (!place_instanced_reward(after, mutation.characterIndex, granted)) return false;
         canonical.inventory.values[canonical.inventory.count++] = granted;
     }
     if (!same_character(canonical, mutation.afterCharacter)) {
@@ -467,7 +488,8 @@ valid_item_acquisition_source(const PendingItemAcquisition& mutation) noexcept {
     after.characters[mutation.characterIndex] = canonical;
     family4_loadout::ResolvedLoadout resolved{};
     if (!account::valid(after)
-        || !family4_loadout::resolve(after, mutation.characterIndex, resolved)) {
+        || !family4_loadout::resolve(after, mutation.characterIndex, resolved)
+        || !character_encoding_preflight(after, mutation.characterIndex, resolved)) {
         return false;
     }
     for (std::size_t index = 0; index < mutation.itemCount; ++index) {

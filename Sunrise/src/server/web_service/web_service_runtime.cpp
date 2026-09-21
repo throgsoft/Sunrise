@@ -24,6 +24,7 @@
 #include "../../middleware/web_service/messages/opcode901/opcode901_codec.h"
 #include "../../middleware/web_service/messages/opcode903.h"
 #include "../../middleware/web_service/messages/opcode904/opcode904_codec.h"
+#include "../../middleware/web_service/messages/opcode2002.h"
 #include "../../middleware/web_service/web_service_envelope.h"
 #include "../../state/account/account_state.h"
 #include "../../state/activity/membership/activity_membership_query.h"
@@ -31,6 +32,7 @@
 #include "../../state/runtime/runtime.h"
 #include "opcode_routes.h"
 #include "web_service_actions.h"
+#include "vendor/eververse_vendor_actions.h"
 
 namespace sunrise::server::web_service {
 
@@ -56,7 +58,7 @@ constexpr std::int32_t kRefusedStatus = 1;
  * Kept sorted; the lookup below is a binary search.
  */
 constexpr auto kResidentDependentOpcodes =
-    std::to_array<std::uint16_t>({402, 403, 404, 406, 504, 903, 1801, 1820, 1901, 2400});
+    std::to_array<std::uint16_t>({402, 403, 404, 406, 504, 903, 905, 1801, 1820, 1901, 2002, 2400});
 
 /** One refusal line carries both request indices, the clock presence, and the clock verdict. */
 constexpr std::size_t kPurchaseLineCapacity = 128;
@@ -294,7 +296,8 @@ bool consume(std::span<const std::byte> request,
              std::span<std::byte> response,
              std::size_t& written,
              Outcome& outcome,
-             std::span<const state::account::inventory::PresentedItemRow> presentation) noexcept {
+             std::span<const state::account::inventory::PresentedItemRow> presentation,
+             std::uint16_t previousMoteMask) noexcept {
     written = 0;
     outcome = {};
     middleware::web_service::Message message;
@@ -310,14 +313,17 @@ bool consume(std::span<const std::byte> request,
     }
     if (message.opcode == middleware::web_service::messages::opcode205::kOpcode) {
         state::InvestmentState investment{};
-        return (state::investment_snapshot(investment)
+        if (!(state::investment_snapshot(investment, previousMoteMask)
                 && middleware::web_service::messages::opcode205::encode_response(
                     message,
                     investment,
                     static_cast<std::uint64_t>(core::runtime::server_clock_seconds()),
                     response,
-                    written))
-               || encode_echo(message, response, written);
+                    written)))
+            return encode_echo(message, response, written);
+        outcome.hasPublishedMoteMask = true;
+        outcome.publishedMoteMask = investment.moteOwnershipMask;
+        return true;
     }
 
     if (message.opcode == middleware::web_service::messages::opcode503::kOpcode) {
@@ -330,7 +336,7 @@ bool consume(std::span<const std::byte> request,
             bootstrap.primarySoid = state::account_snapshot().primarySoid;
         }
         state::InvestmentState investment{};
-        if (!parsed || !state::investment_snapshot(investment)
+        if (!parsed || !state::investment_snapshot(investment, previousMoteMask)
             || !middleware::web_service::messages::opcode503::encode_response(
                 message,
                 bootstrap,
@@ -340,6 +346,8 @@ bool consume(std::span<const std::byte> request,
                 written)) {
             return encode_echo(message, response, written);
         }
+        outcome.hasPublishedMoteMask = true;
+        outcome.publishedMoteMask = investment.moteOwnershipMask;
         if (bootstrap.hasPrimarySoid && !state::set_primary_soid(bootstrap.primarySoid)) {
             core::log::write(core::log::Channel::server,
                              core::log::Level::warn,
@@ -417,13 +425,12 @@ bool consume(std::span<const std::byte> request,
         purchase_item(message, outcome);
     } else if (message.opcode == middleware::web_service::messages::opcode904::kOpcode) {
         acquire_quest(message, outcome);
+    } else if (message.opcode == middleware::web_service::messages::opcode2002::kOpcode) {
+        redeem_bright_engram(message, outcome);
+    } else if (message.opcode == 405) {
+        claim_postmaster_item(message, outcome);
     } else if (message.opcode == 905) {
-        // Engram redemption is not implemented. Do not acknowledge a successful decrypt
-        // without consuming the source and publishing its reward transaction.
-        core::log::writef(core::log::Channel::server,
-                          core::log::Level::warn,
-                          "ev=ws905 stage=redeem result=unsupported payload_bytes=%zu",
-                          message.payload.size());
+        vendor::refund_package(message, outcome);
     } else {
         dispatched = false;
     }

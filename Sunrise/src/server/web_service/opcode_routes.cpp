@@ -24,9 +24,11 @@ constexpr auto kStatusPairOpcodes = std::to_array<std::uint16_t>({
 /** Opcodes whose status pair carries a trailing bool with no presence bit, so 38 bits. */
 constexpr auto kStatusPairBoolOpcodes = std::to_array<std::uint16_t>({104, 901});
 
-/** Opcodes whose response definition hands its status value to the Client's Family-4 wait. */
+/** Opcodes whose response definition hands its status value to the Client's Family-4 wait.
+ * WS-104's 8080770C response also inherits 8080777E; an unperformed sync must use -1,
+ * not the descriptor's minimum-int default, while it has no account publication. */
 constexpr auto kFamily4VersionOpcodes = std::to_array<std::uint16_t>({
-    105, 106, 402, 403, 404, 405, 406, 501,  502,  503,  504,  505,  601,  701,  702,
+    104, 105, 106, 402, 403, 404, 405, 406, 501, 502, 503, 504, 505, 601, 701, 702,
     801, 802, 804, 901, 903, 904, 905, 1801, 1802, 1820, 1821, 1901, 2002, 2400,
 });
 

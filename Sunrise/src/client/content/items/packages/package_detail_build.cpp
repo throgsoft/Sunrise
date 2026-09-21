@@ -230,6 +230,12 @@ bool build_detail(const DetailSource& source,
     }
     item.definitionHash = indexRow.definitionHash;
     detail = to_detail(item);
+    detail.acquiredFlagSlot = item.acquiredFlagSlot;
+    detail.acquireEffectIndex = item.acquireEffectIndex;
+    if (item.acquiredFlagSlot != kUnmappedSlot
+        && item.acquiredFlagSlot < source.accountFlagSlotMap.size()) {
+        detail.acquiredAccountFlag = source.accountFlagSlotMap[item.acquiredFlagSlot];
+    }
     return true;
 }
 

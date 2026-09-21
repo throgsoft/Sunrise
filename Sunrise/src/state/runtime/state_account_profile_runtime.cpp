@@ -10,6 +10,7 @@
 #include <utility>
 
 #include "../build_data/runtime.h"
+#include "../build_data/eververse/profile_wrapper.h"
 #include "profile_discard.h"
 #include "runtime.h"
 #include "state_account_transaction_helpers.h"
@@ -26,7 +27,7 @@ namespace inventory_buckets = build_data::inventory::buckets;
                                             const authored_inventory::ProfileItem& right) noexcept {
     return left.instanceSoid == right.instanceSoid && left.definitionHash == right.definitionHash
            && left.quantity == right.quantity && left.mutationSerial == right.mutationSerial
-           && left.seen == right.seen;
+           && left.seen == right.seen && left.wrappedItemHash == right.wrappedItemHash;
 }
 
 /** @return True when a complete fixed profile inventory equals one captured view. */
@@ -87,13 +88,21 @@ same_profile_inventory(const AccountState& account,
             || detail.definitionIndex != definition.definitionIndex
             || detail.definitionHash != definition.definitionHash
             || detail.bucketId != definition.bucketId
-            || detail.instancedDefinitionState != item_details::InstancedDefinitionState::stackable
             || !build_data::find_inventory_bucket_descriptor(definition.bucketId, bucket)
             || bucket.arraySelector != inventory_buckets::ArraySelector::profile) {
             return false;
         }
-        const bool actionSource =
-            build_data::is_profile_action_source(definition.definitionIndex, definition.bucketId);
+        const bool wrapper = item.wrappedItemHash != 0;
+        std::uint16_t containedIndex{};
+        if (wrapper ? (item.quantity != 1
+                       || !build_data::eververse::resolve_profile_wrapper(
+                           definition, detail, item.wrappedItemHash, containedIndex))
+                    : detail.instancedDefinitionState
+                          != item_details::InstancedDefinitionState::stackable) {
+            return false;
+        }
+        const bool actionSource = wrapper
+            || build_data::is_profile_action_source(definition.definitionIndex, definition.bucketId);
         if (actionSource != (item.instanceSoid != 0)
             || (actionSource
                 && ++actionSourceCount > authored_inventory::kProfileActionSourceCapacity)) {
@@ -114,7 +123,7 @@ same_profile_inventory(const AccountState& account,
         account.profileItems.cbegin() + static_cast<std::ptrdiff_t>(account.profileItemCount);
     return std::all_of(tail, account.profileItems.cend(), [](const auto& item) noexcept {
         return item.instanceSoid == 0 && item.definitionHash == 0 && item.quantity == 0
-               && item.mutationSerial == 0;
+               && item.mutationSerial == 0 && item.wrappedItemHash == 0;
     });
 }
 
@@ -381,12 +390,12 @@ valid_profile_mutation_shape(const PendingProfileItemAcquisition& mutation) noex
             const authored_inventory::ProfileItem& after = mutation.afterItems[index];
             if (index >= mutation.expectedItemCount
                 && (before.instanceSoid != 0 || before.definitionHash != 0 || before.quantity != 0
-                    || before.mutationSerial != 0)) {
+                    || before.mutationSerial != 0 || before.wrappedItemHash != 0)) {
                 return false;
             }
             if (index >= mutation.afterItemCount
                 && (after.instanceSoid != 0 || after.definitionHash != 0 || after.quantity != 0
-                    || after.mutationSerial != 0)) {
+                    || after.mutationSerial != 0 || after.wrappedItemHash != 0)) {
                 return false;
             }
         }
@@ -458,12 +467,12 @@ valid_profile_mutation_shape(const PendingProfileItemAcquisition& mutation) noex
         }
         if (index >= mutation.expectedItemCount
             && (before.instanceSoid != 0 || before.definitionHash != 0 || before.quantity != 0
-                || before.mutationSerial != 0)) {
+                || before.mutationSerial != 0 || before.wrappedItemHash != 0)) {
             return false;
         }
         if (index >= mutation.afterItemCount
             && (after.instanceSoid != 0 || after.definitionHash != 0 || after.quantity != 0
-                || after.mutationSerial != 0)) {
+                || after.mutationSerial != 0 || after.wrappedItemHash != 0)) {
             return false;
         }
         if (!mutation.appended && index < mutation.expectedItemCount

@@ -21,7 +21,8 @@ using State = account::inventory::dawning::State;
                          std::uint16_t plugDefinitionIndex,
                          PendingSocketPlug& mutation) noexcept;
 
-/** Counter rewards are virtual materials: neither ingredient plugs nor pickups are residents. */
+/** Credits the oven balance. Acquisition stages its separate pickup FIFO in the same transaction;
+ * neither the pickup nor the plug needs an item-instance resident. */
 [[nodiscard]] bool credit(State& state,
                           std::uint32_t definitionHash,
                           std::int32_t quantity,

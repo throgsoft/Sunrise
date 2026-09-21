@@ -37,6 +37,7 @@ bool read_items(AccountState& output) noexcept {
                           item.meleeAbilityEntry,
                           item.classAbilityEntry,
                           item.seen,
+                          item.placement,
                           item.objectiveDefinitionIndex,
                           item.objectiveValues[0],
                           item.objectiveValues[1],
@@ -108,7 +109,8 @@ bool read_profile(AccountState& output) noexcept {
                           item.definitionHash,
                           item.quantity,
                           item.mutationSerial,
-                          item.seen)
+                          item.seen,
+                          item.wrappedItemHash)
             || position != output.profileItemCount || position >= output.profileItems.size()) {
             return false;
         }
@@ -163,7 +165,8 @@ bool write_item(Statement& items,
                      item.superAbilityEntry,
                      item.meleeAbilityEntry,
                      item.classAbilityEntry,
-                     item.seen)) {
+                     item.seen,
+                     item.placement)) {
         return false;
     }
     for (std::size_t lane = 0; lane < item.sockets.plugCount; ++lane) {
@@ -197,7 +200,7 @@ bool read_inventory(AccountState& output) noexcept {
 
 /** Inventory rows are replaced inside the account's transaction. */
 bool write_inventory(const AccountState& value) noexcept {
-    Statement items("INSERT INTO items VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)");
+    Statement items("INSERT INTO items VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)");
     Statement sockets("INSERT INTO sockets VALUES (?,?,?)");
     Statement stacks("INSERT INTO character_stacks VALUES (?,?,?,?,?)");
     for (std::size_t owner = 0; owner < value.characterCount; ++owner) {
@@ -226,7 +229,7 @@ bool write_inventory(const AccountState& value) noexcept {
             }
         }
     }
-    Statement profile("INSERT INTO profile_items VALUES (?,?,?,?,?,?)");
+    Statement profile("INSERT INTO profile_items VALUES (?,?,?,?,?,?,?)");
     for (std::size_t position = 0; position < value.profileItemCount; ++position) {
         const auto& item = value.profileItems[position];
         if (!profile.write(position,
@@ -234,7 +237,8 @@ bool write_inventory(const AccountState& value) noexcept {
                            item.definitionHash,
                            item.quantity,
                            item.mutationSerial,
-                           item.seen)) {
+                           item.seen,
+                           item.wrappedItemHash)) {
             return false;
         }
     }

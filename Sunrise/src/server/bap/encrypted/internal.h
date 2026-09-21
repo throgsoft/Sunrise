@@ -63,6 +63,12 @@ struct EquipmentSwapTransaction {
     queuez::EquipmentSwap update{};
 };
 
+/** Identity-preserving Lost Items claim and its promised character revision. */
+struct PostmasterClaimTransaction {
+    std::unique_ptr<state::PendingPostmasterClaim> pending{};
+    queuez::EquipmentSwap update{};
+};
+
 /** Socket mutation and the exact QueueZ after-image promised by its response. */
 
 struct SocketPlugTransaction {
@@ -170,6 +176,11 @@ struct ServiceOutcome {
     /** A Triumph claim changed the account flag bank and its image has to follow. */
 
     bool hasRecordClaim{};
+    /** A local wallet reconciliation committed and owes an account-generation update. */
+    bool hasStoreSync{};
+    std::uint32_t storeSyncRevision{};
+    bool hasPublishedMoteMask{};
+    std::uint16_t publishedMoteMask{};
 
     bool hasArtifactReset{};
 
@@ -200,6 +211,7 @@ struct ServiceOutcome {
                                      std::unique_ptr<queuez::SelectCharacter>,
 
                                      std::unique_ptr<EquipmentSwapTransaction>,
+                                     std::unique_ptr<PostmasterClaimTransaction>,
 
                                      std::unique_ptr<SubclassSelectionTransaction>,
 
@@ -407,6 +419,12 @@ process(const ServiceRoute& route,
 /** Owns server-initiated encrypted frames appended after correlated replies. */
 
 namespace push {
+[[nodiscard]] bool append_postmaster_claim_notification(
+    Scratch& scratch, const queuez::EquipmentSwap& update,
+    const state::PendingPostmasterClaim& mutation,
+    std::span<const std::byte, state::kAesKeySize> key,
+    std::span<const std::byte, state::kBapNonceSize> nonce,
+    std::span<std::byte> response, std::size_t& written) noexcept;
 
 /**
  * Canonicalizes the account before any family builder reads it.
@@ -723,6 +741,8 @@ append_current_activity_notification(Scratch& scratch,
 [[nodiscard]] bool
 
 append_family5_override_notification(Scratch& scratch,
+                                     std::uint16_t previousMoteMask,
+                                     std::uint16_t& publishedMoteMask,
 
                                      std::int32_t version,
 

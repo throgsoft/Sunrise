@@ -7,6 +7,7 @@
 
 #include "../../../../../middleware/bap/frame.h"
 #include "../../../../../middleware/secure_channel/runtime.h"
+#include "../../../capture/bap_capture.h"
 
 namespace sunrise::server::bap::encrypted::push::queuez_frame {
 namespace {
@@ -74,6 +75,12 @@ bool append(Scratch& scratch,
                                          response.subspan(written),
                                          frameSize);
     if (encoded) {
+        capture::record(
+            capture::Kind::notification,
+            static_cast<std::uint16_t>(middleware::bap::NotificationService::queuezUpdate),
+            kNotificationSequence,
+            std::span(scratch.responseBody).first(bodySize),
+            &family);
         written += frameSize;
     }
     clear_prefix(scratch.responseBody, bodySize);

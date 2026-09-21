@@ -22,6 +22,7 @@
 #include "../../state/runtime/runtime.h"
 #include "internal_actions.h"
 #include "vendor/dawning_vendor_actions.h"
+#include "vendor/eververse_vendor_actions.h"
 #include "web_service_actions.h"
 
 namespace sunrise::server::web_service {
@@ -649,6 +650,9 @@ void settle_vendor_row(const middleware::web_service::Message& message,
     if (vendor::intercept_dawning_delivery(
             opcode, vendorIndex, rowIndex, itemDefinitionIndex, outcome))
         return;
+    if (vendor::intercept_eververse_purchase(
+            opcode, vendorIndex, rowIndex, itemDefinitionIndex, outcome))
+        return;
     std::uint16_t rolledBounty = kUnavailableDefinitionIndex;
     if (roll_vendor_bounty(vendorIndex, categoryIndex, rolledBounty)) {
         report_purchase(opcode,
@@ -761,8 +765,8 @@ void acquire_quest(const middleware::web_service::Message& message, Outcome& out
 
 /**
  * Prepares one opcode-901 vendor purchase, for any Tower vendor.
- * The sale row names an item-definition index, so this hands over to the Collections grant.
- * Only a recycle row charges: an ordinary row's cost is read but not yet spent.
+ * Store settles its package sale price through the prepared purchase transaction. Other rows
+ * retain their bounty, exchange, or Collections behavior.
  */
 void purchase_item(const middleware::web_service::Message& message, Outcome& outcome) noexcept {
     namespace purchase = middleware::web_service::messages::opcode901;

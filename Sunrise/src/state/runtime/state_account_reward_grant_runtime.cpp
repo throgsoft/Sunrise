@@ -134,6 +134,14 @@ namespace {
 [[nodiscard]] bool materialize_record_reward(const AccountState& current,
                                              const PendingRecordRewardGrant& mutation,
                                              AccountState& after) noexcept {
+    if (mutation.everversePackage)
+        return eververse::materialize_package_action(current, mutation, after);
+    if (mutation.cosmeticUnlock)
+        return eververse::materialize_unlock(current, mutation, after);
+    if (mutation.brightEngramRedemption)
+        return bright_engrams::materialize_redemption(current, mutation, after);
+    if (mutation.everversePurchase)
+        return eververse::materialize_purchase(current, mutation, after);
     if (mutation.pursuitRedemption)
         return bounty::materialize_redemption_grant(current, mutation, after);
     if (mutation.dawningDelivery) return dawning::materialize_delivery(current, mutation, after);
@@ -262,7 +270,8 @@ bool runtime::detail::stage_record_reward_grant(const AccountState& account,
     for (std::size_t index = 0; index < rewards.size(); ++index) {
         const DirectRecordReward& requested = rewards[index];
         PreparedRecordReward material{};
-        const auto materialResult = dawning::stage_reward(requested, mutation, material);
+        const auto materialResult = dawning::stage_reward(
+            working.characters[characterIndex], requested, mutation, material);
         if (materialResult == dawning::MaterialReward::refused) return false;
         if (materialResult == dawning::MaterialReward::staged) {
             mutation.rewards[index] = material;
@@ -419,6 +428,10 @@ bool preview_record_reward_grant(const PendingRecordRewardGrant& mutation,
 /** Commits the shared reward after-image and claim together. */
 bool commit_record_reward(PendingRecordRewardGrant& mutation) noexcept {
     const PendingConsumption consume{mutation};
+    if (mutation.everversePackage) return eververse::commit_package_action(mutation);
+    if (mutation.cosmeticUnlock) return eververse::commit_unlock(mutation);
+    if (mutation.brightEngramRedemption) return bright_engrams::commit_redemption(mutation);
+    if (mutation.everversePurchase) return eververse::commit_purchase(mutation);
     if (mutation.pursuitRedemption) return bounty::commit_redemption_grant(mutation);
     const bool ready = [&]() noexcept {
         investment::store::Transaction transaction;

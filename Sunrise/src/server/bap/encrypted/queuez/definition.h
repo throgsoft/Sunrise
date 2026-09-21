@@ -65,6 +65,8 @@ struct SessionState {
     std::int32_t family0Version{};
     /** Every family-five publication is a full snapshot, so its version only has to move. */
     std::int32_t family5Version{};
+    /** Mote predicates actually published to this peer, for explicit removal clears. */
+    std::uint16_t publishedMoteMask{};
     std::uint16_t family4ResidentCount{};
     Family3Phase family3Phase{Family3Phase::normal};
     bool family4Active{};

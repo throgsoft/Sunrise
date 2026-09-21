@@ -246,6 +246,8 @@ bool preview_socket_plug(const PendingSocketPlug& mutation, AccountState& after)
         || canonical.targetEquipped != mutation.targetEquipped
         || canonical.beforeDawning != mutation.beforeDawning
         || canonical.afterDawning != mutation.afterDawning
+        || canonical.beforeChalice != mutation.beforeChalice
+        || canonical.afterChalice != mutation.afterChalice
         || !same_character(canonical.beforeCharacter, mutation.beforeCharacter)
         || !same_character(canonical.afterCharacter, mutation.afterCharacter)) {
         return false;
@@ -258,7 +260,8 @@ bool preview_socket_plug(const PendingSocketPlug& mutation, AccountState& after)
     const bool balancesChanged = !same_profile_inventory(
         after, mutation.beforeProfileItems, mutation.expectedProfileItemCount);
     family4_loadout::ResolvedLoadout resolved{};
-    return balancesChanged == mutation.profileChanged
+    const bool chaliceChanged = canonical.beforeChalice != canonical.afterChalice;
+    return (balancesChanged || chaliceChanged) == mutation.profileChanged
            && same_profile_inventory(
                after, mutation.afterProfileItems, mutation.afterProfileItemCount)
            && account::valid(after) && valid_profile_inventory(after)
@@ -356,6 +359,8 @@ bool commit_socket_plug(PendingSocketPlug& mutation) noexcept {
         || canonical.targetEquipped != prepared.targetEquipped
         || canonical.beforeDawning != prepared.beforeDawning
         || canonical.afterDawning != prepared.afterDawning
+        || canonical.beforeChalice != prepared.beforeChalice
+        || canonical.afterChalice != prepared.afterChalice
         || !same_character(canonical.beforeCharacter, prepared.beforeCharacter)
         || !same_character(canonical.afterCharacter, prepared.afterCharacter)) {
         investment::store::g_mutex.unlock();
@@ -379,6 +384,9 @@ bool commit_socket_plug(PendingSocketPlug& mutation) noexcept {
     if ((canonical.beforeDawning.has_value() != canonical.afterDawning.has_value())
         || (canonical.beforeDawning
             && !dawning::write(*canonical.beforeDawning, *canonical.afterDawning))
+        || (canonical.beforeChalice.has_value() != canonical.afterChalice.has_value())
+        || (canonical.beforeChalice
+            && !chalice::write(*canonical.beforeChalice, *canonical.afterChalice))
         || !investment::store::write_account(candidate) || !transaction.commit()) {
         investment::store::g_mutex.unlock();
         return false;

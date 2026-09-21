@@ -32,7 +32,6 @@
 #include "../hooks/stall_probe/stall_probe.h"
 #include "../hooks/teleport/runtime.h"
 #include "../hooks/world_objects/world_object_registry.h"
-#include "../material_toast/feedback.h"
 #include "../movement/movement_settings_store.h"
 #include "../player/player_settings_store.h"
 #include "../targets/game.h"
@@ -188,7 +187,6 @@ bool shutdown() noexcept {
     content::activity::sdk_generation::reset();
     content::activity::scriptables::reset();
     server::bap::unregister_client_investment_consumers();
-    material_toast::shutdown();
     content::investment::worker::reset();
     (void)hooks::async_io::uninstall();
     targets::steam::clear();

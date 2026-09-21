@@ -59,8 +59,15 @@ inline constexpr std::size_t kCharacterValueCapacity = 256;
 inline constexpr std::size_t kProfileUnlockFlagCapacity = 512;
 /** Opaque records separate the per-character blocks from the profile unlock bank. */
 inline constexpr std::size_t kUnlockProfilePaddingSize = 2'424;
-/** Opaque records follow the profile unlock bank to the end of the object. */
-inline constexpr std::size_t kProfileFlagsTailPaddingSize = 21'384;
+/** Reserved bytes separate profile unlock flags from the Store sync revision. */
+inline constexpr std::size_t kProfileFlagsStoreSyncPaddingSize = 12;
+/** Opaque records separate Store sync state from the native purchase-receipt bank. */
+inline constexpr std::size_t kStoreSyncReceiptPaddingSize = 13'327;
+/** The native bank reserves 30 stable receipt slots, each with up to six return items. */
+inline constexpr std::size_t kPurchaseReceiptCapacity = 30;
+inline constexpr std::size_t kPurchaseReceiptReturnCapacity = 6;
+/** Opaque account records follow the complete receipt bank. */
+inline constexpr std::size_t kPurchaseReceiptTailPaddingSize = 1'552;
 /** The complete native Family-4 account object occupies 96,280 bytes. */
 inline constexpr std::size_t kObjectSize = 96'280;
 /** The account key starts the native Family-4 account object. */
@@ -99,6 +106,12 @@ inline constexpr std::size_t kObjectiveValuesOffset = 42'040;
 inline constexpr std::size_t kCharacterUnlocksOffset = 66'840;
 /** The profile unlock bank follows the opaque records after the per-character blocks. */
 inline constexpr std::size_t kProfileUnlockFlagsOffset = 74'384;
+/** Native account observer E078F0 compares this counter before completing Store sync. */
+inline constexpr std::size_t kStoreSyncRevisionOffset = 74'908;
+/** Native C8EF80 reads the Store sync state as a signed byte. */
+inline constexpr std::size_t kStoreSyncStateOffset = 74'912;
+/** Native receipt lookup scans 30 records beginning eight bytes after this bank header. */
+inline constexpr std::size_t kPurchaseReceiptsOffset = 88'240;
 
 #pragma pack(push, 1)
 
@@ -126,6 +139,42 @@ struct ProfileInventoryChangeList {
     std::uint16_t writeSlot{};
     std::uint16_t nextSequence{};
     std::array<ProfileInventoryChangeRecord, kProfileInventoryChangeRecordCapacity> records{};
+};
+
+/** Native receipt tuple; unlike an inventory row, it has no mutation metadata. */
+struct PurchaseReceiptItem {
+    std::uint16_t definitionIndex{0xFFFFU};
+    std::array<std::byte, 6> definitionPadding{};
+    std::uint64_t instanceSoid{};
+    std::int32_t quantity{};
+    std::array<std::byte, 4> quantityPadding{};
+};
+
+/** Native class 80807869. Kind 1 matches the source SOID; kind 0 marks an empty slot. */
+struct PurchaseReceipt {
+    std::int32_t returnItemCount{};
+    std::array<std::byte, 4> countPadding{};
+    std::array<PurchaseReceiptItem, kPurchaseReceiptReturnCapacity> returnItems{};
+    std::uint8_t kind{};
+    std::array<std::byte, 7> kindPadding{};
+    PurchaseReceiptItem source{};
+    /** Used by kind 2; kind 1 retains the native absent-selector sentinel. */
+    std::uint16_t secondarySelector{0xFFFFU};
+    std::array<std::byte, 2> selectorPadding{};
+    std::int32_t unknownValue{};
+    /** Absolute seconds in the same clock domain as the client's current-time value. */
+    std::int64_t expiresAt{};
+    /** Purchase character; profile-inventory cleanup skips the character identity comparison. */
+    std::uint64_t characterSoid{};
+    std::uint8_t unknownEnum{};
+    std::array<std::byte, 7> tailPadding{};
+};
+
+/** Native class 80807866. Lookup uses receipt kinds, not this unknown header, for occupancy. */
+struct PurchaseReceiptBank {
+    std::int32_t unknownHeader{};
+    std::array<std::byte, 4> headerPadding{};
+    std::array<PurchaseReceipt, kPurchaseReceiptCapacity> records{};
 };
 
 /** Byte-exact Family-4 account object generated from State. */
@@ -162,7 +211,12 @@ struct Object {
     std::array<CharacterUnlockBlock, kUnlockCharacterCapacity> characterUnlocks{};
     std::array<std::byte, kUnlockProfilePaddingSize> unlockProfilePadding{};
     std::array<std::uint8_t, kProfileUnlockFlagCapacity> profileUnlockFlags{};
-    std::array<std::byte, kProfileFlagsTailPaddingSize> profileFlagsTailPadding{};
+    std::array<std::byte, kProfileFlagsStoreSyncPaddingSize> profileFlagsStoreSyncPadding{};
+    std::uint32_t storeSyncRevision{};
+    std::int8_t storeSyncState{};
+    std::array<std::byte, kStoreSyncReceiptPaddingSize> storeSyncReceiptPadding{};
+    PurchaseReceiptBank purchaseReceipts{};
+    std::array<std::byte, kPurchaseReceiptTailPaddingSize> purchaseReceiptTailPadding{};
 };
 
 #pragma pack(pop)
@@ -190,6 +244,8 @@ static_assert(offsetof(Object, acquiredFlags) == kAcquiredFlagsOffset);
 static_assert(offsetof(Object, objectiveValues) == kObjectiveValuesOffset);
 static_assert(offsetof(Object, characterUnlocks) == kCharacterUnlocksOffset);
 static_assert(offsetof(Object, profileUnlockFlags) == kProfileUnlockFlagsOffset);
+static_assert(offsetof(Object, storeSyncRevision) == kStoreSyncRevisionOffset);
+static_assert(offsetof(Object, storeSyncState) == kStoreSyncStateOffset);
 static_assert(sizeof(CharacterUnlockBlock)
               == kCharacterFlagCapacity + kCharacterValueCapacity * sizeof(std::int32_t));
 static_assert(sizeof(ProfileInventoryChangeRecord)

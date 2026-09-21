@@ -105,6 +105,12 @@ struct Definition {
     std::uint16_t definitionIndex{};
     /** The definition's own hash, which the character record collects for its overflow bank. */
     std::uint32_t definitionHash{};
+    /** Native acquired unlock slot, or 0xFFFF when this item declares none. */
+    std::uint16_t acquiredFlagSlot{0xFFFFU};
+    /** Native +D8 acquire-effect reference: unknown until read, FFFF means absent. */
+    std::optional<std::uint16_t> acquireEffectIndex{};
+    /** Account acquired-flag bank index, or 0xFFFF when the slot has no account mapping. */
+    std::uint16_t acquiredAccountFlag{0xFFFFU};
     std::uint8_t bucketId{};
     std::int32_t maxStackSize{};
     InstancedDefinitionState instancedDefinitionState{InstancedDefinitionState::stackable};

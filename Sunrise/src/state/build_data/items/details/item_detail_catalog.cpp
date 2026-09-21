@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "../../table.h"
+#include "../../../unlocks/definition.h"
 #include "../item_catalog.h"
 #include "core/threading/srw_lock.h"
 
@@ -87,6 +88,11 @@ static_assert(kDefinitionCapacity < kEmptyLookupRow);
            && std::all_of(definition.rewards.begin(),
                           definition.rewards.begin() + definition.rewardCount,
                           [](const Reward& row) { return row.quantity >= 0; })
+           && (definition.acquiredFlagSlot == 0xFFFFU
+               || definition.acquiredFlagSlot <= INT16_MAX)
+           && (definition.acquiredAccountFlag == 0xFFFFU
+               || (definition.acquiredFlagSlot != 0xFFFFU
+                   && definition.acquiredAccountFlag < unlocks::kAccountFlagCapacity))
            && definition.lifetimeSeconds >= 0
            && std::all_of(definition.objectiveIndices.begin() + definition.objectiveCount,
                           definition.objectiveIndices.end(),

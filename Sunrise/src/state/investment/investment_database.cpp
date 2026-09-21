@@ -79,7 +79,53 @@ bool Statement::text(int column, std::string_view& value) const noexcept {
     return true;
 }
 
-/** New databases receive schema and defaults in one durable transaction. */
+namespace {
+/** Rebuild only the constrained parent table; sockets and objective identities remain intact. */
+bool migrate_postmaster_storage() noexcept {
+    // SQLite cannot change foreign_keys inside a savepoint. The open-time mutex is held and
+    // no account readers exist yet; restore enforcement after the savepoint ends on either path.
+    if (!execute("PRAGMA foreign_keys=OFF")) return false;
+    const bool migrated = []() noexcept {
+        Transaction transaction;
+        if (!transaction.ready() || !execute(R"sql(
+CREATE TABLE items_postmaster_migration (
+    character_slot INTEGER NOT NULL REFERENCES characters(slot),
+    location INTEGER NOT NULL CHECK (location IN (0, 1)),
+    position INTEGER NOT NULL CHECK (position >= 0),
+    instance_soid INTEGER NOT NULL UNIQUE,
+    definition_hash INTEGER NOT NULL CHECK (definition_hash BETWEEN 1 AND 4294967295),
+    level INTEGER NOT NULL,
+    quantity INTEGER NOT NULL CHECK (quantity > 0),
+    mutation_serial INTEGER NOT NULL CHECK (mutation_serial >= 0),
+    flags INTEGER NOT NULL CHECK (flags BETWEEN 0 AND 7),
+    socket_policy INTEGER NOT NULL CHECK (socket_policy IN (0, 1)),
+    plug_count INTEGER NOT NULL CHECK (plug_count BETWEEN 0 AND 12),
+    movement_ability INTEGER NOT NULL,
+    grenade_ability INTEGER NOT NULL,
+    super_ability INTEGER NOT NULL,
+    melee_ability INTEGER NOT NULL,
+    class_ability INTEGER NOT NULL,
+    seen INTEGER NOT NULL CHECK (seen IN (0, 1)),
+    placement INTEGER NOT NULL DEFAULT 0 CHECK (placement IN (0, 1)),
+    PRIMARY KEY (character_slot, location, position),
+    CHECK ((location = 0 AND position < 17 AND placement = 0)
+           OR (location = 1 AND position < 156)),
+    CHECK (placement = 0 OR quantity = 1)
+) STRICT;
+INSERT INTO items_postmaster_migration SELECT items.*, 0 FROM items;
+DROP TABLE items;
+ALTER TABLE items_postmaster_migration RENAME TO items;
+PRAGMA user_version=8;
+)sql")) return false;
+        Statement foreignKeys("PRAGMA foreign_key_check");
+        return foreignKeys.step() == SQLITE_DONE && transaction.commit();
+    }();
+    const bool enforced = execute("PRAGMA foreign_keys=ON");
+    return migrated && enforced;
+}
+} // namespace
+
+/** New databases receive schema and defaults, followed by the same versioned migrations. */
 bool open(std::string_view path,
           std::string_view schema,
           std::string_view defaults,
@@ -120,7 +166,7 @@ bool open(std::string_view path,
                 && transaction.commit();
     } else if (ready) {
         // Version 2 adds account preferences and per-item seen state.
-        constexpr int kSchemaVersion = 5;
+        constexpr int kSchemaVersion = 10;
         constexpr int kApplicationId = 1397902921;
         int application = 0;
         Statement query("PRAGMA application_id");
@@ -185,6 +231,86 @@ bool open(std::string_view path,
                        "PRIMARY KEY(epoch,session,revision,player,sequence)) STRICT, WITHOUT ROWID;"
                        "PRAGMA user_version=5;")
             && transaction.commit();
+    }
+    if (ready && version >= 1 && version <= 5) {
+        Transaction transaction;
+        ready = transaction.ready()
+                && execute(
+                    "CREATE TABLE cosmetic_acquisitions("
+                    "account_soid INTEGER NOT NULL CHECK(account_soid<>0),"
+                    "item_hash INTEGER NOT NULL CHECK(item_hash BETWEEN 1 AND 4294967295),"
+                    "PRIMARY KEY(account_soid,item_hash)) STRICT, WITHOUT ROWID;"
+                    "CREATE TABLE eververse_purchases("
+                    "account_soid INTEGER NOT NULL CHECK(account_soid<>0),"
+                    "vendor_hash INTEGER NOT NULL CHECK(vendor_hash BETWEEN 1 AND 4294967295),"
+                    "sale_index INTEGER NOT NULL CHECK(sale_index BETWEEN 0 AND 65535),"
+                    "item_hash INTEGER NOT NULL CHECK(item_hash BETWEEN 1 AND 4294967295),"
+                    "purchases INTEGER NOT NULL CHECK(purchases BETWEEN 1 AND 2147483647),"
+                    "PRIMARY KEY(account_soid,vendor_hash,sale_index,item_hash)) STRICT, WITHOUT ROWID;"
+                    "PRAGMA user_version=6;")
+                && transaction.commit();
+    }
+    if (ready && version >= 1 && version <= 6) {
+        Transaction transaction;
+        ready = transaction.ready()
+                && execute("CREATE TABLE eververse_wallet_sync("
+                           "account_soid INTEGER PRIMARY KEY CHECK(account_soid<>0),"
+                           "revision INTEGER NOT NULL CHECK(revision BETWEEN 1 AND 4294967295)"
+                           ") STRICT, WITHOUT ROWID; PRAGMA user_version=7;")
+                && transaction.commit();
+    }
+    // The bundled bootstrap stays compatible with its positional seed inserts. Fresh databases
+    // and upgraded databases both pass through the v7 -> v8 placement migration here.
+    if (ready) {
+        int currentVersion = -1;
+        {
+            Statement query("PRAGMA user_version");
+            ready = query.step() == SQLITE_ROW && query.column(0, currentVersion);
+        }
+        if (ready && currentVersion == 7) {
+            ready = migrate_postmaster_storage();
+            currentVersion = 8;
+        }
+        if (ready && currentVersion == 8) {
+            Transaction transaction;
+            ready = transaction.ready()
+                && execute("CREATE TABLE dawning_pickup_queue("
+                           "id INTEGER PRIMARY KEY AUTOINCREMENT,"
+                           "character_soid INTEGER NOT NULL CHECK(character_soid<>0),"
+                           "definition_hash INTEGER NOT NULL CHECK(definition_hash BETWEEN 1 AND 4294967295),"
+                           "quantity INTEGER NOT NULL CHECK(quantity BETWEEN 1 AND 2147483647)"
+                           ") STRICT; PRAGMA user_version=9;")
+                && transaction.commit();
+            currentVersion = 9;
+        }
+        if (ready && currentVersion == 9) {
+            Transaction transaction;
+            ready = transaction.ready()
+                && execute("ALTER TABLE profile_items ADD COLUMN wrapped_item_hash INTEGER NOT NULL "
+                           "DEFAULT 0 CHECK(wrapped_item_hash BETWEEN 0 AND 4294967295);"
+                           "CREATE TABLE eververse_receipts("
+                           "account_soid INTEGER NOT NULL CHECK(account_soid<>0),"
+                           "source_soid INTEGER NOT NULL CHECK(source_soid>0),"
+                           "character_soid INTEGER NOT NULL CHECK(character_soid<>0),"
+                           "wrapper_hash INTEGER NOT NULL CHECK(wrapper_hash BETWEEN 1 AND 4294967295),"
+                           "item_hash INTEGER NOT NULL CHECK(item_hash BETWEEN 1 AND 4294967295),"
+                           "currency_hash INTEGER NOT NULL CHECK(currency_hash BETWEEN 1 AND 4294967295),"
+                           "cost INTEGER NOT NULL CHECK(cost BETWEEN 1 AND 2147483647),"
+                           "vendor_index INTEGER NOT NULL CHECK(vendor_index BETWEEN 0 AND 65535),"
+                           "sale_index INTEGER NOT NULL CHECK(sale_index BETWEEN 0 AND 65535),"
+                           "purchased_at INTEGER NOT NULL CHECK(purchased_at>0),"
+                           "expires_at INTEGER NOT NULL CHECK(expires_at>purchased_at),"
+                           "slot INTEGER NOT NULL CHECK(slot BETWEEN 0 AND 29),"
+                           "state INTEGER NOT NULL CHECK(state BETWEEN 0 AND 2),"
+                           "PRIMARY KEY(account_soid,source_soid)"
+                           ") STRICT, WITHOUT ROWID;"
+                           "CREATE UNIQUE INDEX eververse_active_receipt_slot "
+                           "ON eververse_receipts(account_soid,slot) WHERE state=0;"
+                           "PRAGMA user_version=10;")
+                && transaction.commit();
+            currentVersion = 10;
+        }
+        if (ready && currentVersion != 10) ready = false;
     }
     if (!ready) {
         shutdown();

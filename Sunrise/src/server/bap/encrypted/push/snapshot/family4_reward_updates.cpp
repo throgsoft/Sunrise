@@ -6,9 +6,11 @@
 #include <optional>
 #include <span>
 
+#include "../../../../../core/logging/log.h"
 #include "../../../../../middleware/datagen/definitions.h"
 #include "../../../../../middleware/datagen/family4/account/account_encoder.h"
 #include "../../../../../middleware/datagen/family4/account/layout.h"
+#include "../../../../../middleware/datagen/family4/account/purchase_receipts.h"
 #include "../../../../../middleware/datagen/family4/character/character_encoder.h"
 #include "../../../../../middleware/datagen/family4/character/layout.h"
 #include "../../../../../state/build_data/runtime.h"
@@ -21,6 +23,69 @@
 namespace sunrise::server::bap::encrypted::push::snapshot {
 
 namespace family4_datagen = middleware::datagen::family4;
+
+namespace {
+/** Definition/socket replacements retain their QueueZ key but need a new instance payload. */
+bool append_changed_inventory_instances(
+    const state::CharacterState& beforeCharacter,
+    const state::CharacterState& afterCharacter,
+    const queuez::SessionState& beforeSession,
+    const queuez::SessionState& afterSession,
+    std::uint32_t instanceDefinitionId,
+    const family4_datagen::loadout::ResolvedLoadout& loadout,
+    family4_datagen::loadout::ResolvedInstances& output) noexcept {
+    if (beforeCharacter.inventory.count > beforeCharacter.inventory.values.size()
+        || afterCharacter.inventory.count > afterCharacter.inventory.values.size()
+        || beforeSession.family4ResidentCount > beforeSession.family4Residents.size()
+        || afterSession.family4ResidentCount > afterSession.family4Residents.size()
+        || loadout.itemCount > loadout.items.size() || output.itemCount > output.items.size())
+        return false;
+    for (std::size_t i = 0; i < afterCharacter.inventory.count; ++i) {
+        const auto& held = afterCharacter.inventory.values[i];
+        const state::account::inventory::Item* prior = nullptr;
+        for (std::size_t j = 0; j < beforeCharacter.inventory.count; ++j) {
+            const auto& candidate = beforeCharacter.inventory.values[j];
+            if (candidate.instanceSoid != held.instanceSoid) continue;
+            if (prior) return false;
+            prior = &candidate;
+        }
+        if (!prior
+            || (held.definitionHash == prior->definitionHash
+                && held.sockets.policy == prior->sockets.policy
+                && held.sockets.plugCount == prior->sockets.plugCount
+                && held.sockets.plugs == prior->sockets.plugs))
+            continue;
+        const auto resident_matches = [&](const queuez::SessionState& session) noexcept {
+            std::size_t matches = 0;
+            for (std::size_t j = 0; j < session.family4ResidentCount; ++j) {
+                const auto& resident = session.family4Residents[j];
+                if (resident.objectSoid == held.instanceSoid
+                    && resident.definitionId == instanceDefinitionId)
+                    ++matches;
+            }
+            return matches == 1;
+        };
+        if (!resident_matches(beforeSession) || !resident_matches(afterSession)) return false;
+        // An objective update may already have appended this survivor's complete after-image.
+        bool present = false;
+        for (std::size_t j = 0; j < output.itemCount; ++j)
+            present |= output.items[j].instance.instanceSoid == held.instanceSoid;
+        if (present) continue;
+        bool found = false;
+        for (std::size_t j = 0; j < loadout.itemCount; ++j) {
+            const auto& item = loadout.items[j];
+            if (item.instance.instanceSoid != held.instanceSoid) continue;
+            if (found || item.equipped || item.mutationSerial != held.mutationSerial
+                || output.itemCount == output.items.size())
+                return false;
+            output.items[output.itemCount++] = {item.equipmentSlot, item.instance};
+            found = true;
+        }
+        if (!found) return false;
+    }
+    return true;
+}
+} // namespace
 
 /** Builds one atomic Season package update with one acquisition record per granted item. */
 bool prepare_season_pass_package(
@@ -218,12 +283,10 @@ bool prepare_record_reward_grant(
     Prepared& prepared) noexcept {
     namespace account_layout = family4_datagen::account::layout;
     namespace character_layout = family4_datagen::character::layout;
-    const auto released =
-        mutation.pursuitRedemption && mutation.pursuitRedemption->expectedQuantity == 1
-            ? mutation.pursuitRedemption->sourceInstanceSoid
-            : 0;
+    const auto released = state::released_reward_source(mutation);
     const std::size_t removed = released != 0;
-    if (!mutation.prepared || (mutation.rewardCount == 0 && !mutation.pursuitRedemption)
+    if (!mutation.prepared
+        || (mutation.rewardCount == 0 && !mutation.pursuitRedemption && !mutation.cosmeticUnlock)
         || mutation.rewardCount > mutation.rewards.size() || !queuez::valid(before)
         || !queuez::valid(update.after) || !before.family4Active || before.family4ResidentCount == 0
         || before.family4Version == (std::numeric_limits<std::int32_t>::max)()
@@ -250,19 +313,6 @@ bool prepare_record_reward_grant(
         || selected.characterObjectId != update.characterDefinitionId
         || selected.itemInstanceObjectId != update.itemInstanceDefinitionId) {
         return report_failure("record_reward_account");
-    }
-
-    const auto* rankCredits = mutation.pursuitRedemption ? &*mutation.pursuitRedemption : nullptr;
-    bool presentsRank = false;
-    if (rankCredits) {
-        if (rankCredits->rankCount > rankCredits->ranks.size())
-            return report_failure("record_reward_rank_count");
-        for (std::size_t i = 0; i < rankCredits->rankCount; ++i) {
-            const auto& credit = rankCredits->ranks[i];
-            if (credit.before < 0 || credit.after < credit.before)
-                return report_failure("record_reward_rank_delta");
-            presentsRank |= credit.after > credit.before;
-        }
     }
 
     family4_datagen::loadout::ResolvedInstances residents{};
@@ -325,6 +375,14 @@ bool prepare_record_reward_grant(
     if (!dawning::append_changed_objectives(
             mutation.beforeCharacter, mutation.afterCharacter, selected.loadout, residents))
         return report_failure("record_reward_objective_items");
+    if (!append_changed_inventory_instances(mutation.beforeCharacter,
+                                             mutation.afterCharacter,
+                                             before,
+                                             update.after,
+                                             update.itemInstanceDefinitionId,
+                                             selected.loadout,
+                                             residents))
+        return report_failure("record_reward_changed_instances");
 
     const Reservation reservation = reserve_prior(scratch, prepared);
     if (reservation.rawWriteOffset > scratch.plaintext.size()
@@ -415,6 +473,8 @@ bool prepare_record_reward_grant(
         change.flags = kChangeFlags;
         ++characterChanges;
     }
+    // Ingredient balances commit here. Their durable pickup queue publishes separately
+    // after the native FIFO has room, with one acquisition record per actual row.
     characterObject.inventoryChanges.writeSlot = static_cast<std::uint16_t>(characterChanges);
     characterObject.inventoryChanges.nextSequence = static_cast<std::uint16_t>(characterChanges);
     if (!apply_acquisition_presentation(
@@ -422,29 +482,11 @@ bool prepare_record_reward_grant(
         clear_after(scratch, reservation);
         return report_failure("record_reward_presentation");
     }
-    if (rankCredits) {
-        for (std::size_t i = 0; i < rankCredits->rankCount; ++i) {
-            const auto& credit = rankCredits->ranks[i];
-            if (credit.after == credit.before) continue;
-            if (credit.presentationSerial < 0
-                || static_cast<std::uint32_t>(credit.presentationSerial)
-                       < mutation.beforeCharacter.nextInventorySerial
-                || static_cast<std::uint32_t>(credit.presentationSerial)
-                       >= character.nextInventorySerial
-                || !append_transient_reward_presentation(characterBytes,
-                                                         credit.markerHash,
-                                                         credit.after - credit.before,
-                                                         credit.presentationSerial)) {
-                clear_after(scratch, reservation);
-                return report_failure("record_reward_rank_presentation");
-            }
-        }
-    }
     if (!append_object(scratch,
                        characterBytes,
                        update.characterDefinitionId,
                        update.characterSoid,
-                       staged.objects[residentCursor + (presentsRank ? 1U : 0U)],
+                       staged.objects[residentCursor],
                        compressedExtent)) {
         clear_after(scratch, reservation);
         return report_failure("record_reward_character_object");
@@ -456,26 +498,16 @@ bool prepare_record_reward_grant(
         return report_failure("record_reward_account_encode");
     }
     auto& accountObject = *reinterpret_cast<account_layout::Object*>(accountBytes.data());
-    // Preview precedes the authoritative commit. Project its exact rank after-image in this
-    // frame, before the temporary pickup row; the deferred resync then carries the same value.
-    if (rankCredits) {
-        for (std::size_t i = 0; i < rankCredits->rankCount; ++i) {
-            const auto& credit = rankCredits->ranks[i];
-            std::size_t matches = 0;
-            for (auto& progression : accountObject.progressions) {
-                if (progression.definitionIndex != credit.index) continue;
-                if (progression.values[0] != credit.before) {
-                    clear_after(scratch, reservation);
-                    return report_failure("record_reward_rank_before");
-                }
-                progression.values[0] = credit.after;
-                ++matches;
-            }
-            if (matches != 1) {
-                clear_after(scratch, reservation);
-                return report_failure("record_reward_rank_definition");
-            }
-        }
+    if (!family4_datagen::account::project_purchase_receipts(mutation.accountSoid, accountObject, &mutation)
+        || !state::visit_reward_ownership(mutation, [&](const state::eververse::NativeOwnership& ownership) {
+            if (!ownership.prepared || ownership.accountFlag >= accountObject.acquiredFlags.size()
+                || accountObject.acquiredFlags[ownership.accountFlag] != ownership.before)
+                return false;
+            accountObject.acquiredFlags[ownership.accountFlag] = ownership.after;
+            return true;
+        })) {
+        clear_after(scratch, reservation);
+        return report_failure("record_reward_ownership");
     }
     if (mutation.afterDawning && !dawning::project_banks(*mutation.afterDawning, accountObject)) {
         clear_after(scratch, reservation);
@@ -532,7 +564,7 @@ bool prepare_record_reward_grant(
                        accountBytes,
                        update.accountDefinitionId,
                        update.accountSoid,
-                       staged.objects[residentCursor + (presentsRank ? 0U : 1U)],
+                       staged.objects[residentCursor + 1U],
                        compressedExtent)) {
         clear_after(scratch, reservation);
         return report_failure("record_reward_account_object");
@@ -554,6 +586,11 @@ bool prepare_record_reward_grant(
         clear_after(scratch, reservation);
         return report_failure("record_reward_commit");
     }
+    if (mutation.afterDawning)
+        core::log::writef(core::log::Channel::server, core::log::Level::info,
+                          "ev=dawning_pickup stage=queued revision=%d character_changes=%zu "
+                          "source=durable_queue",
+                          update.after.family4Version, characterChanges);
     return true;
 }
 

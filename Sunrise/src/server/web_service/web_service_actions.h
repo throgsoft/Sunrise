@@ -6,6 +6,8 @@
 #include "web_service_runtime.h"
 
 namespace sunrise::server::web_service {
+void claim_postmaster_item(const middleware::web_service::Message& message,
+                           Outcome& outcome) noexcept;
 
 void select_character(const middleware::web_service::Message& message, Outcome& outcome) noexcept;
 void mutate_equipment(const middleware::web_service::Message& message,
@@ -24,6 +26,8 @@ void dismantle_item(const middleware::web_service::Message& message, Outcome& ou
 void acquire_item(const middleware::web_service::Message& message, Outcome& outcome) noexcept;
 void purchase_item(const middleware::web_service::Message& message, Outcome& outcome) noexcept;
 void acquire_quest(const middleware::web_service::Message& message, Outcome& outcome) noexcept;
+/** Prepares Store redemption; the shared publication path owns the revision and final commit. */
+void redeem_bright_engram(const middleware::web_service::Message& message, Outcome& outcome) noexcept;
 
 /** Persists an opcode-1801 Triumph claim and prepares its optional reward. */
 void claim_record(const middleware::web_service::Message& message, Outcome& outcome) noexcept;

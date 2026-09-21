@@ -9,6 +9,9 @@
 
 #include "../account/inventory/dawning_oven_state.h"
 #include "../build_data/records/definition.h"
+#include "bright_engram_runtime.h"
+#include "chalice_crafting_runtime.h"
+#include "eververse_runtime.h"
 #include "state.h"
 
 namespace sunrise::state::account::settings {
@@ -243,9 +246,6 @@ struct PursuitRedemptionContext {
     struct RankCredit {
         std::uint16_t index{};
         std::int32_t before{}, after{};
-        /** Nonresident pickup identity and a serial reserved only for a positive bank delta. */
-        std::uint32_t markerHash{};
-        std::int32_t presentationSerial{};
         bool operator==(const RankCredit&) const = default;
     };
     std::array<RankCredit, 2> ranks{};
@@ -259,6 +259,10 @@ struct PursuitRedemptionContext {
 
 /** Record claim or pursuit consumption and all reward rows committed as one transaction. */
 struct PendingRecordRewardGrant {
+    std::optional<bright_engrams::RedemptionContext> brightEngramRedemption{};
+    std::optional<eververse::PurchaseContext> everversePurchase{};
+    std::optional<eververse::UnlockContext> cosmeticUnlock{};
+    std::optional<eververse::PackageActionContext> everversePackage{};
     std::optional<PursuitRedemptionContext> pursuitRedemption{};
     std::optional<account::inventory::dawning::DeliveryContext> dawningDelivery{};
     std::optional<account::inventory::dawning::State> beforeDawning{}, afterDawning{};
@@ -279,6 +283,40 @@ struct PendingRecordRewardGrant {
     std::size_t rewardCount{};
     bool prepared{};
 };
+
+/** Resident identity consumed by this transaction, if the entire source is removed. */
+[[nodiscard]] inline std::uint64_t released_reward_source(
+    const PendingRecordRewardGrant& mutation) noexcept {
+    if (mutation.cosmeticUnlock) return mutation.cosmeticUnlock->sourceInstanceSoid;
+    if (mutation.everversePackage) return mutation.everversePackage->receipt.sourceInstanceSoid;
+    if (mutation.brightEngramRedemption)
+        return mutation.brightEngramRedemption->sourceInstanceSoid;
+    if (mutation.pursuitRedemption && mutation.pursuitRedemption->expectedQuantity == 1)
+        return mutation.pursuitRedemption->sourceInstanceSoid;
+    return 0;
+}
+
+/** Native acquisition after-image for the account object published with the item change. */
+[[nodiscard]] inline const eververse::NativeOwnership* reward_ownership(
+    const PendingRecordRewardGrant& mutation) noexcept {
+    if (mutation.cosmeticUnlock) return &mutation.cosmeticUnlock->ownership;
+    if (mutation.everversePackage && mutation.everversePackage->ownership.prepared)
+        return &mutation.everversePackage->ownership;
+    if (mutation.brightEngramRedemption) return &mutation.brightEngramRedemption->ownership;
+    if (mutation.everversePurchase && mutation.everversePurchase->ownership.prepared)
+        return &mutation.everversePurchase->ownership;
+    return nullptr;
+}
+
+/** Visits every acquisition flag; the original single-flag lookup remains the routing signal. */
+template <typename Visitor>
+[[nodiscard]] bool visit_reward_ownership(const PendingRecordRewardGrant& mutation,
+                                          Visitor&& visitor) noexcept {
+    if (mutation.everversePurchase)
+        return eververse::visit_purchase_ownership(*mutation.everversePurchase, visitor);
+    const auto* ownership = reward_ownership(mutation);
+    return !ownership || visitor(*ownership);
+}
 
 /** One uncommitted Season reward and the exact native row or bundle it will claim. */
 struct PendingSeasonPassReward {
@@ -339,17 +377,18 @@ struct PendingItemDismantle {
     bool prepared{};
 };
 
-/** Prepared ordinary-socket selection for one selected-character item instance. */
+/** Prepared socket selection or material exchange for one selected-character item instance. */
 struct PendingSocketPlug {
     std::optional<account::inventory::dawning::State> beforeDawning{}, afterDawning{};
+    std::optional<runtime::detail::chalice::State> beforeChalice{}, afterChalice{};
     /** Exact prepare-time character view used as the commit staleness guard. */
     CharacterState beforeCharacter{};
-    /** Canonical after-image. Only the target item's authored socket block differs. */
+    /** Canonical after-image, including objective credit earned by an exchange. */
     CharacterState afterCharacter{};
     /** Exact account-wide material balances observed before applying the installed cost set. */
     std::array<account::inventory::ProfileItem, account::inventory::kProfileItemCapacity>
         beforeProfileItems{};
-    /** Canonical material balances after every consuming row in the installed cost set. */
+    /** Canonical material balances after payment and any exchange output. */
     std::array<account::inventory::ProfileItem, account::inventory::kProfileItemCapacity>
         afterProfileItems{};
     std::uint64_t accountSoid{};
@@ -373,6 +412,7 @@ struct PendingSocketPlug {
     std::uint8_t targetBucketId{};
     std::uint8_t plugBucketId{};
     std::uint8_t materialRequirementCount{};
+    /** Publish account stacks and any native Chalice bank changes with the socket. */
     bool profileChanged{};
     bool targetEquipped{};
     bool prepared{};
@@ -794,7 +834,7 @@ struct ProfileExchangePayout {
  * @param output Receives one complete Family-5 snapshot on success.
  * @return False when the fixed override banks cannot hold the complete state.
  */
-[[nodiscard]] bool investment_snapshot(InvestmentState& output) noexcept;
+[[nodiscard]] bool investment_snapshot(InvestmentState& output, std::uint16_t previousMoteMask = 0) noexcept;
 
 /** Seasonal artifact item definition, whose equipped row carries the Power bonus stat. */
 inline constexpr std::uint32_t kSeasonalArtifactItemHash = 0x613A3DA6U;

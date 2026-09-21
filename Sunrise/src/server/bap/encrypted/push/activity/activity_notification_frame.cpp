@@ -10,6 +10,7 @@
 #include "../../../../../middleware/bap/activity_message/activity_message_notification_encoder.h"
 #include "../../../../../middleware/bap/frame.h"
 #include "../../../../../middleware/secure_channel/runtime.h"
+#include "../../../capture/bap_capture.h"
 
 namespace sunrise::server::bap::encrypted::push::activity {
 namespace {
@@ -95,6 +96,11 @@ bool append_notification_frame(Scratch& scratch,
                                          response.subspan(written),
                                          frameSize);
     if (encoded) {
+        capture::record(
+            capture::Kind::notification,
+            static_cast<std::uint16_t>(middleware::bap::NotificationService::activityMessage),
+            kNotificationSequence,
+            std::span(scratch.responsePayload).first(activitySize));
         written += frameSize;
     }
     report(sessionId, messageType, messageBody.size(), encoded ? frameSize : 0);

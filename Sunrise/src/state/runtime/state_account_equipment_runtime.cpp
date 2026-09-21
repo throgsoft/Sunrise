@@ -278,6 +278,7 @@ finalize_equipment_transition(const AccountState& account,
     return left.instanceSoid == right.instanceSoid && left.definitionHash == right.definitionHash
            && left.level == right.level && left.quantity == right.quantity
            && left.flags == right.flags && left.seen == right.seen
+           && left.placement == right.placement
            && left.objectiveValues == right.objectiveValues
            && left.objectiveDefinitionIndex == right.objectiveDefinitionIndex
            && left.sockets.policy == right.sockets.policy
@@ -344,6 +345,8 @@ void report_item_state(std::string_view stage,
         || left.currentActivityIndex != right.currentActivityIndex
         || left.contentBypass != right.contentBypass
         || left.equippedTitleRecordIndex != right.equippedTitleRecordIndex
+        || left.signInSeconds != right.signInSeconds
+        || left.acquiredSubclassAbilityMask != right.acquiredSubclassAbilityMask
         || left.nextInventorySerial != right.nextInventorySerial
         || left.gambitPrimeHelmetTiers != right.gambitPrimeHelmetTiers
         || left.gambitPrimeSynthesizerTier != right.gambitPrimeSynthesizerTier
@@ -411,7 +414,8 @@ void report_item_state(std::string_view stage,
         if (character.inventory.values[index].instanceSoid != instanceSoid) {
             continue;
         }
-        if (found) {
+        if (found || character.inventory.values[index].placement
+                         != authored_inventory::ItemPlacement::inventory) {
             return false;
         }
         found = true;
@@ -430,7 +434,9 @@ character_item_at(const CharacterState& character, const CharacterItemLocation& 
         }
         return &*character.equipment.slots[location.index];
     }
-    if (location.index >= character.inventory.count) {
+    if (location.index >= character.inventory.count
+        || character.inventory.values[location.index].placement
+               != authored_inventory::ItemPlacement::inventory) {
         return nullptr;
     }
     return &character.inventory.values[location.index];
@@ -446,7 +452,9 @@ character_item_at(CharacterState& character, const CharacterItemLocation& locati
         }
         return &*character.equipment.slots[location.index];
     }
-    if (location.index >= character.inventory.count) {
+    if (location.index >= character.inventory.count
+        || character.inventory.values[location.index].placement
+               != authored_inventory::ItemPlacement::inventory) {
         return nullptr;
     }
     return &character.inventory.values[location.index];

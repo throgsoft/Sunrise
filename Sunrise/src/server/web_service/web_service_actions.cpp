@@ -20,6 +20,7 @@
 #include "../../state/runtime/profile_discard.h"
 #include "../../state/runtime/runtime.h"
 #include "internal_actions.h"
+#include "vendor/eververse_vendor_actions.h"
 
 namespace sunrise::server::web_service {
 
@@ -309,6 +310,7 @@ void dismantle_item(const middleware::web_service::Message& message, Outcome& ou
                       static_cast<int>(request.definitionIndex),
                       request.value,
                       static_cast<int>(request.selector));
+    if (vendor::intercept_cosmetic_unlock(request, outcome)) return;
     if (!request.hasInstance && request.instanceSoid == 0 && request.definitionIndex >= 0
         && request.value > 0 && request.selector >= 0) {
         state::build_data::items::Definition definition{};

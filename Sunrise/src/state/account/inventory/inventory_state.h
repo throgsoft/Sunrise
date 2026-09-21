@@ -54,14 +54,18 @@ struct Sockets {
 
 /** Account-wide stacks can occupy every row of the native 701-row profile inventory. */
 inline constexpr std::size_t kProfileItemCapacity = 701;
-/** The supported mod and shader profile bucket runs reserve 50 action-source rows each. */
+/** Ornaments, shaders and wrappers in those buckets share 50 source rows per bucket. */
 inline constexpr std::size_t kProfileActionSourceCapacity = 100;
 /** Runtime-owned SOIDs for profile stacks use a namespace separate from created item instances. */
 inline constexpr std::uint64_t kFirstProfileItemInstanceSoid = 0x5000000000000001ULL;
 /**
  * 151 native rows minus the 16 equipped rows leaves 135 unequipped item rows.
  */
-inline constexpr std::size_t kCharacterItemCapacity = 135;
+inline constexpr std::size_t kOrdinaryCharacterItemCapacity = 135;
+/** Lost Items holds at most 21 whole instances; full storage refuses further overflow. */
+inline constexpr std::size_t kPostmasterItemCapacity = 21;
+inline constexpr std::size_t kCharacterItemCapacity =
+    kOrdinaryCharacterItemCapacity + kPostmasterItemCapacity;
 /** Runtime-owned non-instanced character stacks. */
 inline constexpr std::size_t kCharacterStackCapacity = 32;
 
@@ -103,7 +107,12 @@ struct ProfileItem {
     std::int32_t mutationSerial{};
     /** The client has dismissed this item's new-item marker. */
     bool seen{};
+    /** Contained item identity for a refundable wrapper; zero for ordinary profile stacks. */
+    std::uint32_t wrappedItemHash{};
 };
+
+/** Semantic ownership location; Middleware alone maps Postmaster to a native bucket. */
+enum class ItemPlacement : std::uint8_t { inventory, postmaster };
 
 /** One authored equipment item without native table or wire-layout fields. */
 struct Item {
@@ -136,6 +145,7 @@ struct Item {
     std::uint8_t classAbilityEntry{2};
     /** The client has dismissed this item's new-item marker. */
     bool seen{};
+    ItemPlacement placement{ItemPlacement::inventory};
 };
 
 /** Ordered unequipped items placed into their native character-inventory bucket ranges. */

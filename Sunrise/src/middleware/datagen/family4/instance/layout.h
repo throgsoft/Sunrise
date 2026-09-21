@@ -126,13 +126,15 @@ struct CreationEntry {
     std::int32_t value{};
 };
 
-/** Optional creation request kept empty for an already existing item instance. */
+/** Native creation inputs; the primary definition is absent on an ordinary existing item. */
 struct CreationRequest {
     std::uint16_t primaryDefinitionIndex{};
     std::uint16_t reservedA{};
-    std::array<std::uint32_t, kSocketAuxiliaryHashCount> definitionHashes{};
-    std::int32_t value{};
-    std::uint16_t secondaryDefinitionIndex{};
+    std::uint32_t randomSeed{};
+    /** Optional creation input whose meaning is unresolved; native default is zero. */
+    std::uint32_t creationOption{};
+    std::int32_t level{};
+    std::uint16_t curveSelector{};
     std::uint16_t reservedB{};
     std::int32_t entryCount{};
     std::array<CreationEntry, kCreationEntryCapacity> entries{};

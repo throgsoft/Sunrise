@@ -55,6 +55,9 @@ struct Row {
     Reward rewards[kRewardCapacity]{};
     std::uint32_t definitionHash{};
     std::uint16_t definitionIndex{};
+    /** Acquired unlock slot from the item header, or 0xFFFF when absent. */
+    std::uint16_t acquiredFlagSlot{0xFFFFU};
+    std::optional<std::uint16_t> acquireEffectIndex{};
     std::uint8_t bucketId{};
     /** Native rarity ladder: 1 common through 5 exotic; 0 outside the ladder. */
     std::uint8_t tier{};

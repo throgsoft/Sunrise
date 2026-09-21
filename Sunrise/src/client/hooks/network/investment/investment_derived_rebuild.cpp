@@ -326,10 +326,15 @@ void notify_investment_publication() noexcept {
                      "ev=investment stage=publication result=armed");
 }
 
-/** Definition expressions changed in place; cached conditions must be recomputed too. */
-void notify_investment_definition_change() noexcept {
+/** The next native access must rebuild every cached bank from the newly received inputs. */
+void invalidate_derived_caches() noexcept {
     g_cacheRevision.fetch_add(1, std::memory_order_acq_rel);
     arm_derived_rebuild();
+}
+
+/** Definition expressions changed in place; cached conditions must be recomputed too. */
+void notify_investment_definition_change() noexcept {
+    invalidate_derived_caches();
 }
 
 /** @return True when freshness and both real-arrival rebuild arms are attached. */

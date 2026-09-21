@@ -41,4 +41,7 @@ void restore_lore_visibility() noexcept;
  */
 void arm_derived_rebuild() noexcept;
 
+/** Invalidates each cached derived bank after new inputs have actually arrived. */
+void invalidate_derived_caches() noexcept;
+
 } // namespace sunrise::client::hooks::network::investment

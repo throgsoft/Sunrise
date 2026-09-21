@@ -157,7 +157,8 @@ bool build_item_rows(const reader::Source& source,
     if (published && needDetailRows) {
         reason = "details";
         const DetailSource detailSource{
-            &source, &storage.scratch, container, table, &storage.definition};
+            &source, &storage.scratch, container, table, &storage.definition,
+            storage.slotMaps.accountFlag};
         std::size_t builtDetailCount = 0;
         for (std::size_t slot = 0; slot < detailCount; ++slot) {
             build_details::Definition detail{};

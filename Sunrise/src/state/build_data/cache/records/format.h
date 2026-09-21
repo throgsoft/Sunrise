@@ -35,7 +35,7 @@ inline constexpr std::array<char, 8> kCacheMagic{'S', 'U', 'N', 'R', 'I', 'S', '
  * Bump it when a stored shape changes or when the extraction filling it changes what it writes,
  * because a cached row survives a code change and a corrected walk keeps publishing old rows.
  */
-inline constexpr std::uint32_t kCacheFormatVersion = 67;
+inline constexpr std::uint32_t kCacheFormatVersion = 70;
 /** Signed -1 on disk means there is no equipment slot. */
 inline constexpr std::int8_t kAbsentEquipmentSlot = -1;
 /** The standard 64-bit FNV-1a offset basis starts the payload checksum. */
@@ -202,6 +202,10 @@ struct ItemRewardRecord {
 
 /** Disk form of the supported item fields instance generation uses. */
 struct ItemDetailRecord {
+    std::uint8_t acquireEffectKnown{};
+    std::uint16_t acquireEffectIndex{};
+    std::uint16_t acquiredFlagSlot{0xFFFFU};
+    std::uint16_t acquiredAccountFlag{0xFFFFU};
     std::uint8_t rewardCount{};
     std::array<ItemRewardRecord, items::details::kRewardCapacity> rewards{};
     std::uint8_t objectiveCount{};
@@ -283,7 +287,7 @@ struct InventoryBucketRecord {
     std::uint16_t firstSlot{};
     std::uint16_t slotCount{};
     std::int8_t equipmentSlot{inventory::buckets::kUnavailableEquipmentSlot};
-    std::uint8_t reserved{};
+    std::uint8_t policyFlags{};
 };
 
 /** Disk form of the buckets one subclass publishes under one ability selection. */
@@ -558,6 +562,9 @@ struct VendorDefinitionRecord {
     std::uint16_t installedCount{};
     std::uint16_t saleCount{};
     std::uint16_t thirdCount{};
+    std::uint8_t transferRulesAvailable{};
+    std::uint8_t transferRuleCount{};
+    std::array<std::uint8_t, vendors::kTransferRuleCapacity * 2> transferRules{};
 };
 
 /** Disk form of one vendor sale row. */
@@ -569,6 +576,14 @@ struct VendorSaleRowRecord {
     std::uint16_t costItemIndex{};
     /** Must be zero, so the packed sale row always matches. */
     std::uint16_t reserved{};
+    std::int32_t quantity{};
+    std::uint16_t costCount{};
+    std::uint16_t purchaseUnlockSlot{0xFFFFU};
+    std::uint8_t costIsConstant{};
+    std::uint8_t purchaseGate{};
+    /** Native RefundPolicy byte; version 70 assigns one formerly reserved byte. */
+    std::uint8_t refundPolicy{};
+    std::uint8_t reservedStore{};
 };
 
 /** Disk form of one vendor category row. */
@@ -601,8 +616,9 @@ static_assert(sizeof(SpawnPointRecord)
                      + sizeof(std::uint16_t) + 2 * sizeof(std::uint8_t));
 static_assert(sizeof(VendorIndexRecord) == 2 * sizeof(std::uint32_t) + 2 * sizeof(std::uint16_t));
 static_assert(sizeof(VendorDefinitionRecord)
-              == 14 * sizeof(std::uint32_t) + 4 * sizeof(std::uint16_t));
-static_assert(sizeof(VendorSaleRowRecord) == 4 * sizeof(std::uint16_t) + 2 * sizeof(std::uint32_t));
+              == 14 * sizeof(std::uint32_t) + 4 * sizeof(std::uint16_t)
+                     + 2 + vendors::kTransferRuleCapacity * 2);
+static_assert(sizeof(VendorSaleRowRecord) == 28);
 static_assert(sizeof(VendorInstalledRowRecord) == sizeof(std::uint32_t));
 static_assert(sizeof(HashNameRecord)
               == hash_names::kNameLength + sizeof(std::uint32_t) + 4 * sizeof(std::uint8_t));
@@ -670,10 +686,10 @@ static_assert(sizeof(MaterialRequirementSetRecord)
                            * sizeof(MaterialRequirementRecord));
 static_assert(sizeof(ItemRewardRecord) == 2 * sizeof(std::uint16_t) + sizeof(std::int32_t));
 static_assert(sizeof(ItemDetailRecord)
-              == 2 * sizeof(std::uint8_t)
+              == 3 * sizeof(std::uint8_t) + sizeof(std::uint16_t)
                      + items::details::kRewardCapacity * sizeof(ItemRewardRecord)
                      + items::details::kObjectiveCapacity * sizeof(std::uint16_t)
-                     + sizeof(std::int32_t) + 7 * sizeof(std::uint16_t) + 8 * sizeof(std::uint8_t)
+                     + sizeof(std::int32_t) + 9 * sizeof(std::uint16_t) + 8 * sizeof(std::uint8_t)
                      + sizeof(std::int32_t) + sizeof(std::uint32_t)
                      + 2 * items::details::kInitialPlugCapacity * sizeof(std::uint16_t)
                      + items::details::kStatCapacity * (sizeof(std::uint8_t) + sizeof(std::int32_t))

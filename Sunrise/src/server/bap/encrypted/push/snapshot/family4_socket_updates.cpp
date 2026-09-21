@@ -10,6 +10,7 @@
 #include "../../../../../middleware/datagen/family4/instance/instance_encoder.h"
 #include "../../../../../middleware/datagen/family4/instance/layout.h"
 #include "../../../../../state/runtime/runtime.h"
+#include "../../../../../state/runtime/synthesizer_crafting_runtime.h"
 #include "dawning_oven_projection.h"
 #include "internal.h"
 #include "snapshot_storage.h"
@@ -17,6 +18,73 @@
 namespace sunrise::server::bap::encrypted::push::snapshot {
 
 namespace family4_datagen = middleware::datagen::family4;
+
+namespace {
+/** Publish non-resident material gains from a canonical socket exchange. Debits and
+ * rows moved by compaction are not acquisitions. Resident changes need their own delta. */
+bool project_material_gains(const state::PendingSocketPlug& mutation,
+                            family4_datagen::account::layout::Object& object) noexcept {
+    if (!mutation.prepared || !mutation.profileChanged
+        || mutation.expectedProfileItemCount > mutation.beforeProfileItems.size()
+        || mutation.afterProfileItemCount > mutation.afterProfileItems.size()
+        || object.profileItemCount != mutation.afterProfileItemCount)
+        return false;
+    auto& ring = object.profileInventoryChanges;
+    if (ring.writeSlot != 0 || ring.nextSequence != 0
+        || !std::all_of(ring.records.begin(), ring.records.end(), [](const auto& row) {
+               return row.sequence == 0 && row.reserved == 0 && row.mutationSerial == 0
+                      && row.kind == 0 && row.reservedKind == 0 && row.flags == 0;
+           }))
+        return false;
+    std::int32_t greatestSerial = 0;
+    for (std::size_t i = 0; i < mutation.expectedProfileItemCount; ++i)
+        greatestSerial = (std::max)(greatestSerial, mutation.beforeProfileItems[i].mutationSerial);
+    std::size_t count = 0;
+    for (std::size_t i = 0; i < mutation.afterProfileItemCount; ++i) {
+        const auto& gain = mutation.afterProfileItems[i];
+        // Evaluate each definition once; these socket exchanges do not split reward stacks.
+        bool visited = false;
+        for (std::size_t j = 0; j < i; ++j)
+            visited |= mutation.afterProfileItems[j].definitionHash == gain.definitionHash;
+        if (visited) continue;
+        std::int64_t delta = 0;
+        std::size_t afterRows = 0;
+        for (std::size_t j = 0; j < mutation.expectedProfileItemCount; ++j)
+            if (mutation.beforeProfileItems[j].definitionHash == gain.definitionHash)
+                delta -= mutation.beforeProfileItems[j].quantity;
+        for (std::size_t j = 0; j < mutation.afterProfileItemCount; ++j) {
+            if (mutation.afterProfileItems[j].definitionHash != gain.definitionHash) continue;
+            delta += mutation.afterProfileItems[j].quantity;
+            ++afterRows;
+        }
+        if (delta <= 0) continue;
+        if (afterRows != 1 || gain.instanceSoid != 0 || gain.quantity <= 0
+            || gain.mutationSerial <= greatestSerial || count == ring.records.size())
+            return false;
+        state::build_data::items::Definition definition{};
+        if (!state::build_data::find_item_definition_hash(gain.definitionHash, definition))
+            return false;
+        std::size_t matches = 0;
+        for (const auto& row : object.profileItems) {
+            if (row.mutationSerial != gain.mutationSerial) continue;
+            if (row.definitionIndex != definition.definitionIndex || row.instanceSoid != 0
+                || row.quantity != gain.quantity)
+                return false;
+            ++matches;
+        }
+        if (matches != 1) return false;
+        ring.records[count] = {static_cast<std::uint16_t>(count), 0, gain.mutationSerial, 1, 0, 0};
+        ++count;
+    }
+    ring.writeSlot = ring.nextSequence = static_cast<std::uint16_t>(count);
+    if (mutation.beforeChalice || mutation.afterChalice) {
+        return mutation.beforeChalice && mutation.afterChalice
+               && state::runtime::detail::chalice::project(*mutation.beforeChalice,
+                    *mutation.afterChalice, object.acquiredFlags, object.objectiveValues);
+    }
+    return true;
+}
+} // namespace
 
 /** Builds a resident item upsert followed by charged account balances when the cost consumes. */
 bool prepare_socket_plug(Scratch& scratch,
@@ -108,9 +176,17 @@ bool prepare_socket_plug(Scratch& scratch,
     if (socketPlug.updatesAccount) {
         const auto accountBytes = rawStorage.first(family4_datagen::account::layout::kObjectSize);
         if (!family4_datagen::account::encode(account, accountBytes)
-            || !dawning::project_socket_result(
-                mutation,
-                *reinterpret_cast<family4_datagen::account::layout::Object*>(accountBytes.data()))
+            || !(mutation.beforeDawning || mutation.afterDawning
+                     ? dawning::project_socket_result(
+                           mutation,
+                           *reinterpret_cast<family4_datagen::account::layout::Object*>(accountBytes.data()))
+                     : state::runtime::detail::synthesizer::is_container(mutation.targetDefinitionHash)
+                     ? state::runtime::detail::synthesizer::project_exchange(
+                           mutation, account, socketPlug.after.publishedMoteMask,
+                           *reinterpret_cast<family4_datagen::account::layout::Object*>(accountBytes.data()))
+                     : project_material_gains(
+                           mutation,
+                           *reinterpret_cast<family4_datagen::account::layout::Object*>(accountBytes.data())))
             || objectCount >= staged.objects.size()
             || !append_object(scratch,
                               accountBytes,

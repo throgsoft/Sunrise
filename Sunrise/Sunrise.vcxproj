@@ -2224,6 +2224,10 @@
     <ClCompile Include="src\state\runtime\dawning_oven_runtime.cpp" />
     <ClInclude Include="src\state\runtime\dawning_oven_runtime.h" />
     <ClCompile Include="src\state\runtime\dawning_reward_runtime.cpp" />
+    <ClCompile Include="src\server\bap\encrypted\queuez\dawning_pickup_release.cpp" />
+    <ClInclude Include="src\server\bap\encrypted\queuez\dawning_pickup_release.h" />
+    <ClCompile Include="src\server\bap\encrypted\queuez\synthesizer_family4_refresh.cpp" />
+    <ClInclude Include="src\server\bap\encrypted\queuez\synthesizer_family4_refresh.h" />
     <ClInclude Include="src\state\runtime\dawning_reward_runtime.h" />
     <ClCompile Include="src\state\runtime\gameplay_investment_runtime.cpp" />
     <ClInclude Include="src\state\runtime\gameplay_investment_runtime.h" />
@@ -2232,6 +2236,7 @@
     <ClInclude Include="src\client\console\pursuit_grant_lists.h" />
     <ClCompile Include="src\state\runtime\developer_investment_runtime.cpp" />
     <ClInclude Include="src\state\runtime\developer_investment_runtime.h" />
+    <ClInclude Include="src\server\bap\developer_grant.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="src\state\runtime\bounty_redemption_runtime.cpp" />
@@ -2249,12 +2254,6 @@
     <ClCompile Include="src\client\hooks\season_xp_toast\season_xp_toast.cpp" />
     <ClInclude Include="src\client\hooks\season_xp_toast\season_xp_toast.h" />
     <ClInclude Include="src\client\hooks\season_xp_toast\paired_toast.h" />
-    <ClCompile Include="src\client\material_toast\native_presentation.cpp" />
-    <ClInclude Include="src\client\material_toast\native_presentation.h" />
-    <ClCompile Include="src\client\material_toast\feedback.cpp" />
-    <ClInclude Include="src\client\material_toast\feedback.h" />
-    <ClCompile Include="src\server\bap\presentation\material_notifications.cpp" />
-    <ClInclude Include="src\server\bap\presentation\material_notifications.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="src\client\hooks\network\investment\investment_dawning_delivery_visibility.cpp" />
@@ -2265,4 +2264,60 @@
     <ClInclude Include="src\client\hooks\network\investment\oven_received_state.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+  <ItemGroup>
+    <ClInclude Include="src\middleware\web_service\messages\opcode2002.h" />
+    <ClInclude Include="src\middleware\web_service\messages\opcode104.h" />
+    <ClCompile Include="src\middleware\web_service\messages\opcode104_codec.cpp" />
+    <ClCompile Include="src\middleware\web_service\messages\opcode2002_codec.cpp" />
+    <ClCompile Include="src\server\web_service\vendor\eververse_vendor_actions.cpp" />
+    <ClInclude Include="src\server\web_service\vendor\eververse_vendor_actions.h" />
+    <ClCompile Include="src\server\web_service\web_service_bright_engram.cpp" />
+    <ClCompile Include="src\state\build_data\eververse\manifest_catalog.cpp" />
+    <ClInclude Include="src\state\build_data\eververse\manifest_catalog.h" />
+    <ClCompile Include="src\state\runtime\bright_engram_runtime.cpp" />
+    <ClInclude Include="src\state\runtime\bright_engram_runtime.h" />
+    <ClCompile Include="src\state\runtime\eververse_currency.cpp" />
+    <ClInclude Include="src\state\runtime\eververse_internal.h" />
+    <ClCompile Include="src\state\runtime\eververse_persistence.cpp" />
+    <ClCompile Include="src\state\runtime\eververse_purchase.cpp" />
+    <ClInclude Include="src\state\runtime\eververse_runtime.h" />
+    <ClCompile Include="src\state\runtime\synthesizer_upgrade_runtime.cpp" />
+    <ClInclude Include="src\state\runtime\synthesizer_upgrade_runtime.h" />
+    <ClCompile Include="src\state\runtime\synthesizer_crafting_runtime.cpp" />
+    <ClInclude Include="src\state\runtime\synthesizer_crafting_runtime.h" />
+    <ClCompile Include="src\state\runtime\chalice_crafting_runtime.cpp" />
+    <ClInclude Include="src\state\runtime\chalice_crafting_runtime.h" />
+    <ClCompile Include="src\server\bap\capture\bap_capture.cpp" />
+    <ClInclude Include="src\server\bap\capture\bap_capture.h" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="src\client\ui\items\items_catalog.cpp" />
+    <ClInclude Include="src\client\ui\items\items_catalog.h" />
+    <ClCompile Include="src\client\ui\items\items_icon_cache.cpp" />
+    <ClInclude Include="src\client\ui\items\items_icon_cache.h" />
+    <ClCompile Include="src\client\ui\items\items_panel.cpp" />
+    <ClInclude Include="src\client\ui\items\items_panel.h" />
+    <ClCompile Include="src\client\ui\items\items_service_bridge.cpp" />
+    <ClInclude Include="src\client\ui\items\items_service_bridge.h" />
+    <ClCompile Include="src\middleware\content\packages\items\item_presentation_reader.cpp" />
+    <ClInclude Include="src\middleware\content\packages\items\item_presentation_reader.h" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="src\middleware\web_service\messages\opcode405.h" />
+    <ClCompile Include="src\middleware\web_service\messages\opcode405_codec.cpp" />
+    <ClCompile Include="src\server\web_service\web_service_postmaster.cpp" />
+    <ClInclude Include="src\state\account\inventory\postmaster_policy.h" />
+    <ClInclude Include="src\state\runtime\postmaster_runtime.h" />
+    <ClCompile Include="src\state\runtime\postmaster_runtime.cpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="src\state\runtime\eververse_receipts.cpp" />
+    <ClCompile Include="src\state\runtime\eververse_packages.cpp" />
+    <ClCompile Include="src\middleware\datagen\family4\account\purchase_receipts.cpp" />
+    <ClCompile Include="src\middleware\web_service\messages\opcode905_codec.cpp" />
+    <ClInclude Include="src\state\runtime\eververse_receipts.h" />
+    <ClInclude Include="src\middleware\datagen\family4\account\purchase_receipts.h" />
+    <ClInclude Include="src\middleware\web_service\messages\opcode905.h" />
+    <ClInclude Include="src\state\build_data\eververse\profile_wrapper.h" />
+  </ItemGroup>
 </Project>

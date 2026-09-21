@@ -11,7 +11,6 @@
 #include "../../../client/hooks/feature_flags/feature_flags.h"
 #include "../../../client/hooks/membership_probe/membership_probe.h"
 #include "../../../client/hooks/net_tick_probe/net_tick_probe.h"
-#include "../../../client/material_toast/feedback.h"
 #include "../../../core/logging/log.h"
 #include "../../../core/ui/busy/busy.h"
 #include "../../../server/runtime/server_runtime.h"
@@ -210,7 +209,6 @@ void run_slice() noexcept {
         client::content::investment::worker::service(now);
         client::content::activity::sdk_generation::service();
         client::content::activity::scriptables::service();
-        client::material_toast::pump(now);
         // Read-only, and out of line: the container bind lands a tick after its message.
         client::hooks::membership_probe::service(now);
     }

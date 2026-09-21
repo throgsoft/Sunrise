@@ -15,7 +15,7 @@ inline constexpr std::size_t kIdentityCapacity =
 /** @return True when a profile row carries no authored or runtime-owned value. */
 [[nodiscard]] bool empty_profile_item(const inventory::ProfileItem& item) noexcept {
     return item.instanceSoid == 0 && item.definitionHash == 0 && item.quantity == 0
-           && item.mutationSerial == 0;
+           && item.mutationSerial == 0 && item.wrappedItemHash == 0;
 }
 
 /** Tier bits 1-5 are the native rarity ladder; bit 0 (no tier) is never a payout target. */
@@ -96,6 +96,9 @@ constexpr std::uint8_t kDismantleClassMaskBits =
         const inventory::ProfileItem& item = state.profileItems[index];
         if (item.definitionHash == inventory::kNoDefinitionHash || item.quantity <= 0
             || item.mutationSerial < 0
+            || (item.wrappedItemHash != 0
+                && (item.wrappedItemHash == inventory::kNoDefinitionHash
+                    || item.wrappedItemHash == item.definitionHash || item.quantity != 1))
             || (item.instanceSoid != 0
                 && !append_identity(identities, identityCount, item.instanceSoid))) {
             return false;

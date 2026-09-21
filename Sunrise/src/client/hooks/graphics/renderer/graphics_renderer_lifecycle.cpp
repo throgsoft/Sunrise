@@ -11,6 +11,7 @@
 #include "../../polled_input/runtime.h"
 #include "../input/input.h"
 #include "client/console/console_overlay.h"
+#include "client/ui/items/items_panel.h"
 #include "graphics_renderer_report.h"
 #include "state.h"
 #include "world_lines.h"
@@ -250,6 +251,7 @@ void release_render_target(Resources& resources) noexcept {
 
 /** @param resources SDK resources freed in an order that respects their dependencies. */
 void release_resources(Resources& resources) noexcept {
+    client::ui::items::release_renderer();
     world_lines::release();
     release_render_target(resources);
     textures::release_logo_sheet(resources.logoSheet);

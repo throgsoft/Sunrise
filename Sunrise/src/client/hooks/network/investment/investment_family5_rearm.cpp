@@ -1,7 +1,7 @@
 /**
- * Arms one derived-state rebuild after the family-five object commit. The account's unlock
- * overrides reach that object only when the commit finishes, so a rebuild armed any earlier
- * reads an override list that is not there yet.
+ * Invalidates cached derived state after the family-five object commit. The account's unlock
+ * overrides reach that object only when the commit finishes; invalidating on publication can
+ * rebuild a menu before its new override list has arrived.
  */
 
 #include <atomic>
@@ -36,9 +36,9 @@ hooking::detour::Handle g_handle{};
 std::atomic<CommitFamily5> g_original{nullptr};
 
 /**
- * Runs the family-five commit, then arms one derived-state rebuild. The two callers pass different
- * second arguments, so it is passed on unread. Arming twice is harmless, and the next freshness
- * verdict uses it up, so repeat commits need no latch.
+ * Runs the family-five commit, then advances the existing per-bank invalidation revision.
+ * The two callers pass different second arguments, so it is passed on unread. Multiple commits
+ * before the next access coalesce into one rebuild against the latest received revision.
  * @param manager Borrowed queuez manager owning the Family-5 commit.
  * @param nested4 Borrowed caller-owned argument, passed on unread.
  * @return The commit's own result, or the no-commit result when the trampoline is gone.
@@ -49,12 +49,15 @@ __declspec(noinline) std::int64_t __fastcall commit(void* manager,
     if (original == nullptr) {
         return kNoCommit;
     }
-    // Arm on the way out: the overrides are in the object only once the commit has run.
+    // Invalidate on receipt, after the overrides are in the object. Family 4 can arrive
+    // first and rebuild a menu against the preceding overrides. Native 50A260 then
+    // returns its valid bank without consulting the freshness verdict, so an arm alone
+    // leaves that menu stale. Advance the existing per-bank revision as well.
     const std::int64_t result = original(manager, nested4);
-    arm_derived_rebuild();
+    invalidate_derived_caches();
     core::log::write(core::log::Channel::client,
                      core::log::Level::debug,
-                     "ev=investment stage=family5_commit result=armed");
+                     "ev=investment stage=family5_commit result=cache_refresh_armed");
     return result;
 }
 

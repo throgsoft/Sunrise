@@ -33,7 +33,8 @@ bool stage_rewards(const AccountState& account,
     for (const auto& request : rewards) {
         if (request.quantity <= 0) return false;
         PreparedRecordReward material{};
-        const auto handled = dawning::stage_reward(request, mutation, material);
+        const auto handled = dawning::stage_reward(
+            working.characters[characterIndex], request, mutation, material);
         if (handled == dawning::MaterialReward::refused) return false;
         if (handled == dawning::MaterialReward::staged) {
             if (rewardCount == mutation.rewards.size()) return false;

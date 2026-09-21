@@ -29,8 +29,11 @@ inline constexpr std::uint8_t kUnavailableBucketId = (std::numeric_limits<std::u
 inline constexpr std::size_t kDescriptorCapacity = kUnavailableBucketId;
 /** Signed -1 marks a bucket that has no equipment slot. */
 inline constexpr std::int8_t kUnavailableEquipmentSlot = -1;
-/** The packed descriptor holds routing, an optional equipment slot, and one reserved byte. */
+/** The packed descriptor holds routing, an optional equipment slot, and acquisition policy. */
 inline constexpr std::size_t kDescriptorByteSize = 8;
+inline constexpr std::uint8_t kFifo = 1;
+inline constexpr std::uint8_t kNoTransferOnEviction = 2;
+inline constexpr std::uint8_t kPolicyMask = kFifo | kNoTransferOnEviction;
 
 /** Packed routing record for one checked runtime inventory bucket. */
 struct Descriptor {
@@ -39,7 +42,7 @@ struct Descriptor {
     std::uint16_t firstSlot{};
     std::uint16_t slotCount{};
     std::int8_t equipmentSlot{kUnavailableEquipmentSlot};
-    std::uint8_t reserved{};
+    std::uint8_t policyFlags{};
 };
 
 static_assert(sizeof(Descriptor) == kDescriptorByteSize);

@@ -39,8 +39,12 @@ Scratch g_scratch{};
 std::atomic<InvestmentPublicationConsumer> g_investmentPublicationConsumer{};
 std::atomic<InvestmentSliceConsumer> g_investmentSliceConsumer{};
 
-/** Lifetime of the native item-acquisition flyout, which the hold must outlast. */
+/** Existing conservative hold for acquisition flyouts and retained inventory-row overlays. */
 constexpr std::uint64_t kAcquisitionPresentationHoldMs = 8'000;
+/** Short queue grace for the observer to copy acquisition data. This is a
+ * Sunrise scheduling grace, not a decoded client acknowledgment or retail timeout. */
+constexpr std::uint64_t kAcquisitionQueueGraceMs = 1'500;
+static_assert(kAcquisitionQueueGraceMs <= kAcquisitionPresentationHoldMs);
 
 /** Arms every other active peer after one shared-account transaction is published. */
 void publish_account_mutation(Session& origin) noexcept {
@@ -368,6 +372,23 @@ void arm_account_resync_everywhere() noexcept {
 void request_account_resync() noexcept {
     const std::lock_guard lock(session_lock());
     arm_account_resync_everywhere();
+}
+
+std::uint64_t acquisition_queue_deadline() noexcept {
+    std::uint64_t result = 0;
+    for (const auto& peer : g_sessions) {
+        if (peer.id == 0 || !peer.authenticated || !peer.queuez.family4Active) continue;
+        // Every arm records the full presentation duration. Derive the shorter queue
+        // deadline from that same arm only when no retained inventory-row overlay exists.
+        // Do not shorten the stored deadline: ordinary repushes and overlay consumers
+        // still need their existing eight-second protection.
+        const auto reduction = peer.acquisitionPresentationRowCount == 0
+            ? kAcquisitionPresentationHoldMs - kAcquisitionQueueGraceMs : 0;
+        const auto until = peer.acquisitionPresentationUntilTick;
+        const auto deadline = until > reduction ? until - reduction : 0;
+        result = (std::max)(result, deadline);
+    }
+    return result;
 }
 
 /** Extends this peer's flyout hold, clearing a lapsed overlay first. */

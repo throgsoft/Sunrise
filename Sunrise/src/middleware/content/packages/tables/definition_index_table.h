@@ -391,6 +391,8 @@ inline constexpr std::size_t kBucketDescriptorSize = 36;
 inline constexpr std::size_t kBucketFirstSlotOffset = 4;
 inline constexpr std::size_t kBucketSlotCountOffset = 8;
 inline constexpr std::size_t kBucketArraySelectorOffset = 24;
+inline constexpr std::size_t kBucketFifoOffset = 25;
+inline constexpr std::size_t kBucketNoTransferOnEvictionOffset = 26;
 
 /** Every definition table holds its array descriptor at this fixed offset. */
 inline constexpr std::size_t kTableArrayDescriptor = 8;

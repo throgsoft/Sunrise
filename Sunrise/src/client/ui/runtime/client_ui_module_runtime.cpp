@@ -4,6 +4,7 @@
 
 #include "../../../core/ui/modules/registry/ui_module_registry.h"
 #include "../../../core/ui/modules/ui_module_descriptor.h"
+#include "../items/items_panel.h"
 #include "../movement/movement_panel.h"
 #include "../player/player_panel.h"
 #include "../spawn/spawn_panel.h"
@@ -22,10 +23,11 @@ constexpr std::string_view kPlayerDisplayName = "Player";
 core::ui::modules::registry::PageRegistration g_movementPage;
 core::ui::modules::registry::PageRegistration g_playerPage;
 core::ui::modules::registry::PageRegistration g_spawnPage;
+core::ui::modules::registry::PageRegistration g_itemsPage;
 
 } // namespace
 
-/** @return True when both Client modules own their Core UI registry slots. */
+/** @return True when every Client module owns its Core UI registry slot. */
 bool initialize() noexcept {
     // Registered after movement, which is the order the menu lists them in.
     const bool movementOwned = g_movementPage.acquire(
@@ -34,11 +36,14 @@ bool initialize() noexcept {
         core::ui::modules::Owner::client, kPlayerStableId, kPlayerDisplayName, &player::draw);
     const bool spawnOwned = g_spawnPage.acquire(
         core::ui::modules::Owner::client, "client.developer_spawn", "Spawn", &spawn::draw);
-    return movementOwned && playerOwned && spawnOwned;
+    const bool itemsOwned = g_itemsPage.acquire(
+        core::ui::modules::Owner::client, "client.items", "Items", &items::draw);
+    return movementOwned && playerOwned && spawnOwned && itemsOwned;
 }
 
 /** Removes the Client modules from the Core UI registry. */
 void shutdown() noexcept {
+    g_itemsPage.release(&items::shutdown);
     g_spawnPage.release();
     g_playerPage.release();
     g_movementPage.release();

@@ -1,5 +1,5 @@
 PRAGMA application_id = 1397902921;
-PRAGMA user_version = 5;
+PRAGMA user_version = 7;
 
 CREATE TABLE account (
     id INTEGER PRIMARY KEY CHECK (id = 1),
@@ -150,4 +150,25 @@ CREATE TABLE gameplay_receipts (
     player INTEGER NOT NULL,
     sequence INTEGER NOT NULL CHECK(sequence BETWEEN 1 AND 4294967295),
     PRIMARY KEY(epoch, session, revision, player, sequence)
+) STRICT, WITHOUT ROWID;
+
+-- Account rows are replaced by write_account; acquisition receipts must survive those writes.
+CREATE TABLE cosmetic_acquisitions (
+    account_soid INTEGER NOT NULL CHECK(account_soid<>0),
+    item_hash INTEGER NOT NULL CHECK(item_hash BETWEEN 1 AND 4294967295),
+    PRIMARY KEY(account_soid, item_hash)
+) STRICT, WITHOUT ROWID;
+
+CREATE TABLE eververse_purchases (
+    account_soid INTEGER NOT NULL CHECK(account_soid<>0),
+    vendor_hash INTEGER NOT NULL CHECK(vendor_hash BETWEEN 1 AND 4294967295),
+    sale_index INTEGER NOT NULL CHECK(sale_index BETWEEN 0 AND 65535),
+    item_hash INTEGER NOT NULL CHECK(item_hash BETWEEN 1 AND 4294967295),
+    purchases INTEGER NOT NULL CHECK(purchases BETWEEN 1 AND 2147483647),
+    PRIMARY KEY(account_soid, vendor_hash, sale_index, item_hash)
+) STRICT, WITHOUT ROWID;
+
+CREATE TABLE eververse_wallet_sync (
+    account_soid INTEGER PRIMARY KEY CHECK(account_soid<>0),
+    revision INTEGER NOT NULL CHECK(revision BETWEEN 1 AND 4294967295)
 ) STRICT, WITHOUT ROWID;

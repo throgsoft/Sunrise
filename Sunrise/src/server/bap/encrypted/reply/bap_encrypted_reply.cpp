@@ -3,6 +3,7 @@
 #include <algorithm>
 
 #include "../../../../middleware/secure_channel/runtime.h"
+#include "../../capture/bap_capture.h"
 #include "../internal.h"
 
 namespace sunrise::server::bap::encrypted::reply {
@@ -43,6 +44,12 @@ bool encode(Scratch& scratch,
                                          std::span(scratch.sealed).first(sealedSize),
                                          scratch.framed,
                                          framedSize);
+    if (encoded) {
+        capture::record(capture::Kind::response,
+                        static_cast<std::uint16_t>(route.response),
+                        taskId,
+                        body);
+    }
     SecureZeroMemory(scratch.responsePayload.data(),
                      (std::min)(scratch.responsePayload.size(), payloadSize));
     SecureZeroMemory(scratch.sealed.data(), (std::min)(scratch.sealed.size(), sealedSize));

@@ -12,6 +12,7 @@
 #include "../../middleware/web_service/messages/opcode206.h"
 #include "../../state/account/inventory/seen_state.h"
 #include "../../state/runtime/runtime.h"
+#include "../../state/runtime/postmaster_runtime.h"
 
 namespace sunrise::server::web_service {
 
@@ -21,6 +22,8 @@ struct Outcome {
     middleware::queuez::Subscription subscription{};
     /** A claim changed the account flag bank, so a fresh account image has to follow. */
     bool hasRecordClaim{};
+    bool hasPublishedMoteMask{};
+    std::uint16_t publishedMoteMask{};
     /** An earned title changed on the selected character; roster and banner must be republished. */
     bool hasTitleEquip{};
     /** An opcode-504 pick moved the selection and its Family-4 object still has to follow. */
@@ -34,6 +37,7 @@ struct Outcome {
     bool profileSetupRefused{};
     /** A request prepares at most one State mutation and allocates only that exact payload. */
     using Mutation = std::variant<std::monostate,
+                                  std::unique_ptr<state::PendingPostmasterClaim>,
                                   std::unique_ptr<state::PendingEquipmentSwap>,
                                   std::unique_ptr<state::PendingSubclassSelection>,
                                   std::unique_ptr<state::PendingItemAcquisition>,
@@ -167,7 +171,8 @@ consume(std::span<const std::byte> request,
         std::span<std::byte> response,
         std::size_t& written,
         Outcome& outcome,
-        std::span<const state::account::inventory::PresentedItemRow> presentation = {}) noexcept;
+        std::span<const state::account::inventory::PresentedItemRow> presentation = {},
+        std::uint16_t previousMoteMask = 0) noexcept;
 
 /** Encodes the normal refusal shape for a request that may publish resident references. */
 [[nodiscard]] bool encode_resident_dependent_refusal(std::span<const std::byte> request,

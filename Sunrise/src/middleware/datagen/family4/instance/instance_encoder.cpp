@@ -94,6 +94,10 @@ namespace {
            && input.curveSelector == layout::kInitialLevelCurveX
            && input.capSelector == layout::kInitialLevelCapRow
            && valid_item_definition(input.baseDefinitionIndex, input.bounds.itemDefinitionCount)
+           && (input.creationDefinitionIndex == layout::kEmptyDefinitionIndex
+               || (input.creationDefinitionIndex != input.baseDefinitionIndex
+                   && valid_item_definition(input.creationDefinitionIndex,
+                                             input.bounds.itemDefinitionCount)))
            && (input.objectiveDefinitionIndex == layout::kEmptyDefinitionIndex
                || input.objectiveDefinitionIndex == input.baseDefinitionIndex)
            && valid_ordinary_sockets(input.ordinarySockets, input.bounds.itemDefinitionCount)
@@ -116,8 +120,8 @@ void initialize_empty_fields(layout::Object& object) noexcept {
         selector.element = layout::kEmptySelectorByte;
     }
     object.creation.primaryDefinitionIndex = layout::kEmptyDefinitionIndex;
-    object.creation.definitionHashes.fill(layout::kNoDefinitionHash);
-    object.creation.secondaryDefinitionIndex = layout::kEmptyDefinitionIndex;
+    // The native CreationRequest default patch leaves seed, option, level and curve zero.
+    // They are not definition hashes/indices and must not receive those sentinels.
     for (layout::CreationEntry& entry : object.creation.entries) {
         entry.definitionIndices.fill(layout::kEmptyDefinitionIndex);
     }
@@ -141,6 +145,7 @@ bool encode(const ResolvedInstance& input, std::span<std::byte> output) noexcept
     object.level.curveX = input.curveSelector;
     object.level.capRow = input.capSelector;
     object.baseDefinitionIndex = input.baseDefinitionIndex;
+    object.creation.primaryDefinitionIndex = input.creationDefinitionIndex;
     object.ordinarySockets.gateMask = layout::kAllSocketBits;
     object.roll.progress = layout::kInitialInstanceProgress;
     object.roll.socketEntryListIndex = input.socketEntryListIndex;

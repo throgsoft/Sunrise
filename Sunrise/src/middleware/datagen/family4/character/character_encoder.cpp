@@ -95,6 +95,13 @@ constexpr std::int32_t kOccupiedRowWatermark = 1;
             return false;
         }
         const std::size_t end = static_cast<std::size_t>(bucket.firstSlot) + bucket.slotCount;
+        // Repeated single-use acquisitions occupy distinct FIFO entries. Other character
+        // stacks retain their definition-unique contract until their multi-stack path exists.
+        if ((bucket.policyFlags & state::build_data::inventory::buckets::kFifo) == 0) {
+            for (std::size_t prior = 0; prior < index; ++prior)
+                if (state.stacks.values[prior].definitionHash == stack.definitionHash)
+                    return false;
+        }
         std::size_t rowIndex = bucket.firstSlot;
         while (rowIndex < end
                && object.inventoryItems[rowIndex].definitionIndex != kEmptyDefinitionIndex) {

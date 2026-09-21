@@ -22,6 +22,7 @@
 #include "activity_authority_query_owner.h"
 #include "activity_authority_reset_owner.h"
 #include "encrypted/queuez/definition.h"
+#include "encrypted/queuez/synthesizer_family4_refresh.h"
 #include "runtime.h"
 
 namespace sunrise::server::bap {
@@ -313,6 +314,8 @@ struct WorldRewardRequest {
 struct Session {
     std::uint64_t activityAdvertisementHostGeneration{};
     std::uint64_t acquisitionPresentationUntilTick{};
+    /** Bounds recovery/cleanup reads of the persisted Dawning acquisition FIFO. */
+    std::uint64_t dawningPickupSweepDueTick{};
     std::array<encrypted::queuez::AcquisitionPresentationRow,
                encrypted::queuez::kAcquisitionPresentationRowCapacity>
         acquisitionPresentationRows{};
@@ -321,8 +324,9 @@ struct Session {
     std::int32_t pendingSeasonalExperienceAmount{};
     std::uint32_t pendingSeasonalExperienceMutationSerial{};
     bool authenticated{};
-    /** Owes one family-five snapshot for the unlock overrides an artifact change moved. */
-    bool artifactRefreshArmed{};
+    /** Publishes predicates before their item-view companions. */
+    bool family5RefreshArmed{};
+    encrypted::SynthesizerFamily4Refresh synthesizerFamily4Refresh{};
     bool artifactFamily4RefreshArmed{};
     std::uint64_t artifactFamily4RefreshDueTick{};
     state::ArtifactResetResult artifactResetRefresh{};
@@ -505,6 +509,11 @@ void arm_account_resync_everywhere() noexcept;
 
 /** Holds this peer's full Family-4 refreshes until its acquisition flyout has finished. */
 void arm_acquisition_presentation_hold(Session& session) noexcept;
+
+/** Queue admission across peers: short observation grace without retained rows, full
+ * presentation hold with a row overlay. Does not shorten ordinary refresh protection.
+ * Caller owns the session lock; this is scheduling, not a client consumption ACK. */
+[[nodiscard]] std::uint64_t acquisition_queue_deadline() noexcept;
 
 /** Queues one character item for normal acquisition feedback. */
 [[nodiscard]] bool arm_world_item_acquisition(std::uint16_t itemDefinitionIndex) noexcept;

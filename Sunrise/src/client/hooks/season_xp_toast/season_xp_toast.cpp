@@ -6,6 +6,7 @@
 #include <atomic>
 #include <cstring>
 #include <intrin.h>
+#include <span>
 #include <string_view>
 
 #include "../../../core/logging/log.h"
@@ -43,6 +44,11 @@ SRWLOCK g_lifecycle = SRWLOCK_INIT;
 std::atomic_bool g_ready{false};
 std::atomic_uint32_t g_active{0};
 std::atomic_uint32_t g_suppressed{0};
+// Automatic, process-lifetime diagnostic budget. These events observe the bank/queue,
+// not the character menu's still-unmapped CUI getter. Restart to obtain a fresh budget.
+constexpr std::uint32_t kTraceDiffLimit = 64;
+constexpr std::uint32_t kTraceToastLimit = 8;
+std::atomic_uint32_t g_tracedDiffs{0};
 const void* g_accountReturn{};
 const void* g_producerReturn{};
 const void* g_diffProducerReturn{};
@@ -51,8 +57,81 @@ struct Scope {
     detail::Pair pair{};
     void* manager{};
     bool canonicalAttempted{};
+    std::uint32_t traceId{}, traceToasts{}, traceSuppressed{};
 };
 thread_local Scope* g_scope{};
+
+std::uint32_t next_trace() noexcept {
+    auto used = g_tracedDiffs.load(std::memory_order_relaxed);
+    while (used < kTraceDiffLimit) {
+        if (g_tracedDiffs.compare_exchange_weak(used, used + 1, std::memory_order_relaxed))
+            return used + 1;
+    }
+    return 0;
+}
+
+const detail::Entry* unique_entry(std::span<const detail::Entry> bank,
+                                 std::uint16_t definition) noexcept {
+    const detail::Entry* found{};
+    for (const auto& entry : bank) {
+        if (entry.definitionIndex != definition) continue;
+        if (found) return nullptr;
+        found = &entry;
+    }
+    return found;
+}
+
+void trace_diff(Scope& scope,
+                std::span<const detail::Entry> before,
+                std::span<const detail::Entry> after,
+                const char* pairing) noexcept {
+    if (!core::log::accepts(core::log::Channel::client, core::log::Level::info)
+        || g_tracedDiffs.load(std::memory_order_relaxed) >= kTraceDiffLimit)
+        return;
+    const auto* b40 = unique_entry(before, 40);
+    const auto* a40 = unique_entry(after, 40);
+    const auto* b41 = unique_entry(before, 41);
+    const auto* a41 = unique_entry(after, 41);
+    // Only complete, uniquely keyed 40/41 lane-0 changes qualify for this trace.
+    if (!b40 || !a40 || !b41 || !a41
+        || (b40->values[0] == a40->values[0] && b41->values[0] == a41->values[0]))
+        return;
+    scope.traceId = next_trace();
+    if (!scope.traceId) return;
+    core::log::writef(core::log::Channel::client,
+                      core::log::Level::info,
+                      "ev=season_xp_trace stage=diff id=%u before40=%d after40=%d before41=%d "
+                      "after41=%d pairing=%s budget_left=%u",
+                      scope.traceId,
+                      b40->values[0], a40->values[0], b41->values[0], a41->values[0],
+                      pairing,
+                      kTraceDiffLimit - scope.traceId);
+}
+
+void trace_toast(Scope* scope,
+                 std::uint32_t hash,
+                 const detail::Progress& progress,
+                 const char* decision,
+                 const char* reason,
+                 std::int32_t result) noexcept {
+    if (!scope || !scope->traceId) return;
+    // A native wrapper return records dispatch, not proof that a toast was drawn.
+    // Saturate at limit+1 so diff_end can report that individual events were omitted.
+    if (scope->traceToasts > kTraceToastLimit) return;
+    if (++scope->traceToasts > kTraceToastLimit) return;
+    core::log::writef(core::log::Channel::client,
+                      core::log::Level::info,
+                      "ev=season_xp_trace stage=toast id=%u definition=%u hash=%08X "
+                      "decision=%s reason=%s queue_result=%d before_xp=%d after_xp=%d "
+                      "before_cost=%d after_cost=%d before_rank=%d after_rank=%d",
+                      scope->traceId,
+                      hash == detail::kPassToast ? 40U : 41U,
+                      hash,
+                      decision, reason, result,
+                      progress.beforeXp, progress.afterXp,
+                      progress.beforeCost, progress.afterCost,
+                      progress.beforeRank, progress.afterRank);
+}
 
 // These payload calculations apply only to the installed zero-first-step pass and repeating
 // single-step HUD ladder. A different content build must keep its native presentation.
@@ -140,9 +219,22 @@ void observe_diff(const detail::Entry* before, const detail::Entry* after, const
     if (caller == g_accountReturn && before && after
         && copy_banks(before, after, b.data(), a.data())) {
         scope.pair = detail::paired_update(b, a);
-        if (scope.pair.eligible && !compatible_ladders()) scope.pair = {};
+        const char* pairing = scope.pair.eligible ? "eligible" : "not_paired";
+        if (scope.pair.eligible && !compatible_ladders()) {
+            scope.pair = {};
+            pairing = "ladder_mismatch";
+        }
+        trace_diff(scope, b, a, pairing);
     }
-    invoke_diff(before, after, scope.pair.eligible ? &scope : nullptr);
+    invoke_diff(before, after, scope.pair.eligible || scope.traceId ? &scope : nullptr);
+    if (scope.traceId) {
+        core::log::writef(core::log::Channel::client,
+                          core::log::Level::info,
+                          "ev=season_xp_trace stage=diff_end id=%u toast_events=%u suppressed=%u "
+                          "events_truncated=%u",
+                          scope.traceId, scope.traceToasts, scope.traceSuppressed,
+                          scope.traceToasts > kTraceToastLimit ? 1U : 0U);
+    }
 }
 
 std::int32_t
@@ -150,13 +242,32 @@ observe_enqueue(void* manager, const std::uint32_t* hash, const void* payload, c
     Scope* scope = g_scope;
     std::uint32_t value{};
     detail::Progress progress{};
-    const bool candidate = scope && scope->pair.eligible && caller == g_producerReturn && manager
-                           && hash && payload && direct_bank_producer()
-                           && read_toast(hash, payload, value, progress);
-    if (candidate && value == detail::kPrestigeToast && progress == scope->pair.prestige
-        && scope->canonicalAttempted && scope->manager == manager
-        && canonical_queued(manager, scope->pair.pass)) {
+    const bool observed = scope && (scope->pair.eligible || scope->traceId)
+                          && caller == g_producerReturn && manager && hash && payload
+                          && direct_bank_producer() && read_toast(hash, payload, value, progress);
+    const bool candidate = observed && scope->pair.eligible;
+    const bool traced = observed && scope->traceId
+                        && (value == detail::kPassToast || value == detail::kPrestigeToast);
+    const char* reason = "pair_ineligible";
+    bool suppress = false;
+    if (candidate) {
+        if (value == detail::kPassToast) reason = "canonical";
+        else if (value == detail::kPrestigeToast) {
+            if (progress != scope->pair.prestige) reason = "payload_mismatch";
+            else if (!scope->canonicalAttempted) reason = "canonical_not_attempted";
+            else if (scope->manager != manager) reason = "manager_mismatch";
+            else {
+                suppress = canonical_queued(manager, scope->pair.pass);
+                reason = suppress ? "canonical_queued" : "canonical_not_queued";
+            }
+        }
+    }
+    if (suppress) {
         scope->pair.eligible = false; // At most one suppressed toast per paired update.
+        if (traced) {
+            ++scope->traceSuppressed;
+            trace_toast(scope, value, progress, "suppressed", reason, 0);
+        }
         const auto count = g_suppressed.fetch_add(1, std::memory_order_relaxed) + 1;
         if (count <= 16 || (count & (count - 1)) == 0) {
             core::log::writef(core::log::Channel::client,
@@ -175,6 +286,7 @@ observe_enqueue(void* manager, const std::uint32_t* hash, const void* payload, c
         scope->canonicalAttempted = true;
         scope->manager = manager;
     }
+    if (traced) trace_toast(scope, value, progress, "passthrough", reason, result);
     return result;
 }
 
@@ -250,6 +362,13 @@ bool install() noexcept {
                      installed ? core::log::Level::info : core::log::Level::warn,
                      installed ? "ev=season_xp_toast result=installed presentation_only=1"
                                : "ev=season_xp_toast result=unavailable native_passthrough=1");
+    if (installed) {
+        core::log::writef(core::log::Channel::client,
+                          core::log::Level::info,
+                          "ev=season_xp_trace stage=ready diff_limit=%u toast_limit_per_diff=%u "
+                          "cui_binding_observed=0",
+                          kTraceDiffLimit, kTraceToastLimit);
+    }
     return installed;
 }
 

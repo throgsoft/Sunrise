@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 
@@ -51,6 +52,27 @@ struct IndexEntry {
     std::uint16_t index{};
 };
 
+/** Only purchase predicates whose complete package program has been decoded. */
+enum class PurchaseGate : std::uint8_t { unsupported, unrestricted, notOwned };
+
+/** Authored sale-row +154 byte, retained without inferring transaction eligibility. */
+enum class RefundPolicy : std::uint8_t { notRefundable = 0, refundable = 1 };
+
+/** Only the native refund policy values whose encoding is known. */
+[[nodiscard]] constexpr bool valid_refund_policy(RefundPolicy value) noexcept {
+    return value == RefundPolicy::notRefundable || value == RefundPolicy::refundable;
+}
+
+inline constexpr std::size_t kTransferRuleCapacity = 8;
+inline constexpr std::uint32_t kTransferRuleClass = 0x8080785FU;
+inline constexpr std::uint8_t kAuthoredDestination = 0xFFU;
+
+/** Accepted source bucket and destination; FF selects the item's authored bucket. */
+struct TransferRule {
+    std::uint8_t sourceBucket{};
+    std::uint8_t destinationBucket{};
+};
+
 /** One extracted vendor definition and the flat-bank ranges its rows occupy. */
 struct Definition {
     std::uint32_t definitionHash{};
@@ -81,6 +103,10 @@ struct Definition {
     std::uint16_t installedCount{};
     std::uint16_t saleCount{};
     std::uint16_t thirdCount{};
+    /** Unknown or oversized arrays disable transfer alone, not this vendor's sales. */
+    bool transferRulesAvailable{};
+    std::uint8_t transferRuleCount{};
+    std::array<TransferRule, kTransferRuleCapacity> transferRules{};
 };
 
 /** A sale row charging nothing carries this instead of a cost item. */
@@ -88,6 +114,15 @@ inline constexpr std::uint16_t kAbsentCostItem = 0xFFFFU;
 
 /** One sale row of one vendor definition. */
 struct SaleRow {
+    /** Native sale +76, independently of the item's Collections reacquisition quantity. */
+    std::int32_t quantity{};
+    /** Full array count; a Store transaction must never charge only its first currency. */
+    std::uint16_t costCount{};
+    /** True only for a constant price without either embedded adjustment program. */
+    bool costIsConstant{};
+    PurchaseGate purchaseGate{PurchaseGate::unsupported};
+    /** One NOT FLAG ownership gate; no numeric/reset limit is inferred from unknown programs. */
+    std::uint16_t purchaseUnlockSlot{0xFFFFU};
     /** Row +100. The row's vendor category. The catalog bounds it by the category count. */
     std::int32_t categoryIndex{};
     /** First price-override row's charged units. Zero when the row charges nothing. */
@@ -98,6 +133,8 @@ struct SaleRow {
     std::uint16_t secondaryItemIndex{};
     /** First price-override row's item, or `kAbsentCostItem` when the row charges nothing. */
     std::uint16_t costItemIndex{kAbsentCostItem};
+    /** Row +154. Empty rows default to the authored non-refundable value. */
+    RefundPolicy refundPolicy{RefundPolicy::notRefundable};
 };
 
 /** One category row, reduced to the definition hash a rowless request resolves through. */

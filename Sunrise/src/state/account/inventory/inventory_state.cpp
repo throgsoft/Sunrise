@@ -94,13 +94,16 @@ bool valid(const Sockets& sockets) noexcept {
 bool valid(const Item& item) noexcept {
     return item.instanceSoid != 0 && item.definitionHash != kNoDefinitionHash && item.level >= 0
            && item.quantity > 0 && item.mutationSerial >= 0
-           && item.objectiveValues[kItemExpiryLane] >= 0 && valid(item.sockets);
+           && item.objectiveValues[kItemExpiryLane] >= 0 && valid(item.sockets)
+           && (item.placement == ItemPlacement::inventory
+               || (item.placement == ItemPlacement::postmaster && item.quantity == 1));
 }
 
 /** Checks every item present in the fixed semantic equipment array. */
 bool valid(const Equipment& equipment) noexcept {
     for (const std::optional<Item>& item : equipment.slots) {
-        if (item.has_value() && !valid(*item)) {
+        if (item.has_value()
+            && (!valid(*item) || item->placement != ItemPlacement::inventory)) {
             return false;
         }
     }
@@ -112,19 +115,23 @@ bool valid(const CharacterItems& items) noexcept {
     if (items.count > items.values.size()) {
         return false;
     }
+    std::size_t postmasterCount = 0;
     for (std::size_t index = 0; index < items.values.size(); ++index) {
         if (index < items.count) {
             if (!valid(items.values[index])) {
                 return false;
             }
-        } else if (items.values[index].instanceSoid != 0) {
+            postmasterCount += items.values[index].placement == ItemPlacement::postmaster;
+        } else if (items.values[index].instanceSoid != 0
+                   || items.values[index].placement != ItemPlacement::inventory) {
             return false;
         }
     }
-    return true;
+    return postmasterCount <= kPostmasterItemCapacity
+           && items.count - postmasterCount <= kOrdinaryCharacterItemCapacity;
 }
 
-/** Checks a dense, definition-unique character stack list. */
+/** Checks dense stacks. Separate acquisitions may carry the same definition. */
 bool valid(const CharacterStacks& items) noexcept {
     if (items.count > items.values.size()) {
         return false;
@@ -142,7 +149,8 @@ bool valid(const CharacterStacks& items) noexcept {
             return false;
         }
         for (std::size_t prior = 0; prior < index; ++prior) {
-            if (items.values[prior].definitionHash == item.definitionHash) {
+            if (items.values[prior].definitionHash == item.definitionHash
+                && items.values[prior].mutationSerial == item.mutationSerial) {
                 return false;
             }
         }

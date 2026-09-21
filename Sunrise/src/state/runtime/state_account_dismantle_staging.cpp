@@ -470,6 +470,8 @@ apply_dismantle_rewards(const AccountState& before,
         }
     }
     if (inventoryIndex >= before.inventory.count
+        || before.inventory.values[inventoryIndex].placement
+               != authored_inventory::ItemPlacement::inventory
         || before.inventory.values[inventoryIndex].quantity != expectedStackQuantity
         || (before.inventory.values[inventoryIndex].flags & authored_inventory::kLockedItemFlag)
                != 0) {

@@ -14,12 +14,14 @@
 #include "../../core/logging/log.h"
 #include "../../middleware/datagen/family4/loadout/loadout_resolver.h"
 #include "../build_data/runtime.h"
+#include "chalice_crafting_runtime.h"
 #include "dawning_oven_runtime.h"
 #include "runtime.h"
 #include "state.h"
 #include "state_account_transaction_helpers.h"
 #include "state_rolled_socket_plugs.h"
 #include "storage/internal.h"
+#include "synthesizer_crafting_runtime.h"
 
 namespace sunrise::state {
 namespace runtime::detail {
@@ -162,6 +164,22 @@ void report_socket_plug(std::string_view stage,
     }
     if (build_data::is_exotic_catalyst_lane(targetDefinition.definitionIndex, socketLane)) {
         return fail("catalyst_lane_requires_atomic_change");
+    }
+    if (targetDefinition.definitionHash == chalice::kChaliceHash) {
+        if (chalice::stage(snapshot, characterIndex, targetInstanceSoid, socketLane,
+                            plugDefinitionIndex, mutation))
+            return true;
+        return fail("chalice_exchange");
+    }
+    if (synthesizer::is_container(targetDefinition.definitionHash)) {
+        if (synthesizer::stage_exchange(snapshot,
+                                       characterIndex,
+                                       targetInstanceSoid,
+                                       socketLane,
+                                       plugDefinitionIndex,
+                                       mutation))
+            return true;
+        return fail(socketLane == 4 ? "synthesizer_recycle_exchange" : "synthesizer_exchange");
     }
     if (targetDefinition.definitionHash == account::inventory::dawning::kOvenHash
         && socketLane >= 2) {

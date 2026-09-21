@@ -1,19 +1,14 @@
 /** Triumph, title and season-pass reward actions the web service prepares from one request. */
 
-#include <algorithm>
 #include <array>
 #include <cstdio>
 #include <span>
 #include <string_view>
 
 #include "../../core/logging/log.h"
-#include "../../middleware/crypto/random_bytes.h"
-#include "../../middleware/encoding/byte_order.h"
 #include "../../middleware/web_service/messages/opcode1801.h"
 #include "../../middleware/web_service/messages/opcode1821.h"
 #include "../../middleware/web_service/messages/opcode2400.h"
-#include "../../state/account/account_state.h"
-#include "../../state/build_data/items/item_catalog.h"
 #include "../../state/build_data/runtime.h"
 #include "../../state/progression/season_pass_reward_catalog.h"
 #include "../../state/runtime/runtime.h"
@@ -171,9 +166,6 @@ void claim_season_pass_reward(const middleware::web_service::Message& message,
         clear_mutation(outcome);
         return fail("claim_rejected");
     }
-    grant->sourceDefinitionHash = reward.itemHash;
-    grant->rewardIndex = request.rewardIndex;
-    grant->prepared = true;
 }
 
 /** Decodes one opcode-1801 Triumphs claim and reports the record it names. */

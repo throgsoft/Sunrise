@@ -2,7 +2,6 @@
 
 #include <algorithm>
 #include <cmath>
-#include <limits>
 
 #include "../build_data/rewards/reward_catalog.h"
 
@@ -10,7 +9,7 @@ namespace sunrise::state::rewards {
 namespace {
 
 namespace definitions = build_data::rewards;
-/** The empty native tag leaves the enclosing reward category or bucket unconstrained. */
+/** The empty bucket tag inherits the enclosing pool's bucket constraint. */
 constexpr std::uint32_t kEmptyTag = 0x811C9DC5U;
 /** Bounded postfix stack for native reward conditions. */
 constexpr std::size_t kExpressionCapacity = 64;
@@ -29,6 +28,7 @@ bool condition(definitions::View data,
         const auto operand = instruction.operand;
         std::int64_t value = 0;
         using Read = definitions::BankRead;
+        using Op = definitions::Opcode;
         switch (instruction.opcode) {
         case static_cast<std::uint32_t>(Read::accountFlag):
             if (operand >= context.unlocks.accountFlags.size()) return false;
@@ -62,43 +62,43 @@ bool condition(definitions::View data,
                 return false;
             }
             break;
-        case 11:
+        case static_cast<std::uint32_t>(Op::constant):
             value = static_cast<std::int32_t>(operand);
             break;
-        case 2:
+        case static_cast<std::uint32_t>(Op::logicalNot):
             if (size == 0) return false;
             stack[size - 1] = stack[size - 1] == 0;
             continue;
-        case 22:
+        case static_cast<std::uint32_t>(Op::negate):
             if (size == 0) return false;
             stack[size - 1] = -stack[size - 1];
             continue;
-        case 3:
-        case 4:
-        case 8:
-        case 13:
-        case 14:
-        case 15: {
+        case static_cast<std::uint32_t>(Op::logicalOr):
+        case static_cast<std::uint32_t>(Op::logicalAnd):
+        case static_cast<std::uint32_t>(Op::equal):
+        case static_cast<std::uint32_t>(Op::greaterThan):
+        case static_cast<std::uint32_t>(Op::greaterOrEqual):
+        case static_cast<std::uint32_t>(Op::lessThan): {
             if (size < 2) return false;
             const auto right = stack[--size];
             auto& left = stack[size - 1];
             switch (instruction.opcode) {
-            case 3:
+            case static_cast<std::uint32_t>(Op::logicalOr):
                 left = left != 0 || right != 0;
                 break;
-            case 4:
+            case static_cast<std::uint32_t>(Op::logicalAnd):
                 left = left != 0 && right != 0;
                 break;
-            case 8:
+            case static_cast<std::uint32_t>(Op::equal):
                 left = left == right;
                 break;
-            case 13:
+            case static_cast<std::uint32_t>(Op::greaterThan):
                 left = left > right;
                 break;
-            case 14:
+            case static_cast<std::uint32_t>(Op::greaterOrEqual):
                 left = left >= right;
                 break;
-            case 15:
+            case static_cast<std::uint32_t>(Op::lessThan):
                 left = left < right;
                 break;
             }
@@ -214,7 +214,7 @@ struct Resolver {
             if (remaining < 0) break;
         }
         if (chosen == nullptr
-            || chosen->quantity != 1 && chosen->poolIndex != definitions::kAbsent) {
+            || (chosen->quantity != 1 && chosen->poolIndex != definitions::kAbsent)) {
             return false;
         }
         if (chosen->poolIndex != definitions::kAbsent) {

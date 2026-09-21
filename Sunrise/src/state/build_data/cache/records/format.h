@@ -309,7 +309,7 @@ struct ProgressionStepRecord {
     std::int32_t cost{};
 };
 
-/** Disk form of one season pass reward row. */
+/** Disk form of one reward socket override. */
 struct RewardSocketOverrideRecord {
     std::uint16_t socketType{};
     std::uint16_t plugItem{};
@@ -323,13 +323,14 @@ struct RewardInstructionRecord {
     std::uint32_t operand{};
 };
 
+/** Disk form of one season pass reward row. */
 struct SeasonPassRewardRecord {
     std::uint32_t itemHash{};
     std::uint32_t quantity{};
     std::uint16_t itemIndex{};
     std::uint16_t claimFlagIndex{season_pass::kUnavailableFlagIndex};
     std::uint8_t requiredRank{};
-    std::array<RewardSocketOverrideRecord, 12> sockets{};
+    std::array<RewardSocketOverrideRecord, rewards::kSocketsPerItem> sockets{};
     std::uint8_t socketCount{};
     std::array<RewardInstructionRecord, season_pass::kConditionCapacity> condition{};
     std::uint8_t conditionCount{};
@@ -681,7 +682,7 @@ static_assert(sizeof(ProgressionRecord) == 2 * sizeof(std::uint16_t) + 2 * sizeo
 static_assert(sizeof(ProgressionStepRecord) == sizeof(std::int32_t));
 static_assert(sizeof(SeasonPassRewardRecord)
               == 2 * sizeof(std::uint32_t) + 2 * sizeof(std::uint16_t) + 6 * sizeof(std::uint8_t)
-                     + 12 * sizeof(RewardSocketOverrideRecord)
+                     + rewards::kSocketsPerItem * sizeof(RewardSocketOverrideRecord)
                      + season_pass::kConditionCapacity * sizeof(RewardInstructionRecord));
 static_assert(sizeof(BountyRecord) == 2 * sizeof(std::uint32_t) + 2 * sizeof(std::uint16_t));
 static_assert(sizeof(RecordDefinitionRecord)

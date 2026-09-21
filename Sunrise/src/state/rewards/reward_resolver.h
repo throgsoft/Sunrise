@@ -12,7 +12,7 @@ inline constexpr std::uint32_t kGearCategory = 1172844112U;
 struct Grant {
     std::uint16_t itemIndex{build_data::rewards::kAbsent};
     std::int32_t quantity{};
-    std::array<build_data::rewards::SocketOverride, 12> sockets{};
+    std::array<build_data::rewards::SocketOverride, build_data::rewards::kSocketsPerItem> sockets{};
     std::size_t socketCount{};
 };
 

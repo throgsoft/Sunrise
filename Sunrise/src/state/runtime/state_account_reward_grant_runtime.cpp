@@ -2,9 +2,6 @@
  * Grants that no purchase pays for: season pass rewards, record rewards, and the
  * default emote collection.
  */
-#include <Windows.h>
-
-#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>

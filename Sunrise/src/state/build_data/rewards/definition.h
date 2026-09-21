@@ -16,6 +16,8 @@ inline constexpr std::size_t kItemCapacity = 32768;
 inline constexpr std::size_t kInstructionCapacity = 131072;
 inline constexpr std::size_t kModifierCapacity = 32768;
 inline constexpr std::size_t kSocketOverrideCapacity = 32768;
+/** Native reward overrides address the 12 ordinary sockets on an item. */
+inline constexpr std::size_t kSocketsPerItem = 12;
 /** A wrapper can select independently from four reward categories. */
 inline constexpr std::size_t kSelectionCapacity = 4;
 /** A resolved grant fits one bounded inventory transaction. */
@@ -28,7 +30,22 @@ struct Range {
     std::uint32_t count{};
 };
 
-/** Native expression operators retain their operands until State evaluates them. */
+/** Native instruction values before unlock references are bound. */
+enum class Opcode : std::uint32_t {
+    flag = 1,
+    logicalNot = 2,
+    logicalOr = 3,
+    logicalAnd = 4,
+    equal = 8,
+    loadValue = 10,
+    constant = 11,
+    expression = 12,
+    greaterThan = 13,
+    greaterOrEqual = 14,
+    lessThan = 15,
+    negate = 22,
+};
+
 struct Instruction {
     std::uint32_t opcode{};
     std::uint32_t operand{};
@@ -105,7 +122,6 @@ struct View {
     std::span<const SocketOverride> sockets;
 };
 
-/** A range is checked before any subspan is formed. */
 template <typename T> [[nodiscard]] constexpr bool fits(Range range, std::span<T> bank) noexcept {
     return range.first <= bank.size() && range.count <= bank.size() - range.first;
 }

@@ -4,7 +4,6 @@
 #include <cstddef>
 #include <cstdint>
 #include <span>
-#include <variant>
 
 #include "../build_data/items/quest_initialization.h"
 #include "../build_data/records/definition.h"

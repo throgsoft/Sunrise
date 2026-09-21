@@ -100,7 +100,9 @@ bool encode(const season_pass::Reward& value, SeasonPassRewardRecord& record) no
     record.requiredRank = value.requiredRank;
     record.socketCount = value.socketCount;
     record.conditionCount = value.conditionCount;
-    if (record.conditionCount > record.condition.size()) return false;
+    if (record.conditionCount > record.condition.size()
+        || record.socketCount > record.sockets.size())
+        return false;
     for (std::size_t i = 0; i < record.condition.size(); ++i) {
         if (!encode(value.condition[i], record.condition[i])) return false;
     }

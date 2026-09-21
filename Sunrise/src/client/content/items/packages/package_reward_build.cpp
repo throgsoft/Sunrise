@@ -2,7 +2,6 @@
 
 #include <algorithm>
 #include <cstring>
-#include <limits>
 #include <vector>
 
 #include "../../../../middleware/content/packages/tables/definition_index_table.h"
@@ -54,7 +53,7 @@ bool array(std::span<const std::byte> blob,
 }
 
 template <typename T> bool append(std::vector<T>& bank, T value, std::size_t capacity) noexcept {
-    if (bank.size() == capacity) {
+    if (bank.size() >= capacity) {
         return false;
     }
     try {
@@ -105,7 +104,7 @@ struct Builder {
                 return false;
             }
         }
-        std::array<domain::SocketOverride, 12> overrides{};
+        std::array<domain::SocketOverride, domain::kSocketsPerItem> overrides{};
         std::size_t count = 0;
         if (!read_reward_sockets(blob, at + 64, overrides, count)
             || count > domain::kSocketOverrideCapacity - sockets.size()) {
@@ -148,8 +147,9 @@ bool RewardConditions::load(const reader::Source& source,
 }
 
 bool RewardConditions::bind(domain::Instruction& instruction) const noexcept {
-    const bool flag = instruction.opcode == 1;
-    if (!flag && instruction.opcode != 10) {
+    const auto opcode = static_cast<domain::Opcode>(instruction.opcode);
+    const bool flag = opcode == domain::Opcode::flag;
+    if (!flag && opcode != domain::Opcode::loadValue) {
         return true;
     }
     const auto& rows = flag ? flagRows_ : valueRows_;
@@ -185,7 +185,7 @@ bool RewardConditions::append_expression(std::span<const std::byte> blob,
         if (!field(blob, rows.dataOffset + i * 8, instruction.opcode)
             || !field(blob, rows.dataOffset + i * 8 + 4, instruction.operand))
             return false;
-        if (instruction.opcode == 12) {
+        if (static_cast<domain::Opcode>(instruction.opcode) == domain::Opcode::expression) {
             const auto before = bank.size();
             if (instruction.operand >= expressionRows_.count
                 || !append_expression(expressions_,
@@ -229,7 +229,12 @@ bool RewardConditions::read_list(std::span<const std::byte> blob,
             return false;
         }
         // Every expression attached to a progression reward must hold.
-        if (i != 0) instructions.push_back({4, 0});
+        if (i != 0
+            && !append(
+                instructions,
+                domain::Instruction{static_cast<std::uint32_t>(domain::Opcode::logicalAnd), 0},
+                output.size()))
+            return false;
         if (instructions.size() > output.size()) return false;
     }
     std::copy(instructions.begin(), instructions.end(), output.begin());
@@ -310,7 +315,7 @@ bool build_rewards(const reader::Source& source,
         }
         item.definitionHash = row.definitionHash;
         if (acquired != domain::kAbsent) {
-            domain::Instruction flag{1, acquired};
+            domain::Instruction flag{static_cast<std::uint32_t>(domain::Opcode::flag), acquired};
             if (!build.conditions.bind(flag)) {
                 return false;
             }

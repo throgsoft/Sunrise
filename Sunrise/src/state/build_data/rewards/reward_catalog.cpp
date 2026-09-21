@@ -1,5 +1,6 @@
 #include "reward_catalog.h"
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <mutex>
@@ -29,22 +30,25 @@ View view() noexcept {
             g_sockets.rows()};
 }
 
-bool acyclic(View data,
-             std::size_t index,
-             std::array<std::uint8_t, kPoolCapacity>& visited,
-             std::size_t depth = 0) noexcept {
+bool valid_depth(View data,
+                 std::size_t index,
+                 std::array<std::uint8_t, kPoolCapacity>& heights,
+                 std::size_t depth = 0) noexcept {
+    constexpr std::uint8_t kVisiting = 0xFF;
     if (depth >= kTraversalDepth) return false;
-    if (visited[index] != 0) {
-        return visited[index] == 2;
+    if (heights[index] != 0) {
+        // Reused subtrees must also fit when reached through a deeper path.
+        return heights[index] != kVisiting && heights[index] <= kTraversalDepth - depth;
     }
-    visited[index] = 1;
+    heights[index] = kVisiting;
+    std::uint8_t height = 1;
     const Range range = data.pools[index].entries;
     for (const Entry& entry : data.entries.subspan(range.first, range.count)) {
-        if (entry.poolIndex != kAbsent && !acyclic(data, entry.poolIndex, visited, depth + 1)) {
-            return false;
-        }
+        if (entry.poolIndex == kAbsent) continue;
+        if (!valid_depth(data, entry.poolIndex, heights, depth + 1)) return false;
+        height = (std::max)(height, static_cast<std::uint8_t>(heights[entry.poolIndex] + 1));
     }
-    visited[index] = 2;
+    heights[index] = height;
     return true;
 }
 
@@ -114,9 +118,9 @@ bool valid(View data) noexcept {
             return false;
         }
     }
-    std::array<std::uint8_t, kPoolCapacity> visited{};
+    std::array<std::uint8_t, kPoolCapacity> heights{};
     for (std::size_t index = 0; index < data.pools.size(); ++index) {
-        if (!acyclic(data, index, visited)) {
+        if (!valid_depth(data, index, heights)) {
             return false;
         }
     }

@@ -2,9 +2,6 @@
 
 #include "queuez_reward_staging.h"
 
-#include <optional>
-#include <variant>
-
 #include "../../../../core/logging/log.h"
 #include "../../../../middleware/secure_channel/runtime.h"
 
@@ -56,30 +53,24 @@ stage_profile_item_acquisition_push(Scratch& scratch,
     return true;
 }
 
-/** Stages all rewards of one pass claim in a single account revision. */
+/** Publishes a reward batch before advancing the nonce and peer revision. */
 [[nodiscard]] bool
-stage_season_pass_reward(Scratch& scratch,
+stage_record_reward_push(Scratch& scratch,
                          const SessionState& before,
-                         const SeasonPassRewardTransaction& reward,
+                         const RecordRewardGrant& update,
+                         const state::PendingRecordRewardGrant& pending,
                          std::span<const AcquisitionPresentationRow> presentationRows,
                          std::span<const std::byte, state::kAesKeySize> key,
                          std::array<std::byte, state::kBapNonceSize>& nonce,
                          std::span<std::byte> response,
                          std::size_t& written,
                          SessionState& after) noexcept {
-    if (!push::append_record_reward_notification(scratch,
-                                                 before,
-                                                 reward.update,
-                                                 reward.pending->grant,
-                                                 presentationRows,
-                                                 key,
-                                                 nonce,
-                                                 response,
-                                                 written)) {
+    if (!push::append_record_reward_notification(
+            scratch, before, update, pending, presentationRows, key, nonce, response, written)) {
         return false;
     }
     middleware::secure_channel::advance_nonce(nonce);
-    after = reward.update.after;
+    after = update.after;
     return true;
 }
 
@@ -144,28 +135,35 @@ bool stage_reward_outcome(Scratch& scratch,
     }
     if (const auto* record = transaction_if<RecordRewardGrantTransaction>(outcome)) {
         if (record->pending == nullptr
-            || !push::append_record_reward_notification(scratch,
-                                                        before,
-                                                        record->update,
-                                                        *record->pending,
-                                                        presentationRows,
-                                                        key,
-                                                        nonce,
-                                                        response,
-                                                        written)) {
+            || !stage_record_reward_push(scratch,
+                                         before,
+                                         record->update,
+                                         *record->pending,
+                                         presentationRows,
+                                         key,
+                                         nonce,
+                                         response,
+                                         written,
+                                         after)) {
             core::log::write(core::log::Channel::server,
                              core::log::Level::warn,
                              "ev=queuez stage=record_reward result=fail");
             return false;
         }
-        middleware::secure_channel::advance_nonce(nonce);
-        after = record->update.after;
         return true;
     }
     const auto* seasonPass = transaction_if<SeasonPassRewardTransaction>(outcome);
     if (seasonPass == nullptr || seasonPass->pending == nullptr
-        || !stage_season_pass_reward(
-            scratch, before, *seasonPass, presentationRows, key, nonce, response, written, after)) {
+        || !stage_record_reward_push(scratch,
+                                     before,
+                                     seasonPass->update,
+                                     seasonPass->pending->grant,
+                                     presentationRows,
+                                     key,
+                                     nonce,
+                                     response,
+                                     written,
+                                     after)) {
         core::log::write(core::log::Channel::server,
                          core::log::Level::warn,
                          "ev=ws2400 stage=queuez_reward result=fail");

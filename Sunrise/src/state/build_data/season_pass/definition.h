@@ -29,7 +29,7 @@ struct Reward {
     std::uint16_t claimFlagIndex{kUnavailableFlagIndex};
     /** Rank the account needs before the row may be claimed. */
     std::uint8_t requiredRank{};
-    std::array<rewards::SocketOverride, 12> sockets{};
+    std::array<rewards::SocketOverride, rewards::kSocketsPerItem> sockets{};
     std::uint8_t socketCount{};
     std::array<rewards::Instruction, kConditionCapacity> condition{};
     std::uint8_t conditionCount{};

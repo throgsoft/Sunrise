@@ -1,4 +1,3 @@
-#include <algorithm>
 #include <cstring>
 #include <limits>
 
@@ -13,7 +12,6 @@ namespace domain = state::build_data::season_pass;
 /** Account progression the installed Season of Arrivals pass declares its rewards on. */
 constexpr std::uint16_t kPassProgressionIndex = 40;
 
-/** @param blob Source bytes. @param offset Field offset. @param value Receives the field. */
 template <typename Value>
 [[nodiscard]] bool
 read(std::span<const std::byte> blob, std::size_t offset, Value& value) noexcept {
@@ -26,14 +24,7 @@ read(std::span<const std::byte> blob, std::size_t offset, Value& value) noexcept
 
 } // namespace
 
-/**
- * Reads the season pass reward list and fixed socket overrides.
- * A reward names an item index and a claim flag slot; both become the values a grant needs.
- * @param source Installed package source.
- * @param storage Pass storage receiving the reward rows.
- * @param root Investment root bytes.
- * @return True when the reward list read and produced at least one row.
- */
+/** Preserves native reward order for opcode-2400 claim indices. */
 bool build_season_pass(const reader::Source& source,
                        Storage& storage,
                        std::span<const std::byte> root) noexcept {

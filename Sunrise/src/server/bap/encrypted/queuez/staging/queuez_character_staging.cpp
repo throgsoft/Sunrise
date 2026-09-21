@@ -478,14 +478,17 @@ bool stage_record_reward_grant(const SessionState& before,
                                const state::PendingRecordRewardGrant& pending,
                                RecordRewardGrant& grant) noexcept {
     grant = {};
-    if (!pending.prepared || pending.rewardCount > pending.rewards.size()) return false;
+    if (!pending.prepared || pending.rewardCount > pending.rewards.size()) {
+        return false;
+    }
     std::array<std::uint64_t, state::kRecordRewardGrantCapacity> residents{};
     std::size_t count = 0;
     for (std::size_t i = 0; i < pending.rewardCount; ++i) {
         const auto& reward = pending.rewards[i];
         if (reward.kind == state::RecordRewardKind::characterInstance
-            || reward.appendedProfileResident)
+            || reward.appendedProfileResident) {
             residents[count++] = reward.instanceSoid;
+        }
     }
     return stage_record_reward_grant(before,
                                      pending.accountSoid,

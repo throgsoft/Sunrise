@@ -66,10 +66,13 @@ bool consume_world_record_reward(const WorldRewardRequest& request,
     state::investment::store::Transaction transaction;
     if (!pending || !transaction.ready() || request.quantity <= 0
         || !state::prepare_item_reward(
-            request.itemDefinitionIndex, static_cast<std::uint32_t>(request.quantity), *pending))
+            request.itemDefinitionIndex, static_cast<std::uint32_t>(request.quantity), *pending)) {
         return false;
+    }
     queuez::RecordRewardGrant update{};
-    if (!queuez::stage_record_reward_grant(session.queuez, *pending, update)) return false;
+    if (!queuez::stage_record_reward_grant(session.queuez, *pending, update)) {
+        return false;
+    }
     touchesScratch = true;
     std::size_t framedSize = 0;
     if (!push::append_record_reward_notification(scratch,
@@ -82,8 +85,9 @@ bool consume_world_record_reward(const WorldRewardRequest& request,
                                                  scratch.framed,
                                                  framedSize)
         || framedSize == 0 || framedSize > response.size() || !state::commit_record_reward(*pending)
-        || !bap::complete_world_reward(request.id) || !transaction.commit())
+        || !bap::complete_world_reward(request.id) || !transaction.commit()) {
         return false;
+    }
     std::copy_n(scratch.framed.begin(), framedSize, response.begin());
     written = framedSize;
     middleware::secure_channel::advance_nonce(session.sendNonce);
@@ -101,12 +105,14 @@ bool consume_world_record_reward(const WorldRewardRequest& request,
                                                   std::size_t& written,
                                                   bool& touchesScratch) noexcept {
     state::build_data::items::Definition item{};
-    if (!state::build_data::find_item_definition_index(request.itemDefinitionIndex, item))
+    if (!state::build_data::find_item_definition_index(request.itemDefinitionIndex, item)) {
         return false;
+    }
     if (item.questInitialization.scope
-        == state::build_data::items::QuestInitialization::Scope::none)
+        == state::build_data::items::QuestInitialization::Scope::none) {
         return consume_world_record_reward(
             request, session, scratch, response, written, touchesScratch);
+    }
     state::investment::store::Transaction transaction;
     if (!transaction.ready()) {
         return false;

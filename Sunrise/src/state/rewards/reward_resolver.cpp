@@ -31,19 +31,27 @@ bool condition(definitions::View data,
         using Op = definitions::Opcode;
         switch (instruction.opcode) {
         case static_cast<std::uint32_t>(Read::accountFlag):
-            if (operand >= context.unlocks.accountFlags.size()) return false;
+            if (operand >= context.unlocks.accountFlags.size()) {
+                return false;
+            }
             value = context.unlocks.accountFlags[operand] == unlocks::kFlagSet;
             break;
         case static_cast<std::uint32_t>(Read::characterFlag):
-            if (operand >= context.unlocks.characterObjectFlags.size()) return false;
+            if (operand >= context.unlocks.characterObjectFlags.size()) {
+                return false;
+            }
             value = context.unlocks.characterObjectFlags[operand] == unlocks::kFlagSet;
             break;
         case static_cast<std::uint32_t>(Read::accountValue):
-            if (operand >= context.unlocks.objectiveValues.size()) return false;
+            if (operand >= context.unlocks.objectiveValues.size()) {
+                return false;
+            }
             value = context.unlocks.objectiveValues[operand];
             break;
         case static_cast<std::uint32_t>(Read::characterValue):
-            if (operand >= context.unlocks.characterObjectValues.size()) return false;
+            if (operand >= context.unlocks.characterObjectValues.size()) {
+                return false;
+            }
             value = context.unlocks.characterObjectValues[operand];
             break;
         case static_cast<std::uint32_t>(Read::externalFlag):
@@ -66,11 +74,15 @@ bool condition(definitions::View data,
             value = static_cast<std::int32_t>(operand);
             break;
         case static_cast<std::uint32_t>(Op::logicalNot):
-            if (size == 0) return false;
+            if (size == 0) {
+                return false;
+            }
             stack[size - 1] = stack[size - 1] == 0;
             continue;
         case static_cast<std::uint32_t>(Op::negate):
-            if (size == 0) return false;
+            if (size == 0) {
+                return false;
+            }
             stack[size - 1] = -stack[size - 1];
             continue;
         case static_cast<std::uint32_t>(Op::logicalOr):
@@ -79,7 +91,9 @@ bool condition(definitions::View data,
         case static_cast<std::uint32_t>(Op::greaterThan):
         case static_cast<std::uint32_t>(Op::greaterOrEqual):
         case static_cast<std::uint32_t>(Op::lessThan): {
-            if (size < 2) return false;
+            if (size < 2) {
+                return false;
+            }
             const auto right = stack[--size];
             auto& left = stack[size - 1];
             switch (instruction.opcode) {
@@ -107,11 +121,15 @@ bool condition(definitions::View data,
         default:
             return false;
         }
-        if (size == stack.size()) return false;
+        if (size == stack.size()) {
+            return false;
+        }
         stack[size++] = value;
     }
     if (expression.count != 0) {
-        if (size != 1) return false;
+        if (size != 1) {
+            return false;
+        }
         result = stack[0] != 0;
     }
     return true;
@@ -145,33 +163,54 @@ struct Resolver {
             return true;
         }
         bool enabled = false;
-        if (!condition(data, entry.condition, context, enabled)) return false;
-        if (!enabled) return true;
+        if (!condition(data, entry.condition, context, enabled)) {
+            return false;
+        }
+        if (!enabled) {
+            return true;
+        }
         double value = entry.weight;
-        if (!definitions::fits(entry.modifiers, data.modifiers)) return false;
+        if (!definitions::fits(entry.modifiers, data.modifiers)) {
+            return false;
+        }
         for (const auto& modifier :
              data.modifiers.subspan(entry.modifiers.first, entry.modifiers.count)) {
-            if (!condition(data, modifier.condition, context, enabled)) return false;
+            if (!condition(data, modifier.condition, context, enabled)) {
+                return false;
+            }
             if (enabled) {
-                if (modifier.valueIndex != definitions::kAbsent) return false;
+                if (modifier.valueIndex != definitions::kAbsent) {
+                    return false;
+                }
                 value = modifier.value;
             }
         }
-        if (!std::isfinite(value) || value < 0) return false;
-        if (value == 0) return true;
+        if (!std::isfinite(value) || value < 0) {
+            return false;
+        }
+        if (value == 0) {
+            return true;
+        }
         if (entry.poolIndex != definitions::kAbsent) {
             double total = 0;
             if (!pool_weight(entry.poolIndex,
                              category,
                              entry.bucketHash == kEmptyTag ? bucket : entry.bucketHash,
                              depth + 1,
-                             total))
+                             total)) {
                 return false;
-            if (total == 0) return true;
+            }
+            if (total == 0) {
+                return true;
+            }
         } else if (entry.itemIndex != definitions::kAbsent) {
-            if (entry.itemIndex >= data.items.size()) return false;
+            if (entry.itemIndex >= data.items.size()) {
+                return false;
+            }
             for (std::size_t i = 0; i < result.count; ++i) {
-                if (result.grants[i].itemIndex == entry.itemIndex) return true;
+                if (result.grants[i].itemIndex == entry.itemIndex) {
+                    return true;
+                }
             }
         } else {
             return false;
@@ -186,12 +225,18 @@ struct Resolver {
                      std::size_t depth,
                      double& total) noexcept {
         total = 0;
-        if (depth >= definitions::kTraversalDepth || index >= data.pools.size()) return false;
+        if (depth >= definitions::kTraversalDepth || index >= data.pools.size()) {
+            return false;
+        }
         const auto range = data.pools[index].entries;
-        if (!definitions::fits(range, data.entries)) return false;
+        if (!definitions::fits(range, data.entries)) {
+            return false;
+        }
         for (const auto& entry : data.entries.subspan(range.first, range.count)) {
             double value = 0;
-            if (!weight(entry, category, bucket, depth, value)) return false;
+            if (!weight(entry, category, bucket, depth, value)) {
+                return false;
+            }
             total += value;
         }
         return std::isfinite(total);
@@ -207,11 +252,17 @@ struct Resolver {
         const definitions::Entry* chosen = nullptr;
         for (const auto& entry : data.entries.subspan(range.first, range.count)) {
             double value = 0;
-            if (!weight(entry, category, bucket, depth, value)) return false;
-            if (value == 0) continue;
+            if (!weight(entry, category, bucket, depth, value)) {
+                return false;
+            }
+            if (value == 0) {
+                continue;
+            }
             chosen = &entry;
             remaining -= value;
-            if (remaining < 0) break;
+            if (remaining < 0) {
+                break;
+            }
         }
         if (chosen == nullptr
             || (chosen->quantity != 1 && chosen->poolIndex != definitions::kAbsent)) {
@@ -226,12 +277,15 @@ struct Resolver {
         }
         if (chosen->quantity == 0 || chosen->quantity > INT32_MAX
             || result.count == result.grants.size()
-            || !definitions::fits(chosen->sockets, data.sockets))
+            || !definitions::fits(chosen->sockets, data.sockets)) {
             return false;
+        }
         auto& grant = result.grants[result.count++];
         grant.itemIndex = chosen->itemIndex;
         grant.quantity = static_cast<std::int32_t>(chosen->quantity);
-        if (chosen->sockets.count > grant.sockets.size()) return false;
+        if (chosen->sockets.count > grant.sockets.size()) {
+            return false;
+        }
         grant.socketCount = chosen->sockets.count;
         std::copy_n(
             data.sockets.begin() + chosen->sockets.first, grant.socketCount, grant.sockets.begin());
@@ -246,7 +300,9 @@ bool eligible(std::span<const definitions::Instruction> instructions,
               bool& result) noexcept {
     definitions::View view{};
     view.instructions = instructions;
-    if (instructions.size() > UINT32_MAX) return false;
+    if (instructions.size() > UINT32_MAX) {
+        return false;
+    }
     return condition(view, {0, static_cast<std::uint32_t>(instructions.size())}, context, result);
 }
 
@@ -257,7 +313,9 @@ bool resolve(definitions::View data,
              std::uint32_t category,
              Result& result) noexcept {
     result = {};
-    if (itemIndex >= data.items.size() || quantity == 0 || quantity > INT32_MAX) return false;
+    if (itemIndex >= data.items.size() || quantity == 0 || quantity > INT32_MAX) {
+        return false;
+    }
     const auto& item = data.items[itemIndex];
     Result staged{};
     if (item.poolIndex == definitions::kAbsent) {
@@ -272,8 +330,12 @@ bool resolve(definitions::View data,
         Resolver resolver{data, context, staged, context.seed};
         for (std::size_t i = 0; i < item.selectionCount; ++i) {
             const auto& selection = item.selections[i];
-            if (category != 0 && category != selection.categoryHash) continue;
-            if (selection.count > staged.grants.size()) return false;
+            if (category != 0 && category != selection.categoryHash) {
+                continue;
+            }
+            if (selection.count > staged.grants.size()) {
+                return false;
+            }
             for (std::size_t j = 0; j < selection.count; ++j) {
                 double total = 0;
                 if (!resolver.pool_weight(
@@ -281,13 +343,17 @@ bool resolve(definitions::View data,
                     return false;
                 }
                 // A fixed bundle can have fewer eligible members after an acquisition unlock.
-                if (total == 0) break;
+                if (total == 0) {
+                    break;
+                }
                 if (!resolver.draw(item.poolIndex, selection.categoryHash, kEmptyTag, 0, total)) {
                     return false;
                 }
             }
         }
-        if (staged.count == 0) return false;
+        if (staged.count == 0) {
+            return false;
+        }
     }
     result = staged;
     return true;

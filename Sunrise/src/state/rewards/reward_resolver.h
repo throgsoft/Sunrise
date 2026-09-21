@@ -28,12 +28,12 @@ struct Context {
     std::uint64_t seed{};
 };
 
-[[nodiscard]] bool eligible(std::span<const build_data::rewards::Instruction> condition,
+[[nodiscard]] bool eligible(std::span<const build_data::rewards::Instruction> instructions,
                             const Context& context,
                             bool& result) noexcept;
 
 /** A zero category expands every declared selector; a named category expands only that lane. */
-[[nodiscard]] bool resolve(build_data::rewards::View definitions,
+[[nodiscard]] bool resolve(build_data::rewards::View data,
                            const Context& context,
                            std::uint16_t itemIndex,
                            std::uint32_t quantity,

@@ -35,7 +35,9 @@ bool valid_depth(View data,
                  std::array<std::uint8_t, kPoolCapacity>& heights,
                  std::size_t depth = 0) noexcept {
     constexpr std::uint8_t kVisiting = 0xFF;
-    if (depth >= kTraversalDepth) return false;
+    if (depth >= kTraversalDepth) {
+        return false;
+    }
     if (heights[index] != 0) {
         // Reused subtrees must also fit when reached through a deeper path.
         return heights[index] != kVisiting && heights[index] <= kTraversalDepth - depth;
@@ -44,8 +46,12 @@ bool valid_depth(View data,
     std::uint8_t height = 1;
     const Range range = data.pools[index].entries;
     for (const Entry& entry : data.entries.subspan(range.first, range.count)) {
-        if (entry.poolIndex == kAbsent) continue;
-        if (!valid_depth(data, entry.poolIndex, heights, depth + 1)) return false;
+        if (entry.poolIndex == kAbsent) {
+            continue;
+        }
+        if (!valid_depth(data, entry.poolIndex, heights, depth + 1)) {
+            return false;
+        }
         height = (std::max)(height, static_cast<std::uint8_t>(heights[entry.poolIndex] + 1));
     }
     heights[index] = height;
@@ -104,8 +110,10 @@ bool valid(View data) noexcept {
         if ((kind == BankRead::accountFlag && slot >= unlocks::kAccountFlagCapacity)
             || (kind == BankRead::characterFlag && slot >= unlocks::kCharacterObjectFlagCapacity)
             || (kind == BankRead::accountValue && slot >= unlocks::kObjectiveValueCapacity)
-            || (kind == BankRead::characterValue && slot >= unlocks::kCharacterObjectValueCapacity))
+            || (kind == BankRead::characterValue
+                && slot >= unlocks::kCharacterObjectValueCapacity)) {
             return false;
+        }
     }
     for (const Modifier& modifier : data.modifiers) {
         if (!fits(modifier.condition, data.instructions) || !std::isfinite(modifier.value)) {

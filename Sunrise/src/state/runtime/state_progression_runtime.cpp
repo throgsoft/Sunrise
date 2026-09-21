@@ -372,7 +372,9 @@ bool grant_seasonal_experience(std::int32_t baseAmount, std::int32_t& grantedAmo
             || flag < 0 || flag > unlocks::kFlagSet) {
             return false;
         }
-        if (flag == unlocks::kFlagSet) percent += boost.percent;
+        if (flag == unlocks::kFlagSet) {
+            percent += boost.percent;
+        }
     }
     const std::int64_t amount = static_cast<std::int64_t>(baseAmount) * percent / 100;
     const std::int32_t previous = seasonal_experience();
@@ -391,7 +393,9 @@ bool grant_seasonal_experience(std::int32_t baseAmount, std::int32_t& grantedAmo
     const bool saved = publish_experience_lanes(total)
                        && publish_artifact_locked(family, mask, total)
                        && investment::store::write_family5(family) && transaction.commit();
-    if (saved) grantedAmount = static_cast<std::int32_t>(amount);
+    if (saved) {
+        grantedAmount = static_cast<std::int32_t>(amount);
+    }
     return saved;
 }
 

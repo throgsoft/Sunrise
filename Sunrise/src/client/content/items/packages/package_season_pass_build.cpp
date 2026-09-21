@@ -30,7 +30,9 @@ bool build_season_pass(const reader::Source& source,
                        std::span<const std::byte> root) noexcept {
     storage.seasonPassRewardCount = 0;
     RewardConditions conditions;
-    if (!conditions.load(source, storage.scratch, root)) return false;
+    if (!conditions.load(source, storage.scratch, root)) {
+        return false;
+    }
 
     std::uint32_t itemTableTag = 0;
     tables::Array itemRows{};
@@ -100,8 +102,9 @@ bool build_season_pass(const reader::Source& source,
         }
         reward.socketCount = static_cast<std::uint8_t>(socketCount);
         std::size_t conditionCount = 0;
-        if (!conditions.read_list(progressionTable, at + 24, reward.condition, conditionCount))
+        if (!conditions.read_list(progressionTable, at + 24, reward.condition, conditionCount)) {
             return false;
+        }
         reward.conditionCount = static_cast<std::uint8_t>(conditionCount);
         // A reward with no claim flag carries slot 0.
         if (claimSlot != 0) {

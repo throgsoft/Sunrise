@@ -28,7 +28,9 @@ bool valid(std::span<const Reward> rewards) noexcept {
 }
 
 bool replace(std::span<const Reward> rewards) noexcept {
-    if (!valid(rewards)) return false;
+    if (!valid(rewards)) {
+        return false;
+    }
     const std::lock_guard guard(g_lock);
     return g_rewards.replace(rewards);
 }
@@ -36,7 +38,9 @@ bool replace(std::span<const Reward> rewards) noexcept {
 bool find(std::uint16_t rewardIndex, Reward& reward) noexcept {
     reward = {};
     const std::shared_lock guard(g_lock);
-    if (rewardIndex >= g_rewards.count()) return false;
+    if (rewardIndex >= g_rewards.count()) {
+        return false;
+    }
     reward = g_rewards.rows()[rewardIndex];
     return true;
 }

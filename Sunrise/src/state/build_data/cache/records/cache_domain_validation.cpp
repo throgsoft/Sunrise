@@ -296,13 +296,16 @@ bool valid_domains(const BuildIdentity& build, Domains domains) noexcept {
     }
     for (const auto& reward : domains.seasonPassRewards) {
         if (reward.itemIndex >= domains.items.size()
-            || domains.items[reward.itemIndex].definitionHash != reward.itemHash)
+            || domains.items[reward.itemIndex].definitionHash != reward.itemHash) {
             return false;
+        }
         for (std::size_t i = 0; i < reward.socketCount; ++i) {
             const auto& socket = reward.sockets[i];
             if (socket.socketType == rewards::kAbsent
-                || (socket.plugItem != rewards::kAbsent && socket.plugItem >= domains.items.size()))
+                || (socket.plugItem != rewards::kAbsent
+                    && socket.plugItem >= domains.items.size())) {
                 return false;
+            }
         }
     }
     for (const material_requirements::Definition& definition : domains.materialRequirementSets) {

@@ -101,13 +101,18 @@ bool encode(const season_pass::Reward& value, SeasonPassRewardRecord& record) no
     record.socketCount = value.socketCount;
     record.conditionCount = value.conditionCount;
     if (record.conditionCount > record.condition.size()
-        || record.socketCount > record.sockets.size())
+        || record.socketCount > record.sockets.size()) {
         return false;
+    }
     for (std::size_t i = 0; i < record.condition.size(); ++i) {
-        if (!encode(value.condition[i], record.condition[i])) return false;
+        if (!encode(value.condition[i], record.condition[i])) {
+            return false;
+        }
     }
     for (std::size_t i = 0; i < record.sockets.size(); ++i) {
-        if (!encode(value.sockets[i], record.sockets[i])) return false;
+        if (!encode(value.sockets[i], record.sockets[i])) {
+            return false;
+        }
     }
     return true;
 }
@@ -125,13 +130,21 @@ bool decode(const SeasonPassRewardRecord& record, season_pass::Reward& value) no
     value.requiredRank = record.requiredRank;
     value.socketCount = record.socketCount;
     value.conditionCount = record.conditionCount;
-    if (value.conditionCount > value.condition.size()) return false;
-    for (std::size_t i = 0; i < value.condition.size(); ++i) {
-        if (!decode(record.condition[i], value.condition[i])) return false;
+    if (value.conditionCount > value.condition.size()) {
+        return false;
     }
-    if (value.socketCount > value.sockets.size()) return false;
+    for (std::size_t i = 0; i < value.condition.size(); ++i) {
+        if (!decode(record.condition[i], value.condition[i])) {
+            return false;
+        }
+    }
+    if (value.socketCount > value.sockets.size()) {
+        return false;
+    }
     for (std::size_t i = 0; i < value.sockets.size(); ++i) {
-        if (!decode(record.sockets[i], value.sockets[i])) return false;
+        if (!decode(record.sockets[i], value.sockets[i])) {
+            return false;
+        }
     }
     return true;
 }

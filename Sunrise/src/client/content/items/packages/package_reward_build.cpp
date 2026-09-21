@@ -113,7 +113,9 @@ struct Builder {
         out.sockets = {static_cast<std::uint32_t>(sockets.size()),
                        static_cast<std::uint32_t>(count)};
         for (std::size_t i = 0; i < count; ++i) {
-            if (!append(sockets, overrides[i], domain::kSocketOverrideCapacity)) return false;
+            if (!append(sockets, overrides[i], domain::kSocketOverrideCapacity)) {
+                return false;
+            }
         }
         return append(entries, out, domain::kEntryCapacity);
     }
@@ -178,13 +180,15 @@ bool RewardConditions::append_expression(std::span<const std::byte> blob,
                                          std::vector<domain::Instruction>& bank,
                                          std::size_t depth) const noexcept {
     tables::Array rows{};
-    if (depth >= domain::kTraversalDepth || !array(blob, at, kExpressionClass, 8, rows))
+    if (depth >= domain::kTraversalDepth || !array(blob, at, kExpressionClass, 8, rows)) {
         return false;
+    }
     for (std::size_t i = 0; i < rows.count; ++i) {
         domain::Instruction instruction{};
         if (!field(blob, rows.dataOffset + i * 8, instruction.opcode)
-            || !field(blob, rows.dataOffset + i * 8 + 4, instruction.operand))
+            || !field(blob, rows.dataOffset + i * 8 + 4, instruction.operand)) {
             return false;
+        }
         if (static_cast<domain::Opcode>(instruction.opcode) == domain::Opcode::expression) {
             const auto before = bank.size();
             if (instruction.operand >= expressionRows_.count
@@ -192,8 +196,9 @@ bool RewardConditions::append_expression(std::span<const std::byte> blob,
                                       expressionRows_.dataOffset + instruction.operand * 24 + 8,
                                       bank,
                                       depth + 1)
-                || bank.size() == before)
+                || bank.size() == before) {
                 return false;
+            }
         } else if (!bind(instruction) || !append(bank, instruction, domain::kInstructionCapacity)) {
             return false;
         }
@@ -221,7 +226,9 @@ bool RewardConditions::read_list(std::span<const std::byte> blob,
     count = 0;
     tables::Array rows{};
     std::vector<domain::Instruction> instructions;
-    if (!array(blob, at, 0x80807D2FU, 16, rows)) return false;
+    if (!array(blob, at, 0x80807D2FU, 16, rows)) {
+        return false;
+    }
     for (std::size_t i = 0; i < rows.count; ++i) {
         domain::Range expression{};
         if (!read(blob, rows.dataOffset + i * 16, instructions, expression)
@@ -233,9 +240,12 @@ bool RewardConditions::read_list(std::span<const std::byte> blob,
             && !append(
                 instructions,
                 domain::Instruction{static_cast<std::uint32_t>(domain::Opcode::logicalAnd), 0},
-                output.size()))
+                output.size())) {
             return false;
-        if (instructions.size() > output.size()) return false;
+        }
+        if (instructions.size() > output.size()) {
+            return false;
+        }
     }
     std::copy(instructions.begin(), instructions.end(), output.begin());
     count = instructions.size();
@@ -299,7 +309,9 @@ bool build_rewards(const reader::Source& source,
                 return false;
             }
         }
-        if (!append(build.pools, pool, domain::kPoolCapacity)) return false;
+        if (!append(build.pools, pool, domain::kPoolCapacity)) {
+            return false;
+        }
     }
     for (std::size_t i = 0; i < items.count; ++i) {
         tables::IndexRow row{};
@@ -347,7 +359,9 @@ bool build_rewards(const reader::Source& source,
                 }
             }
         }
-        if (!append(build.items, item, domain::kItemCapacity)) return false;
+        if (!append(build.items, item, domain::kItemCapacity)) {
+            return false;
+        }
     }
     return state::build_data::publish_reward_definitions({build.pools,
                                                           build.entries,

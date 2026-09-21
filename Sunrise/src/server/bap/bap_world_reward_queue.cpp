@@ -17,8 +17,9 @@ bool commit_world_reward(const WorldRewardRequest& request) noexcept {
     bool committed = false;
     if (request.kind == WorldRewardKind::item) {
         state::build_data::items::Definition item{};
-        if (!state::build_data::find_item_definition_index(request.itemDefinitionIndex, item))
+        if (!state::build_data::find_item_definition_index(request.itemDefinitionIndex, item)) {
             return false;
+        }
         if (item.questInitialization.scope
             != state::build_data::items::QuestInitialization::Scope::none) {
             state::PendingItemAcquisition acquisition;

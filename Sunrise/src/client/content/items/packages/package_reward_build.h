@@ -40,7 +40,7 @@ private:
                                  std::span<const std::byte> root) noexcept;
 /** Progression rewards and pool entries use the same socket-override layout. */
 [[nodiscard]] bool read_reward_sockets(std::span<const std::byte> blob,
-                                       std::size_t field,
+                                       std::size_t at,
                                        std::span<state::build_data::rewards::SocketOverride> output,
                                        std::size_t& count) noexcept;
 

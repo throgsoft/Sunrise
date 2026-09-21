@@ -7,6 +7,10 @@
 #include "../../../../middleware/queuez/subscription.h"
 #include "definition.h"
 
+namespace sunrise::state {
+struct PendingRecordRewardGrant;
+}
+
 namespace sunrise::server::bap::encrypted::queuez {
 
 /** @return True when one peer queuez state is canonical for the implemented versions. */
@@ -182,6 +186,10 @@ namespace sunrise::server::bap::encrypted::queuez {
                                              std::uint64_t accountSoid,
                                              std::uint64_t characterSoid,
                                              std::span<const std::uint64_t> appendedResidents,
+                                             RecordRewardGrant& grant) noexcept;
+
+[[nodiscard]] bool stage_record_reward_grant(const SessionState& before,
+                                             const state::PendingRecordRewardGrant& pending,
                                              RecordRewardGrant& grant) noexcept;
 
 /**

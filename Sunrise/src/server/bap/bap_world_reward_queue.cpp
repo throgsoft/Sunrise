@@ -1,4 +1,6 @@
-#include "../../core/logging/log.h"
+#include <memory>
+#include <new>
+
 #include "../../state/build_data/runtime.h"
 #include "../../state/investment/store_internal.h"
 #include "internal.h"
@@ -14,10 +16,25 @@ bool commit_world_reward(const WorldRewardRequest& request) noexcept {
     }
     bool committed = false;
     if (request.kind == WorldRewardKind::item) {
-        state::PendingItemAcquisition acquisition;
-        committed =
-            state::prepare_item_acquisition_for_item(request.itemDefinitionIndex, acquisition)
-            && state::commit_item_acquisition(acquisition);
+        state::build_data::items::Definition item{};
+        if (!state::build_data::find_item_definition_index(request.itemDefinitionIndex, item))
+            return false;
+        if (item.questInitialization.scope
+            != state::build_data::items::QuestInitialization::Scope::none) {
+            state::PendingItemAcquisition acquisition;
+            committed = request.quantity == 1
+                        && state::prepare_item_acquisition_for_item(request.itemDefinitionIndex,
+                                                                    acquisition)
+                        && state::commit_item_acquisition(acquisition);
+        } else {
+            const std::unique_ptr<state::PendingRecordRewardGrant> grant(
+                new (std::nothrow) state::PendingRecordRewardGrant);
+            committed = grant && request.quantity > 0
+                        && state::prepare_item_reward(request.itemDefinitionIndex,
+                                                      static_cast<std::uint32_t>(request.quantity),
+                                                      *grant)
+                        && state::commit_record_reward(*grant);
+        }
     } else {
         state::PendingProfileItemAcquisition acquisition;
         committed = state::prepare_profile_item_acquisition_for_item(

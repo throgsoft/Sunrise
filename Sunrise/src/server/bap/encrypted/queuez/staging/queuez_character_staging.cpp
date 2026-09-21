@@ -7,6 +7,7 @@
 
 #include "../../../../../core/logging/log.h"
 #include "../../../../../middleware/datagen/definitions.h"
+#include "../../../../../state/runtime/runtime.h"
 #include "../queuez_state_validation.h"
 
 namespace sunrise::server::bap::encrypted::queuez {
@@ -473,6 +474,26 @@ bool stage_item_acquisition(const SessionState& before,
 }
 
 /** Stages one atomic record-reward manifest update. */
+bool stage_record_reward_grant(const SessionState& before,
+                               const state::PendingRecordRewardGrant& pending,
+                               RecordRewardGrant& grant) noexcept {
+    grant = {};
+    if (!pending.prepared || pending.rewardCount > pending.rewards.size()) return false;
+    std::array<std::uint64_t, state::kRecordRewardGrantCapacity> residents{};
+    std::size_t count = 0;
+    for (std::size_t i = 0; i < pending.rewardCount; ++i) {
+        const auto& reward = pending.rewards[i];
+        if (reward.kind == state::RecordRewardKind::characterInstance
+            || reward.appendedProfileResident)
+            residents[count++] = reward.instanceSoid;
+    }
+    return stage_record_reward_grant(before,
+                                     pending.accountSoid,
+                                     pending.characterSoid,
+                                     std::span(residents).first(count),
+                                     grant);
+}
+
 bool stage_record_reward_grant(const SessionState& before,
                                std::uint64_t accountSoid,
                                std::uint64_t characterSoid,

@@ -106,7 +106,6 @@ namespace {
         header.rewardInstructionsCount,
         header.rewardModifiersCount,
         header.rewardSocketsCount,
-
     };
 }
 

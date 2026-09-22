@@ -25,36 +25,46 @@ bool set_quantity(std::uint64_t characterSoid,
     if (quantity < 0 || !snapshot || !transaction.ready()
         || !investment::store::read_account(*snapshot) || !account::valid(*snapshot)
         || !build_data::find_item_definition_hash(definitionHash, definition)
-        || !build_data::find_inventory_bucket_descriptor(definition.bucketId, bucket))
+        || !build_data::find_inventory_bucket_descriptor(definition.bucketId, bucket)) {
         return false;
+    }
     if (quantity != 0
         && (!build_data::find_configured_item_detail(definition.definitionIndex, detail)
             || detail.definitionHash != definitionHash || detail.bucketId != definition.bucketId
             || detail.instancedDefinitionState
                    != build_data::items::details::InstancedDefinitionState::stackable
-            || quantity > detail.maxStackSize))
+            || quantity > detail.maxStackSize)) {
         return false;
-    const auto end = snapshot->characters.begin() + snapshot->characterCount;
+    }
+    const auto end =
+        snapshot->characters.begin() + static_cast<std::ptrdiff_t>(snapshot->characterCount);
     const auto selected = std::find_if(snapshot->characters.begin(),
                                        end,
                                        [](const auto& character) { return character.selected; });
-    if (selected == end || selected->soid != characterSoid) return false;
+    if (selected == end || selected->soid != characterSoid) {
+        return false;
+    }
     for (std::size_t c = 0; instanceSoid != 0 && c < snapshot->characterCount; ++c) {
         for (const auto& equipped : snapshot->characters[c].equipment.slots) {
-            if (equipped && equipped->instanceSoid == instanceSoid) return false;
+            if (equipped && equipped->instanceSoid == instanceSoid) {
+                return false;
+            }
         }
     }
     const auto edit = [&](auto& rows, std::size_t& count, const auto& matches, auto nextSerial) {
         for (std::size_t i = 0; i < count; ++i) {
             if (rows[i].definitionHash != definitionHash || rows[i].mutationSerial != mutationSerial
-                || rows[i].quantity != expectedQuantity || !matches(rows[i]))
+                || rows[i].quantity != expectedQuantity || !matches(rows[i])) {
                 continue;
+            }
             if (quantity == 0) {
                 std::move(rows.begin() + i + 1, rows.begin() + count, rows.begin() + i);
                 rows[--count] = {};
             } else {
                 const auto serial = nextSerial();
-                if (serial < 0) return false;
+                if (serial < 0) {
+                    return false;
+                }
                 rows[i].quantity = quantity;
                 rows[i].mutationSerial = serial;
             }
@@ -67,16 +77,18 @@ bool set_quantity(std::uint64_t characterSoid,
     };
     const auto characterSerial = [&]() -> std::int32_t {
         if (selected->nextInventorySerial
-            >= static_cast<std::uint32_t>((std::numeric_limits<std::int32_t>::max)()))
+            >= static_cast<std::uint32_t>((std::numeric_limits<std::int32_t>::max)())) {
             return -1;
+        }
         return static_cast<std::int32_t>(selected->nextInventorySerial++);
     };
     bool changed = false;
     if (bucket.arraySelector == build_data::inventory::buckets::ArraySelector::profile) {
         changed = edit(snapshot->profileItems, snapshot->profileItemCount, sameInstance, [&]() {
             std::int32_t serial = 0;
-            for (std::size_t i = 0; i < snapshot->profileItemCount; ++i)
+            for (std::size_t i = 0; i < snapshot->profileItemCount; ++i) {
                 serial = (std::max)(serial, snapshot->profileItems[i].mutationSerial);
+            }
             return serial == (std::numeric_limits<std::int32_t>::max)() ? -1 : serial + 1;
         });
     } else if (bucket.arraySelector == build_data::inventory::buckets::ArraySelector::character) {

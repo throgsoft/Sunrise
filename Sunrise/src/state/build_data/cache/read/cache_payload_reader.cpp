@@ -363,7 +363,6 @@ bool read_payload(HANDLE file,
             output.rewardInstructions.first(counts.rewardInstructions),
             output.rewardModifiers.first(counts.rewardModifiers),
             output.rewardSockets.first(counts.rewardSockets),
-
         });
 }
 

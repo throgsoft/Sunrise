@@ -223,6 +223,9 @@ inline constexpr std::size_t kProgressionRewardItemIndexOffset = 4;
 inline constexpr std::size_t kProgressionRewardQuantityOffset = 8;
 /** Unlock flag slot a reward's claim sets. The slots run dense in reward order. */
 inline constexpr std::size_t kProgressionRewardClaimSlotOffset = 20;
+/** Eligibility expressions and socket overrides carried by one progression reward. */
+inline constexpr std::size_t kProgressionRewardConditionsOffset = 24;
+inline constexpr std::size_t kProgressionRewardSocketsOffset = 40;
 /** Items a wrapper item opens into, two bytes each as an item-definition index. */
 inline constexpr std::size_t kGearsetItemField = 392;
 inline constexpr std::uint32_t kGearsetItemRowClass = 0x808087DBU;

@@ -25,6 +25,8 @@ inline constexpr std::uint32_t kProfileSlotCapacity = 701;
 inline constexpr std::uint32_t kSmallProfileSlotCapacity = 6;
 /** An all-one bucket id means no runtime bucket is available. */
 inline constexpr std::uint8_t kUnavailableBucketId = (std::numeric_limits<std::uint8_t>::max)();
+/** Account perks persist as acquisition flags instead of inventory rows. */
+inline constexpr std::uint8_t kAccountPerkBucketId = 37;
 /** Leaving out the unavailable id leaves at most 255 unique bucket records. */
 inline constexpr std::size_t kDescriptorCapacity = kUnavailableBucketId;
 /** Signed -1 marks a bucket that has no equipment slot. */

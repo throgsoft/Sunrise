@@ -1,6 +1,7 @@
-#include <cstring>
 #include <limits>
 
+#include "../../../../middleware/content/packages/tables/internal.h"
+#include "../../../../state/progression/season_pass_reward_catalog.h"
 #include "internal.h"
 #include "package_reward_build.h"
 
@@ -8,19 +9,6 @@ namespace sunrise::client::content::items::packages {
 namespace {
 
 namespace domain = state::build_data::season_pass;
-
-/** Account progression the installed Season of Arrivals pass declares its rewards on. */
-constexpr std::uint16_t kPassProgressionIndex = 40;
-
-template <typename Value>
-[[nodiscard]] bool
-read(std::span<const std::byte> blob, std::size_t offset, Value& value) noexcept {
-    if (offset > blob.size() || blob.size() - offset < sizeof value) {
-        return false;
-    }
-    std::memcpy(&value, blob.data() + offset, sizeof value);
-    return true;
-}
 
 } // namespace
 
@@ -54,12 +42,13 @@ bool build_season_pass(const reader::Source& source,
                                   tables::kTableArrayDescriptor,
                                   progressions)
         || progressions.elementClass != tables::kProgressionTableClass
-        || progressions.count <= kPassProgressionIndex) {
+        || progressions.count <= state::progression::season_pass::kProgressionDefinitionIndex) {
         return false;
     }
     const std::span<const std::byte> progressionTable{storage.progressionTable};
-    const std::size_t passAt =
-        progressions.dataOffset + kPassProgressionIndex * tables::kProgressionRowStride;
+    const std::size_t passAt = progressions.dataOffset
+                               + state::progression::season_pass::kProgressionDefinitionIndex
+                                     * tables::kProgressionRowStride;
     tables::Array rewards{};
     if (!tables::find_optional_array_at(
             progressionTable, passAt + tables::kProgressionRewardField, rewards)
@@ -80,11 +69,13 @@ bool build_season_pass(const reader::Source& source,
         domain::Reward& reward = storage.seasonPassRewards[storage.seasonPassRewardCount];
         reward = {};
         tables::IndexRow entry{};
-        if (!read(progressionTable, at + tables::kProgressionRewardRankOffset, rank)
-            || !read(progressionTable, at + tables::kProgressionRewardItemIndexOffset, itemIndex)
-            || !read(
+        if (!tables::read(progressionTable, at + tables::kProgressionRewardRankOffset, rank)
+            || !tables::read(
+                progressionTable, at + tables::kProgressionRewardItemIndexOffset, itemIndex)
+            || !tables::read(
                 progressionTable, at + tables::kProgressionRewardQuantityOffset, reward.quantity)
-            || !read(progressionTable, at + tables::kProgressionRewardClaimSlotOffset, claimSlot)
+            || !tables::read(
+                progressionTable, at + tables::kProgressionRewardClaimSlotOffset, claimSlot)
             || rank > (std::numeric_limits<std::uint8_t>::max)()
             || itemIndex > (std::numeric_limits<std::uint16_t>::max)()
             || claimSlot > (std::numeric_limits<std::uint16_t>::max)()
@@ -96,13 +87,18 @@ bool build_season_pass(const reader::Source& source,
         reward.itemIndex = static_cast<std::uint16_t>(itemIndex);
         reward.requiredRank = static_cast<std::uint8_t>(rank);
         std::size_t socketCount = 0;
-        // Progression reward rows append their socket overrides at byte 40.
-        if (!read_reward_sockets(progressionTable, at + 40, reward.sockets, socketCount)) {
+        if (!read_reward_sockets(progressionTable,
+                                 at + tables::kProgressionRewardSocketsOffset,
+                                 reward.sockets,
+                                 socketCount)) {
             return false;
         }
         reward.socketCount = static_cast<std::uint8_t>(socketCount);
         std::size_t conditionCount = 0;
-        if (!conditions.read_list(progressionTable, at + 24, reward.condition, conditionCount)) {
+        if (!conditions.read_list(progressionTable,
+                                  at + tables::kProgressionRewardConditionsOffset,
+                                  reward.condition,
+                                  conditionCount)) {
             return false;
         }
         reward.conditionCount = static_cast<std::uint8_t>(conditionCount);

@@ -30,9 +30,6 @@ namespace family4_loadout = middleware::datagen::family4::loadout;
 
 namespace {
 
-/** Native inventory bucket for account perks such as Season Pass XP boosts. */
-constexpr std::uint8_t kAccountPerkBucket = 37;
-
 [[nodiscard]] bool materialize_record_reward(const AccountState& current,
                                              const PendingRecordRewardGrant& mutation,
                                              AccountState& after) noexcept;
@@ -86,7 +83,7 @@ apply_reward_sockets(const item_details::Definition& detail,
             }
             continue;
         }
-        if (override.selection != UINT32_MAX) {
+        if (override.selection != build_data::rewards::kFixedPlugSelection) {
             return false;
         }
         std::size_t match = staged.plugCount;
@@ -123,9 +120,8 @@ apply_reward_sockets(const item_details::Definition& detail,
         return false;
     }
     // Stored engrams keep their wrapper until a later opening transaction.
-    constexpr std::uint32_t kOpenOnAcquisition = 1;
     if (source.poolIndex != build_data::rewards::kAbsent
-        && (source.flags & kOpenOnAcquisition) == 0) {
+        && (source.flags & build_data::rewards::kOpenOnAcquisition) == 0) {
         result = {};
         if (quantity == 0 || quantity > INT32_MAX) {
             return false;
@@ -391,7 +387,7 @@ namespace {
         if (reward.kind == RecordRewardKind::accountUnlock) {
             build_data::rewards::Item source{};
             if (reward.quantity != 1 || reward.afterQuantity != 1 || reward.instanceSoid != 0
-                || item.bucketId != kAccountPerkBucket
+                || item.bucketId != inventory_buckets::kAccountPerkBucketId
                 || !build_data::rewards::find_item(item.definitionIndex, source)
                 || source.acquiredFlag == build_data::rewards::kAbsent
                 || source.acquiredFlag != reward.acquiredFlag) {
@@ -515,7 +511,7 @@ bool prepare_record_reward_grant(std::span<const DirectRecordReward> rewards,
                 prepared.previousFlag = static_cast<std::uint8_t>(before);
             }
         }
-        if (item.bucketId == kAccountPerkBucket) {
+        if (item.bucketId == inventory_buckets::kAccountPerkBucketId) {
             if (prepared.acquiredFlag == build_data::rewards::kAbsent || requested.quantity != 1
                 || !requested.sockets.empty()) {
                 return false;

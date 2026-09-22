@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <array>
+#include <charconv>
 #include <cstdio>
 #include <imgui.h>
 #include <memory>
@@ -9,14 +10,18 @@
 #include <string_view>
 #include <vector>
 
+#include "../../../middleware/web_service/messages/opcode2400.h"
+#include "../../../server/ui/items/items_inventory_service.h"
 #include "../../../state/build_data/rewards/reward_catalog.h"
 #include "../../../state/build_data/season_pass/season_pass_catalog.h"
+#include "../../../state/progression/season_pass_reward_catalog.h"
 #include "items_icon_cache.h"
 #include "items_widgets.h"
 
 namespace sunrise::client::ui::items::tables {
 namespace {
 namespace rewards = state::build_data::rewards;
+namespace service = server::ui::items;
 struct PoolDisplay {
     std::string label, search;
     std::vector<std::uint16_t> sources;
@@ -42,6 +47,14 @@ int g_passPage{};
 int g_passRank{};
 int g_passTrack{};
 int g_passReward{-1};
+service::SeasonPass g_passState{};
+int g_passProbed{-2};
+double g_passRefreshAt{};
+std::array<char, 24> g_experienceInput{};
+std::int32_t g_experienceExpected{};
+bool g_experienceInitialized{};
+const char* g_experienceFeedback{};
+const char* g_passFeedback{};
 constexpr int kRanksPerPage = 10;
 constexpr std::array<const char*, 2> kPassTracks{"Regular", "Premium"};
 
@@ -51,13 +64,7 @@ bool premium(const state::build_data::season_pass::Reward& row) noexcept {
     return row.conditionCount >= 3
            && row.condition[0].opcode == static_cast<std::uint32_t>(Read::accountFlag)
            && row.condition[1].opcode == static_cast<std::uint32_t>(Read::characterFlag)
-           && row.condition[2].opcode == 3;
-}
-
-void append_identity(std::string& text, std::uint32_t index, std::uint32_t hash) {
-    char id[64]{};
-    std::snprintf(id, sizeof id, " %u %u 0x%08X ", index, hash, hash);
-    text += id;
+           && row.condition[2].opcode == static_cast<std::uint32_t>(rewards::Opcode::logicalOr);
 }
 
 bool load(const Catalog& catalog) noexcept {
@@ -76,15 +83,19 @@ bool load(const Catalog& catalog) noexcept {
                 } catch (...) {
                     return false;
                 }
-            }))
+            })) {
             return false;
+        }
         next->pass.resize(state::build_data::season_pass::kRewardCapacity);
         std::size_t count = 0;
-        if (!state::build_data::season_pass::snapshot(next->pass, count)) return false;
+        if (!state::build_data::season_pass::snapshot(next->pass, count)) {
+            return false;
+        }
         next->pass.resize(count);
         std::size_t lastRank = 0;
-        for (const auto& row : next->pass)
+        for (const auto& row : next->pass) {
             lastRank = (std::max)(lastRank, std::size_t(row.requiredRank));
+        }
         next->passRanks.resize(lastRank + 1);
         for (std::size_t i = 0; i < next->pass.size(); ++i) {
             const auto& row = next->pass[i];
@@ -93,8 +104,9 @@ bool load(const Catalog& catalog) noexcept {
         next->display.resize(next->pools.size());
         for (std::size_t i = 0; i < next->items.size(); ++i) {
             const auto pool = next->items[i].poolIndex;
-            if (pool < next->display.size())
+            if (pool < next->display.size()) {
                 next->display[pool].sources.push_back(static_cast<std::uint16_t>(i));
+            }
         }
         for (std::size_t i = 0; i < next->pools.size(); ++i) {
             auto& display = next->display[i];
@@ -102,8 +114,9 @@ bool load(const Catalog& catalog) noexcept {
                 const auto* item = widgets::find(catalog, source);
                 if (item && !item->name.empty()) {
                     display.label = item->name;
-                    if (display.sources.size() > 1)
+                    if (display.sources.size() > 1) {
                         display.label += " (+" + std::to_string(display.sources.size() - 1) + ")";
+                    }
                     break;
                 }
             }
@@ -113,7 +126,9 @@ bool load(const Catalog& catalog) noexcept {
                 for (const auto& row :
                      std::span(next->entries).subspan(pool.entries.first, pool.entries.count)) {
                     const auto* item = widgets::find(catalog, row.itemIndex);
-                    if (!item || item->name.empty()) continue;
+                    if (!item || item->name.empty()) {
+                        continue;
+                    }
                     if (named++ == 2) {
                         display.label += ", ...";
                         break;
@@ -121,26 +136,35 @@ bool load(const Catalog& catalog) noexcept {
                     display.label += display.label.empty() ? "Contains: " : ", ";
                     display.label += item->name;
                 }
-                if (display.label.empty()) display.label = "Pool " + std::to_string(i);
+                if (display.label.empty()) {
+                    display.label = "Pool " + std::to_string(i);
+                }
             }
             std::vector<std::size_t> pending{i};
             std::vector<bool> visited(next->pools.size());
             while (!pending.empty()) {
                 const auto index = pending.back();
                 pending.pop_back();
-                if (visited[index]) continue;
+                if (visited[index]) {
+                    continue;
+                }
                 visited[index] = true;
                 const auto& pool = next->pools[index];
-                append_identity(
+                catalog::append_identity(
                     display.search, static_cast<std::uint32_t>(index), pool.definitionHash);
-                for (auto source : next->display[index].sources)
-                    if (const auto* item = widgets::find(catalog, source))
+                for (auto source : next->display[index].sources) {
+                    if (const auto* item = widgets::find(catalog, source)) {
                         display.search += " " + item->search;
+                    }
+                }
                 for (const auto& entry :
                      std::span(next->entries).subspan(pool.entries.first, pool.entries.count)) {
-                    if (const auto* item = widgets::find(catalog, entry.itemIndex))
+                    if (const auto* item = widgets::find(catalog, entry.itemIndex)) {
                         display.search += " " + item->search;
-                    if (entry.poolIndex < next->pools.size()) pending.push_back(entry.poolIndex);
+                    }
+                    if (entry.poolIndex < next->pools.size()) {
+                        pending.push_back(entry.poolIndex);
+                    }
                 }
             }
         }
@@ -156,30 +180,10 @@ const char* item_name(const Catalog& catalog, std::uint16_t index) noexcept {
     return widgets::name(widgets::find(catalog, index));
 }
 
-bool contains(std::string_view text, std::string_view word) noexcept {
-    const auto fold = [](unsigned char c) { return c >= 'A' && c <= 'Z' ? c + ('a' - 'A') : c; };
-    return std::search(text.begin(),
-                       text.end(),
-                       word.begin(),
-                       word.end(),
-                       [&](unsigned char a, unsigned char b) { return fold(a) == fold(b); })
-           != text.end();
-}
-bool matches_text(std::string_view text) noexcept {
-    std::string_view query(g_search.data());
-    while (!query.empty()) {
-        const auto first = query.find_first_not_of(" \t");
-        if (first == std::string_view::npos) break;
-        query.remove_prefix(first);
-        const auto end = query.find_first_of(" \t");
-        if (!contains(text, query.substr(0, end))) return false;
-        if (end == std::string_view::npos) break;
-        query.remove_prefix(end);
-    }
-    return true;
-}
 void select_pool(int index) {
-    if (index < 0 || index >= static_cast<int>(g_data->pools.size())) return;
+    if (index < 0 || index >= static_cast<int>(g_data->pools.size())) {
+        return;
+    }
     if (index == g_pool) {
         g_entry = -1;
         return;
@@ -191,6 +195,7 @@ void select_pool(int index) {
 
 const char* operation(std::uint32_t opcode) noexcept {
     using R = rewards::BankRead;
+    using O = rewards::Opcode;
     switch (opcode) {
     case static_cast<std::uint32_t>(R::accountFlag):
         return "Account flag";
@@ -204,43 +209,49 @@ const char* operation(std::uint32_t opcode) noexcept {
         return "Computed flag hash";
     case static_cast<std::uint32_t>(R::externalValue):
         return "Computed value hash";
-    case 2:
+    case static_cast<std::uint32_t>(O::logicalNot):
         return "NOT";
-    case 3:
+    case static_cast<std::uint32_t>(O::logicalOr):
         return "OR";
-    case 4:
+    case static_cast<std::uint32_t>(O::logicalAnd):
         return "AND";
-    case 8:
+    case static_cast<std::uint32_t>(O::equal):
         return "Equal";
-    case 11:
+    case static_cast<std::uint32_t>(O::constant):
         return "Constant";
-    case 13:
+    case static_cast<std::uint32_t>(O::greaterThan):
         return "Greater";
-    case 14:
+    case static_cast<std::uint32_t>(O::greaterOrEqual):
         return "Greater or equal";
-    case 15:
+    case static_cast<std::uint32_t>(O::lessThan):
         return "Less";
-    case 22:
+    case static_cast<std::uint32_t>(O::negate):
         return "Negate";
     default:
         return "Native operator";
     }
 }
 void condition(std::span<const rewards::Instruction> code) noexcept {
-    if (code.empty()) ImGui::TextDisabled("Unconditional");
-    for (const auto& row : code)
+    if (code.empty()) {
+        ImGui::TextDisabled("Unconditional");
+    }
+    for (const auto& row : code) {
         ImGui::TextWrapped("%s (%u), operand %u / 0x%08X",
                            operation(row.opcode),
                            row.opcode,
                            row.operand,
                            row.operand);
+    }
 }
 void reference(const char* label, std::uint16_t index) {
-    if (index == rewards::kAbsent)
+    if (index == rewards::kAbsent) {
         ImGui::Text("%s: None", label);
-    else
+    } else {
         ImGui::Text("%s: %u", label, index);
-    if (ImGui::IsItemHovered()) ImGui::SetTooltip("Raw index: %u / 0x%04X", index, index);
+    }
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("Raw index: %u / 0x%04X", index, index);
+    }
 }
 void sockets(const Catalog& catalog, std::span<const rewards::SocketOverride> rows) noexcept {
     for (const auto& row : rows) {
@@ -262,7 +273,9 @@ void entry_details(const Catalog& catalog, const rewards::Entry& entry) {
         ImGui::TextDisabled("%s", item->itemType.c_str());
         ImGui::EndGroup();
         ImGui::TextWrapped("Item %u / 0x%08X", entry.itemIndex, item->identity.definitionHash);
-        if (!item->description.empty()) ImGui::TextWrapped("%s", item->description.c_str());
+        if (!item->description.empty()) {
+            ImGui::TextWrapped("%s", item->description.c_str());
+        }
     }
     if (entry.poolIndex < data.pools.size()) {
         ImGui::TextWrapped("%s", data.display[entry.poolIndex].label.c_str());
@@ -270,8 +283,9 @@ void entry_details(const Catalog& catalog, const rewards::Entry& entry) {
             "Pool %u / 0x%08X", entry.poolIndex, data.pools[entry.poolIndex].definitionHash);
     }
     ImGui::Text("Quantity %u / weight %g", entry.quantity, entry.weight);
-    if (entry.poolIndex < data.pools.size() && ImGui::Button("Open nested pool"))
+    if (entry.poolIndex < data.pools.size() && ImGui::Button("Open nested pool")) {
         select_pool(entry.poolIndex);
+    }
     if (ImGui::CollapsingHeader("Conditions")) {
         condition(
             std::span(data.instructions).subspan(entry.condition.first, entry.condition.count));
@@ -283,8 +297,9 @@ void entry_details(const Catalog& catalog, const rewards::Entry& entry) {
                           .subspan(modifier.condition.first, modifier.condition.count));
         }
     }
-    if (entry.sockets.count && ImGui::CollapsingHeader("Socket overrides"))
+    if (entry.sockets.count && ImGui::CollapsingHeader("Socket overrides")) {
         sockets(catalog, std::span(data.sockets).subspan(entry.sockets.first, entry.sockets.count));
+    }
     if (ImGui::CollapsingHeader("Definition fields")) {
         reference("Item", entry.itemIndex);
         reference("Item type", entry.itemType);
@@ -305,8 +320,9 @@ bool item_row(const char* id, const Entry* item, const char* label, bool selecte
     if (ImGui::IsItemVisible()) {
         auto* draw = ImGui::GetWindowDrawList();
         const auto texture = item ? icons::get(item->iconIndex) : ImTextureID_Invalid;
-        if (texture != ImTextureID_Invalid)
-            draw->AddImage(ImTextureRef(texture), origin, {origin.x + side, origin.y + side});
+        if (texture != ImTextureID_Invalid) {
+            widgets::image(texture, origin, {origin.x + side, origin.y + side});
+        }
         const ImVec2 text{origin.x + side + ImGui::GetStyle().ItemSpacing.x,
                           origin.y + (side - ImGui::GetTextLineHeight()) * 0.5f};
         draw->PushClipRect(text, {origin.x + width, origin.y + side}, true);
@@ -319,7 +335,9 @@ bool item_row(const char* id, const Entry* item, const char* label, bool selecte
 const Entry* pool_item(const Catalog& catalog, int index) noexcept {
     for (auto source : g_data->display[index].sources) {
         const auto* item = widgets::find(catalog, source);
-        if (item && item->iconIndex != package::kNoIcon) return item;
+        if (item && item->iconIndex != package::kNoIcon) {
+            return item;
+        }
     }
     return nullptr;
 }
@@ -328,7 +346,7 @@ void reward_icon(const Entry* item, ImVec2 origin, float side) {
     auto* draw = ImGui::GetWindowDrawList();
     const auto texture = item ? icons::get(item->iconIndex) : ImTextureID_Invalid;
     if (texture != ImTextureID_Invalid) {
-        draw->AddImage(ImTextureRef(texture), origin, {origin.x + side, origin.y + side});
+        widgets::image(texture, origin, {origin.x + side, origin.y + side});
     } else if (!item) {
         const auto color = ImGui::GetColorU32(ImGuiCol_TextDisabled);
         draw->AddRectFilled({origin.x + side * 0.12f, origin.y + side * 0.2f},
@@ -354,10 +372,11 @@ bool tree_row(const char* id,
     if (ImGui::IsItemVisible()) {
         reward_icon(item, {origin.x + labelOffset, origin.y}, side);
         char text[512]{};
-        if (quantity)
+        if (quantity) {
             std::snprintf(text, sizeof text, "%s x%u", label, quantity);
-        else
+        } else {
             std::snprintf(text, sizeof text, "%s", label);
+        }
         const ImVec2 pos{origin.x + labelOffset + side + ImGui::GetStyle().ItemSpacing.x,
                          origin.y + (side - ImGui::GetTextLineHeight()) * 0.5f};
         auto* draw = ImGui::GetWindowDrawList();
@@ -382,8 +401,9 @@ void source_items(const Catalog& catalog, int poolIndex) {
                 "source", ImGuiTreeNodeFlags_SpanAvailWidth, "%s", item_name(catalog, index))) {
             widgets::icon(widgets::find(catalog, index), 48);
             ImGui::TextWrapped("Item %u / 0x%08X", index, source.definitionHash);
-            ImGui::TextWrapped((source.flags & 1) ? "Opens when acquired."
-                                                  : "Kept as an item when acquired.");
+            ImGui::TextWrapped((source.flags & rewards::kOpenOnAcquisition)
+                                   ? "Opens when acquired."
+                                   : "Kept as an item when acquired.");
             for (std::size_t i = 0; i < source.selectionCount; ++i) {
                 const auto& selection = source.selections[i];
                 ImGui::TextWrapped("Select up to %u rewards from category 0x%08X.",
@@ -391,8 +411,9 @@ void source_items(const Catalog& catalog, int poolIndex) {
                                    selection.categoryHash);
                 ImGui::TextDisabled("Selection policy %u", selection.policy);
             }
-            if (source.acquiredFlag != rewards::kAbsent)
+            if (source.acquiredFlag != rewards::kAbsent) {
                 ImGui::Text("Acquisition flag %u", source.acquiredFlag);
+            }
             ImGui::TreePop();
         }
         ImGui::PopID();
@@ -410,7 +431,9 @@ void pool_details(const Catalog& catalog, int index) {
 }
 
 void pool_tree(const Catalog& catalog, int poolIndex, std::size_t depth = 0) {
-    if (depth >= rewards::kTraversalDepth) return;
+    if (depth >= rewards::kTraversalDepth) {
+        return;
+    }
     const auto& data = *g_data;
     const auto& pool = data.pools[poolIndex];
     for (std::size_t i = pool.entries.first; i < pool.entries.first + pool.entries.count; ++i) {
@@ -422,17 +445,24 @@ void pool_tree(const Catalog& catalog, int poolIndex, std::size_t depth = 0) {
                                    : "Reward mapping";
         auto flags = ImGuiTreeNodeFlags_OpenOnArrow | ImGuiTreeNodeFlags_OpenOnDoubleClick
                      | ImGuiTreeNodeFlags_SpanAvailWidth;
-        if (!nested) flags |= ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_NoTreePushOnOpen;
-        if (g_entry == static_cast<int>(i)) flags |= ImGuiTreeNodeFlags_Selected;
+        if (!nested) {
+            flags |= ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_NoTreePushOnOpen;
+        }
+        if (g_entry == static_cast<int>(i)) {
+            flags |= ImGuiTreeNodeFlags_Selected;
+        }
         ImGui::PushID(static_cast<int>(i));
         const bool open = tree_row("entry",
                                    flags,
                                    nested ? pool_item(catalog, entry.poolIndex) : item,
                                    label,
                                    entry.quantity);
-        if (ImGui::IsItemClicked() && !ImGui::IsItemToggledOpen()) g_entry = static_cast<int>(i);
-        if (ImGui::IsItemHovered())
+        if (ImGui::IsItemClicked() && !ImGui::IsItemToggledOpen()) {
+            g_entry = static_cast<int>(i);
+        }
+        if (ImGui::IsItemHovered()) {
             ImGui::SetTooltip("%s\nQuantity %u / weight %g", label, entry.quantity, entry.weight);
+        }
         if (open && nested) {
             pool_tree(catalog, entry.poolIndex, depth + 1);
             ImGui::TreePop();
@@ -443,13 +473,17 @@ void pool_tree(const Catalog& catalog, int poolIndex, std::size_t depth = 0) {
 
 void pools(const Catalog& catalog) {
     const auto& data = *g_data;
-    if (data.pools.empty()) return;
+    if (data.pools.empty()) {
+        return;
+    }
     ImGui::SetNextItemWidth(-1);
     ImGui::InputTextWithHint("##table_search",
                              "Search package or reward names, hashes and indices",
                              g_search.data(),
                              g_search.size());
-    if (!ImGui::BeginTable("##pool_browser", 3, ImGuiTableFlags_Resizable)) return;
+    if (!ImGui::BeginTable("##pool_browser", 3, ImGuiTableFlags_Resizable)) {
+        return;
+    }
     const auto& style = ImGui::GetStyle();
     const float iconSide = ImGui::GetFontSize() * 2.5f;
     ImGui::TableSetupColumn("Pools",
@@ -460,34 +494,44 @@ void pools(const Catalog& catalog) {
     ImGui::TableHeadersRow();
     ImGui::TableNextRow();
     ImGui::TableNextColumn();
-    // Bound both lists to leave room in the 64-icon cache for the inspector.
+    // Reserve ten cache slots for clipped rows and details; give the tree twice the list's share.
+    constexpr int listIcons = (icons::kCapacity - 10) / 3;
+    constexpr int treeIcons = listIcons * 2;
     const float listHeight =
         (std::min)(ImGui::GetContentRegionAvail().y,
-                   18 * (iconSide + style.ItemSpacing.y) + style.WindowPadding.y * 2);
+                   listIcons * (iconSide + style.ItemSpacing.y) + style.WindowPadding.y * 2);
     ImGui::BeginChild("##pool_list", {0, listHeight}, ImGuiChildFlags_Borders);
+    const auto query = catalog::search_text(g_search.data());
     std::size_t found = 0;
     for (std::size_t i = 0; i < data.pools.size(); ++i) {
         const auto& display = data.display[i];
-        if (!matches_text(display.search)) continue;
+        if (!catalog::matches(display.search, query)) {
+            continue;
+        }
         ++found;
         ImGui::PushID(static_cast<int>(i));
         const auto origin = ImGui::GetCursorScreenPos();
-        if (ImGui::Selectable("##pool", g_pool == static_cast<int>(i), 0, {iconSide, iconSide}))
+        if (ImGui::Selectable("##pool", g_pool == static_cast<int>(i), 0, {iconSide, iconSide})) {
             select_pool(static_cast<int>(i));
-        if (ImGui::IsItemVisible())
+        }
+        if (ImGui::IsItemVisible()) {
             reward_icon(pool_item(catalog, static_cast<int>(i)), origin, iconSide);
-        if (ImGui::IsItemHovered())
+        }
+        if (ImGui::IsItemHovered()) {
             ImGui::SetTooltip(
                 "%s\nPool %zu / 0x%08X", display.label.c_str(), i, data.pools[i].definitionHash);
+        }
         ImGui::PopID();
     }
     ImGui::EndChild();
     ImGui::TableNextColumn();
     const float treeHeight =
         (std::min)(ImGui::GetContentRegionAvail().y,
-                   36 * ImGui::GetFrameHeightWithSpacing() + style.WindowPadding.y * 2);
+                   treeIcons * ImGui::GetFrameHeightWithSpacing() + style.WindowPadding.y * 2);
     ImGui::BeginChild("##pool_tree", {0, treeHeight}, ImGuiChildFlags_Borders);
-    if (!found) ImGui::TextDisabled("No matching reward tables.");
+    if (!found) {
+        ImGui::TextDisabled("No matching reward tables.");
+    }
     if (!g_history.empty() && ImGui::SmallButton("Back")) {
         g_pool = g_history.back();
         g_history.pop_back();
@@ -500,8 +544,12 @@ void pools(const Catalog& catalog) {
                                    | (g_entry < 0 ? ImGuiTreeNodeFlags_Selected : 0),
                                pool_item(catalog, g_pool),
                                data.display[g_pool].label.c_str());
-    if (ImGui::IsItemClicked() && !ImGui::IsItemToggledOpen()) g_entry = -1;
-    if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", data.display[g_pool].label.c_str());
+    if (ImGui::IsItemClicked() && !ImGui::IsItemToggledOpen()) {
+        g_entry = -1;
+    }
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("%s", data.display[g_pool].label.c_str());
+    }
     if (open) {
         pool_tree(catalog, g_pool);
         ImGui::TreePop();
@@ -512,8 +560,9 @@ void pools(const Catalog& catalog) {
     ImGui::BeginChild("##pool_inspector", {0, 0}, ImGuiChildFlags_Borders);
     if (g_entry >= 0 && g_entry < static_cast<int>(data.entries.size())) {
         entry_details(catalog, data.entries[g_entry]);
-    } else
+    } else {
         pool_details(catalog, g_pool);
+    }
     ImGui::EndChild();
     ImGui::EndTable();
 }
@@ -530,23 +579,120 @@ void pass_details(const Catalog& catalog, int index) {
                 row.requiredRank,
                 row.quantity);
     ImGui::EndGroup();
-    if (item && !item->description.empty()) ImGui::TextWrapped("%s", item->description.c_str());
+    if (item && !item->description.empty()) {
+        ImGui::TextWrapped("%s", item->description.c_str());
+    }
+    if (g_passState.progressFlag) {
+        ImGui::TextUnformatted(g_passState.acquired ? "Acquired." : "Not acquired.");
+    } else {
+        ImGui::BeginDisabled(!g_passState.grantable);
+        if (ImGui::Button("Claim")) {
+            namespace claim = middleware::web_service::messages::opcode2400;
+            std::array<std::byte, claim::kRequestSize> request{};
+            std::size_t written = 0;
+            const bool queued =
+                claim::encode_request({state::progression::season_pass::kProgressionDefinitionIndex,
+                                       static_cast<std::uint16_t>(index)},
+                                      0,
+                                      request,
+                                      written)
+                && service::grant_season_pass_reward(std::span(request).first(written));
+            g_passFeedback = queued ? nullptr : "Reward could not be claimed.";
+            g_passRefreshAt = 0;
+        }
+        ImGui::EndDisabled();
+        ImGui::SameLine();
+        ImGui::BeginDisabled(!g_passState.claimed);
+        if (ImGui::Button("Unclaim")) {
+            g_passFeedback = service::unclaim_season_pass_reward(static_cast<std::uint16_t>(index))
+                                 ? "Claim cleared."
+                                 : "Claim could not be cleared.";
+            g_passRefreshAt = 0;
+        }
+        ImGui::EndDisabled();
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+            ImGui::SetTooltip("Clears the claim flag. Granted items and perks are kept.");
+        }
+        if (g_passFeedback || g_passState.claimed || !g_passState.grantable) {
+            ImGui::SameLine();
+            ImGui::TextWrapped("%s",
+                               g_passFeedback        ? g_passFeedback
+                               : g_passState.pending ? "Claim queued."
+                               : g_passState.claimed
+                                   ? "Already claimed."
+                                   : "Unavailable for this character, rank or inventory.");
+        }
+    }
     if (row.itemIndex < g_data->items.size()
         && g_data->items[row.itemIndex].poolIndex < g_data->pools.size()
         && ImGui::Button("View reward pool")) {
         select_pool(g_data->items[row.itemIndex].poolIndex);
         g_openPools = true;
     }
-    if (ImGui::CollapsingHeader("Definition fields"))
+    if (ImGui::CollapsingHeader("Definition fields")) {
         ImGui::TextWrapped("Reward row %d / Item %u / 0x%08X / Claim flag %u",
                            index,
                            row.itemIndex,
                            row.itemHash,
                            row.claimFlagIndex);
-    if (ImGui::CollapsingHeader("Conditions"))
+    }
+    if (ImGui::CollapsingHeader("Conditions")) {
         condition(std::span(row.condition).first(row.conditionCount));
-    if (row.socketCount && ImGui::CollapsingHeader("Socket overrides"))
+    }
+    if (row.socketCount && ImGui::CollapsingHeader("Socket overrides")) {
         sockets(catalog, std::span(row.sockets).first(row.socketCount));
+    }
+}
+
+void pass_controls() {
+    if (g_passProbed != g_passReward || ImGui::GetTime() >= g_passRefreshAt) {
+        if (g_passProbed != g_passReward) {
+            g_passFeedback = nullptr;
+        }
+        g_passState = service::season_pass(static_cast<std::uint16_t>(g_passReward));
+        g_passProbed = g_passReward;
+        g_passRefreshAt = ImGui::GetTime() + 0.5;
+    }
+    if (g_passState.available && !g_experienceInitialized) {
+        std::snprintf(
+            g_experienceInput.data(), g_experienceInput.size(), "%d", g_passState.experience);
+        g_experienceExpected = g_passState.experience;
+        g_experienceInitialized = true;
+    }
+    ImGui::Text("Seasonal XP: %d / Rank %u", g_passState.experience, g_passState.rank);
+    ImGui::SameLine();
+    ImGui::SetNextItemWidth(ImGui::GetFontSize() * 9);
+    ImGui::BeginDisabled(!g_passState.available);
+    if (ImGui::InputTextWithHint("##seasonal_xp",
+                                 "Total XP",
+                                 g_experienceInput.data(),
+                                 g_experienceInput.size(),
+                                 ImGuiInputTextFlags_CharsDecimal)) {
+        g_experienceFeedback = nullptr;
+    }
+    if (ImGui::IsItemActivated()) {
+        g_experienceExpected = g_passState.experience;
+    }
+    const std::string_view input(g_experienceInput.data());
+    std::int32_t experience = 0;
+    const auto parsed = std::from_chars(input.data(), input.data() + input.size(), experience);
+    const bool valid =
+        parsed.ec == std::errc{} && parsed.ptr == input.data() + input.size() && experience >= 0;
+    ImGui::SameLine();
+    ImGui::BeginDisabled(!valid);
+    if (ImGui::Button("Set XP")) {
+        const bool saved = service::set_seasonal_experience(g_experienceExpected, experience);
+        g_experienceFeedback = saved ? "XP updated." : "XP changed or could not be saved. Retry.";
+        g_passState = service::season_pass(static_cast<std::uint16_t>(g_passReward));
+        g_experienceExpected = g_passState.experience;
+        g_passRefreshAt = 0;
+    }
+    ImGui::EndDisabled();
+    ImGui::EndDisabled();
+    if (g_experienceFeedback) {
+        ImGui::SameLine();
+        ImGui::TextWrapped("%s", g_experienceFeedback);
+    }
 }
 
 void pass(const Catalog& catalog) {
@@ -555,6 +701,7 @@ void pass(const Catalog& catalog) {
         ImGui::TextDisabled("Season pass rewards are not available.");
         return;
     }
+    pass_controls();
     const int lastRank = static_cast<int>(data.passRanks.size()) - 1;
     const int pages = (lastRank + kRanksPerPage - 1) / kRanksPerPage;
     g_passPage = (std::clamp)(g_passPage, 0, (std::max)(0, pages - 1));
@@ -576,7 +723,9 @@ void pass(const Catalog& catalog) {
         const float pageHeight = ImGui::GetTextLineHeightWithSpacing()
                                  + 2 * (cardHeight + ImGui::GetStyle().CellPadding.y * 2);
         ImGui::BeginDisabled(g_passPage == 0);
-        if (ImGui::Button("<##previous_page", {navWidth, pageHeight})) step = -1;
+        if (ImGui::Button("<##previous_page", {navWidth, pageHeight})) {
+            step = -1;
+        }
         ImGui::EndDisabled();
         ImGui::TableNextColumn();
         if (ImGui::BeginTable("##pass_rewards",
@@ -584,24 +733,31 @@ void pass(const Catalog& catalog) {
                               ImGuiTableFlags_SizingStretchSame | ImGuiTableFlags_BordersInnerV)) {
             ImGui::TableSetupColumn(
                 "Track", ImGuiTableColumnFlags_WidthFixed, ImGui::CalcTextSize("Premium").x + 8);
-            for (int column = 0; column < kRanksPerPage; ++column)
+            for (int column = 0; column < kRanksPerPage; ++column) {
                 ImGui::TableSetupColumn("Rank", ImGuiTableColumnFlags_WidthStretch);
+            }
             ImGui::TableNextRow();
             ImGui::TableNextColumn();
             for (int column = 0; column < kRanksPerPage; ++column) {
                 ImGui::TableNextColumn();
-                if (first + column <= lastRank) ImGui::Text("%d", first + column);
+                if (first + column <= lastRank) {
+                    ImGui::Text("%d", first + column);
+                }
             }
             for (int track = 0; track < 2; ++track) {
                 ImGui::TableNextRow();
-                if (track == 1)
-                    ImGui::TableSetBgColor(ImGuiTableBgTarget_RowBg0, IM_COL32(0, 130, 130, 50));
+                if (track == 1) {
+                    ImGui::TableSetBgColor(ImGuiTableBgTarget_RowBg0,
+                                           ImGui::GetColorU32(IM_COL32(0, 130, 130, 50)));
+                }
                 ImGui::TableNextColumn();
                 ImGui::TextUnformatted(kPassTracks[track]);
                 for (int column = 0; column < kRanksPerPage; ++column) {
                     ImGui::TableNextColumn();
                     const int rank = first + column;
-                    if (rank > lastRank) continue;
+                    if (rank > lastRank) {
+                        continue;
+                    }
                     const auto& rows = data.passRanks[rank][track];
                     const auto* row = rows.empty() ? nullptr : &data.pass[rows.front()];
                     const auto* item = row ? widgets::find(catalog, row->itemIndex) : nullptr;
@@ -622,11 +778,14 @@ void pass(const Catalog& catalog) {
                     if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
                         ImGui::BeginTooltip();
                         ImGui::Text("%s / Rank %d", kPassTracks[track], rank);
-                        if (rows.empty()) ImGui::TextDisabled("No reward at this rank.");
-                        for (auto i : rows)
+                        if (rows.empty()) {
+                            ImGui::TextDisabled("No reward at this rank.");
+                        }
+                        for (auto i : rows) {
                             ImGui::Text("%s x%u",
                                         item_name(catalog, data.pass[i].itemIndex),
                                         data.pass[i].quantity);
+                        }
                         ImGui::EndTooltip();
                     }
                     if (rows.size() > 1) {
@@ -644,7 +803,9 @@ void pass(const Catalog& catalog) {
         }
         ImGui::TableNextColumn();
         ImGui::BeginDisabled(g_passPage + 1 >= pages);
-        if (ImGui::Button(">##next_page", {navWidth, pageHeight})) step = 1;
+        if (ImGui::Button(">##next_page", {navWidth, pageHeight})) {
+            step = 1;
+        }
         ImGui::EndDisabled();
         ImGui::EndTable();
     }
@@ -668,16 +829,20 @@ void pass(const Catalog& catalog) {
         for (auto index : data.passRanks[g_passRank][g_passTrack]) {
             ImGui::PushID(index);
             const auto* item = widgets::find(catalog, data.pass[index].itemIndex);
-            if (item_row("##reward_entry", item, widgets::name(item), g_passReward == index))
+            if (item_row("##reward_entry", item, widgets::name(item), g_passReward == index)) {
                 g_passReward = index;
-            if (ImGui::IsItemHovered())
+            }
+            if (ImGui::IsItemHovered()) {
                 ImGui::SetTooltip("%s\nReward row %d", widgets::name(item), index);
+            }
             ImGui::PopID();
         }
         ImGui::EndChild();
         ImGui::TableNextColumn();
         ImGui::BeginChild("##pass_details");
-        if (g_passReward >= 0) pass_details(catalog, g_passReward);
+        if (g_passReward >= 0) {
+            pass_details(catalog, g_passReward);
+        }
         ImGui::EndChild();
         ImGui::EndTable();
     }
@@ -714,5 +879,12 @@ void clear() noexcept {
     g_openPools = false;
     g_passPage = g_passRank = g_passTrack = 0;
     g_passReward = -1;
+    g_passState = {};
+    g_passProbed = -2;
+    g_passRefreshAt = 0;
+    g_experienceInput = {};
+    g_experienceExpected = 0;
+    g_experienceInitialized = false;
+    g_experienceFeedback = g_passFeedback = nullptr;
 }
 } // namespace sunrise::client::ui::items::tables

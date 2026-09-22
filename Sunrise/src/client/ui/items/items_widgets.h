@@ -9,6 +9,8 @@ namespace sunrise::client::ui::items::widgets {
 const Entry* find(const Catalog& catalog, std::uint16_t index) noexcept;
 const char* name(const Entry* entry) noexcept;
 void icon(const Entry* entry, float side);
+/** Draw-list images share the enclosing window's fade and disabled alpha. */
+void image(ImTextureID texture, ImVec2 minimum, ImVec2 maximum);
 
 struct Card {
     const Entry* item{};

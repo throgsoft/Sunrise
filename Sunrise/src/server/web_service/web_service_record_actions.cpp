@@ -160,8 +160,7 @@ void claim_season_pass_reward(const middleware::web_service::Message& message,
         clear_mutation(outcome);
         return fail("reward_definition");
     }
-    // The claim is world state the moment the grant is accepted, so it is written before the
-    // reply and the push are staged from the banks.
+    // Stage the claim before encoding the reply and account push from the transaction's banks.
     if (!state::claim_season_pass_reward(request.rewardIndex)) {
         clear_mutation(outcome);
         return fail("claim_rejected");

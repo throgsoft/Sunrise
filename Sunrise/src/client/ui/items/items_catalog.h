@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "../../../state/build_data/items/item_catalog.h"
@@ -51,6 +52,11 @@ struct IconResult {
 };
 
 namespace catalog {
+/** Search keys and queries use the same case folding in each Items view. */
+[[nodiscard]] std::string search_text(std::string text);
+/** Matches whitespace-separated terms after both strings pass through search_text. */
+[[nodiscard]] bool matches(std::string_view text, std::string_view query) noexcept;
+void append_identity(std::string& text, std::uint32_t index, std::uint32_t hash);
 /** Starts the package worker after State publishes item identities. */
 void start() noexcept;
 void stop() noexcept;

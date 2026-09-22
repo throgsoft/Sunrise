@@ -4,7 +4,9 @@
 #include <array>
 #include <atomic>
 #include <limits>
+#include <memory>
 #include <mutex>
+#include <new>
 #include <shared_mutex>
 #include <span>
 #include <string_view>
@@ -14,6 +16,7 @@
 #include "../../state/activity/runtime.h"
 #include "../../state/build_data/runtime.h"
 #include "../../state/matchmaking/matchmaking_state.h"
+#include "../../state/progression/season_pass_reward_catalog.h"
 #include "../../state/runtime/runtime.h"
 #include "../activity/host_runtime.h"
 #include "activity_authority_query_owner.h"
@@ -300,6 +303,33 @@ bool has_active_family4_peer() noexcept {
     return std::any_of(g_sessions.begin(), g_sessions.end(), [](const Session& session) {
         return session.id != 0 && session.authenticated && session.queuez.family4Active;
     });
+}
+
+bool queue_season_pass_claim(std::span<const std::byte> request) noexcept {
+    middleware::web_service::Message message{};
+    middleware::web_service::messages::opcode2400::Request claim{};
+    if (!middleware::web_service::parse_request(request, message)
+        || !middleware::web_service::messages::opcode2400::parse_request(message, claim)
+        || claim.progressionIndex != state::progression::season_pass::kProgressionDefinitionIndex
+        || std::any_of(g_sessions.begin(), g_sessions.end(), [](const Session& session) {
+               return session.pendingSeasonPassClaim.characterSoid != 0;
+           })) {
+        return false;
+    }
+    const std::unique_ptr<state::PendingSeasonPassReward> pending(
+        new (std::nothrow) state::PendingSeasonPassReward);
+    if (!pending || !state::prepare_season_pass_reward(claim.rewardIndex, *pending)) {
+        return false;
+    }
+    for (auto& peer : g_sessions) {
+        if (peer.id != 0 && peer.authenticated && peer.queuez.family4Active
+            && peer.queuez.family4RootSoid == pending->grant.accountSoid) {
+            peer.pendingSeasonPassClaim = {pending->grant.characterSoid, claim.rewardIndex};
+            std::copy(request.begin(), request.end(), peer.pendingSeasonPassClaim.body.begin());
+            return true;
+        }
+    }
+    return false;
 }
 
 /** Finds one exact authenticated ActivityClient while the caller owns the BAP lock. */

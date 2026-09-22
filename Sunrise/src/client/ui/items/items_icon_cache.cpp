@@ -1,7 +1,6 @@
 #include "items_icon_cache.h"
 
 #include <array>
-#include <limits>
 
 #include "../../hooks/graphics/textures/graphics_texture_upload.h"
 #include "items_catalog.h"
@@ -15,8 +14,7 @@ struct Slot {
     int used{-1};
     Uploaded gpu{};
 };
-// Worst case: 16 MiB GPU storage, plus at most 4 MiB completed CPU work in the worker.
-std::array<Slot, 64> g_slots{};
+std::array<Slot, kCapacity> g_slots{};
 ID3D11Device* g_device{}; // Borrowed only inside renderer-owned frames.
 std::uint64_t g_request{};
 int g_frame{-1};

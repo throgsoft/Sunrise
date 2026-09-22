@@ -281,7 +281,6 @@ cache::records::MutableDomains scratch_domains(Context& state) noexcept {
         ensure_scratch<rewards::Modifier, rewards::kModifierCapacity>(state.rewardModifiersScratch),
         ensure_scratch<rewards::SocketOverride, rewards::kSocketOverrideCapacity>(
             state.rewardSocketsScratch),
-
     };
 }
 
@@ -430,7 +429,6 @@ cache::records::Domains occupied_domains(Context& state,
                                            counts.rewardModifiers},
         std::span<const rewards::SocketOverride>{state.rewardSocketsScratch.data(),
                                                  counts.rewardSockets},
-
     };
 }
 

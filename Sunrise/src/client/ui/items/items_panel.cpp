@@ -2,7 +2,6 @@
 
 #include <algorithm>
 #include <array>
-#include <cctype>
 #include <cstdio>
 #include <imgui.h>
 #include <string>
@@ -43,27 +42,9 @@ std::uint32_t g_heldHash{};
 std::int32_t g_heldSerial{-1};
 int g_heldQuantity{1};
 double g_inventoryRefreshAt{};
-constexpr int kIconBudget = 58;
+// Reserve cache slots for the inspector and partially visible tiles.
+constexpr int kIconBudget = icons::kCapacity - 6;
 
-bool matches(std::string_view haystack, std::string_view query) noexcept {
-    while (!query.empty()) {
-        const auto first = query.find_first_not_of(" \t");
-        if (first == std::string_view::npos) {
-            return true;
-        }
-        query.remove_prefix(first);
-        const auto end = query.find_first_of(" \t");
-        const auto word = query.substr(0, end);
-        if (haystack.find(word) == std::string_view::npos) {
-            return false;
-        }
-        if (end == std::string_view::npos) {
-            return true;
-        }
-        query.remove_prefix(end);
-    }
-    return true;
-}
 int compare_text(std::string_view left, std::string_view right) noexcept {
     const auto fold = [](unsigned char c) { return c >= 'A' && c <= 'Z' ? c + ('a' - 'A') : c; };
     for (std::size_t i = 0, count = (std::min)(left.size(), right.size()); i < count; ++i) {
@@ -82,17 +63,14 @@ int compare_optional_text(std::string_view left, std::string_view right) noexcep
     return compare_text(left, right);
 }
 void prepare_filter(const std::shared_ptr<const Catalog>& data) {
-    std::string query(g_search.data());
-    std::transform(query.begin(), query.end(), query.begin(), [](unsigned char c) {
-        return static_cast<char>(std::tolower(c));
-    });
+    auto query = catalog::search_text(g_search.data());
     if (g_filteredCatalog != data || query != g_appliedSearch || g_category != g_appliedCategory
         || g_sort != g_appliedSort) {
         g_filtered.clear();
         for (std::size_t i = 0; i < data->entries.size(); ++i) {
             if ((g_category == static_cast<int>(Category::all)
                  || static_cast<int>(data->entries[i].category) == g_category)
-                && matches(data->entries[i].search, query)) {
+                && catalog::matches(data->entries[i].search, query)) {
                 g_filtered.push_back(i);
             }
         }
@@ -203,7 +181,7 @@ void catalog_grid(const Catalog& data, float requestedHeight, float requestedWid
                         const ImVec2 imageMax{imageMin.x + side, imageMin.y + side};
                         const auto texture = icons::get(entry.iconIndex);
                         if (texture != ImTextureID_Invalid) {
-                            draw->AddImage(ImTextureRef(texture), imageMin, imageMax);
+                            widgets::image(texture, imageMin, imageMax);
                         } else {
                             constexpr const char* missing = "Icon\nunavailable";
                             const auto size = ImGui::CalcTextSize(missing);
@@ -355,7 +333,9 @@ void selected_item(const std::shared_ptr<const Catalog>& data) {
     }
     ImGui::EndDisabled();
     ImGui::EndGroup();
-    if (g_grantFeedback) ImGui::TextWrapped("%s", g_grantFeedback);
+    if (g_grantFeedback) {
+        ImGui::TextWrapped("%s", g_grantFeedback);
+    }
     if (!allowed) {
         ImGui::TextDisabled("Unavailable for the selected character.");
     }
@@ -384,7 +364,9 @@ void selected_item(const std::shared_ptr<const Catalog>& data) {
     }
 }
 void refresh_inventory() {
-    if (ImGui::GetTime() < g_inventoryRefreshAt) return;
+    if (ImGui::GetTime() < g_inventoryRefreshAt) {
+        return;
+    }
     g_inventoryRefreshAt = ImGui::GetTime() + 1.0;
     auto current = service::inventory();
     if (current.character != g_inventory.character) {
@@ -433,15 +415,22 @@ void buckets_tab(const Catalog& data) {
         }
         ImGui::EndCombo();
     }
-    if (g_bucket >= static_cast<int>(g_inventory.buckets.size())) return;
+    if (g_bucket >= static_cast<int>(g_inventory.buckets.size())) {
+        return;
+    }
     std::vector<const service::HeldItem*> items;
-    for (const auto& item : g_inventory.items)
-        if (item.bucket == g_inventory.buckets[g_bucket].id) items.push_back(&item);
+    for (const auto& item : g_inventory.items) {
+        if (item.bucket == g_inventory.buckets[g_bucket].id) {
+            items.push_back(&item);
+        }
+    }
     const auto entry_for = [&](const service::HeldItem& item) {
         const auto* entry = widgets::find(data, item.index);
         return entry && entry->identity.definitionHash == item.hash ? entry : nullptr;
     };
-    if (!ImGui::BeginTable("##bucket_contents", 2, ImGuiTableFlags_Resizable)) return;
+    if (!ImGui::BeginTable("##bucket_contents", 2, ImGuiTableFlags_Resizable)) {
+        return;
+    }
     ImGui::TableSetupColumn("Items", ImGuiTableColumnFlags_WidthStretch, 0.6f);
     ImGui::TableSetupColumn("Selected item", ImGuiTableColumnFlags_WidthStretch, 0.4f);
     ImGui::TableNextRow();
@@ -452,8 +441,9 @@ void buckets_tab(const Catalog& data) {
         const auto& item = *items[i];
         cards.push_back(
             {entry_for(item), nullptr, static_cast<std::uint32_t>(item.quantity), item.equipped});
-        if (item.hash == g_heldHash && item.instance == g_heldInstance)
+        if (item.hash == g_heldHash && item.instance == g_heldInstance) {
             selectedIndex = static_cast<int>(i);
+        }
     }
     const auto picked = widgets::grid("##bucket_grid", cards, selectedIndex);
     if (picked != selectedIndex && picked >= 0) {
@@ -503,7 +493,9 @@ void buckets_tab(const Catalog& data) {
             ImGui::EndDisabled();
             ImGui::EndDisabled();
         }
-        if (item.equipped) ImGui::TextDisabled("Equipped; unequip before editing.");
+        if (item.equipped) {
+            ImGui::TextDisabled("Equipped; unequip before editing.");
+        }
         ImGui::BeginDisabled(item.equipped || g_inventory.character == 0);
         if (ImGui::Button(item.quantity > 1 ? "Remove stack" : "Remove item")) {
             g_bucketFeedback = service::remove(g_inventory.character, item)
@@ -514,7 +506,9 @@ void buckets_tab(const Catalog& data) {
         }
         ImGui::EndDisabled();
     }
-    if (g_bucketFeedback) ImGui::TextWrapped("%s", g_bucketFeedback);
+    if (g_bucketFeedback) {
+        ImGui::TextWrapped("%s", g_bucketFeedback);
+    }
     ImGui::EndTable();
 }
 } // namespace

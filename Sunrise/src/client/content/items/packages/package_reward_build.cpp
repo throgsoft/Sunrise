@@ -1,10 +1,10 @@
 #include "package_reward_build.h"
 
 #include <algorithm>
-#include <cstring>
 #include <vector>
 
 #include "../../../../middleware/content/packages/tables/definition_index_table.h"
+#include "../../../../middleware/content/packages/tables/internal.h"
 #include "../../../../state/build_data/rewards/reward_catalog.h"
 #include "../../../../state/build_data/runtime.h"
 
@@ -17,9 +17,10 @@ namespace domain = state::build_data::rewards;
 
 /** Investment-root slots identify reward pools and unlock-slot bindings. */
 constexpr std::size_t kPoolSlot = 88;
+constexpr std::size_t kExpressionSlot = 109;
 constexpr std::size_t kFlagSlot = 112;
 constexpr std::size_t kValueSlot = 114;
-/** Reward tables store 24-byte pool rows and 80-byte entries. */
+/** Native reward schema classes and fixed row sizes. */
 constexpr std::uint32_t kPoolClass = 0x80807553U;
 constexpr std::uint32_t kPoolRowClass = 0x8080748CU;
 constexpr std::uint32_t kEntryClass = 0x8080748EU;
@@ -28,18 +29,18 @@ constexpr std::uint32_t kModifierClass = 0x80807490U;
 constexpr std::uint32_t kSocketClass = 0x80803062U;
 constexpr std::uint32_t kWrapperClass = 0x808077CCU;
 constexpr std::uint32_t kSelectionClass = 0x808077CFU;
+constexpr std::uint32_t kFlagTableClass = 0x80807D49U, kFlagRowClass = 0x80807D4FU;
+constexpr std::uint32_t kValueTableClass = 0x80807C92U, kValueRowClass = 0x80807C96U;
+constexpr std::uint32_t kExpressionTableClass = 0x80807C49U, kExpressionRowClass = 0x80807C4FU;
+constexpr std::uint32_t kConditionClass = 0x80807D2FU;
+constexpr std::size_t kPoolStride = 24, kEntryStride = 80, kModifierStride = 24;
+constexpr std::size_t kBindingStride = 8, kExpressionRowStride = 24;
+constexpr std::size_t kSocketStride = 12, kSelectionStride = 12;
+/** Binding scopes select persistent account/character banks; other scopes are computed. */
+constexpr std::uint16_t kAccountScope = 1, kCharacterScope = 2;
 /** Item headers hold a relative wrapper pointer and an acquired-unlock slot. */
 constexpr std::size_t kWrapperField = 0x58;
 constexpr std::size_t kAcquiredFlagField = 0xDA;
-
-template <typename T>
-bool field(std::span<const std::byte> blob, std::size_t at, T& output) noexcept {
-    if (at > blob.size() || sizeof output > blob.size() - at) {
-        return false;
-    }
-    std::memcpy(&output, blob.data() + at, sizeof output);
-    return true;
-}
 
 bool array(std::span<const std::byte> blob,
            std::size_t at,
@@ -73,33 +74,33 @@ struct Builder {
     std::vector<domain::SocketOverride> sockets;
     RewardConditions conditions;
 
-    bool expression(std::span<const std::byte> blob, std::size_t at, domain::Range& out) noexcept {
-        return conditions.read(blob, at, instructions, out);
-    }
-
     bool entry(std::span<const std::byte> blob, std::size_t at) noexcept {
         domain::Entry out{};
         // Fixed fields precede condition, weight-modifier, and socket arrays.
-        if (!field(blob, at, out.itemIndex) || !field(blob, at + 2, out.itemType)
-            || !field(blob, at + 4, out.quantity) || !field(blob, at + 8, out.poolIndex)
-            || !field(blob, at + 10, out.mappingIndex) || !field(blob, at + 12, out.scale)
-            || !field(blob, at + 16, out.adjusterIndex) || !field(blob, at + 20, out.categoryHash)
-            || !field(blob, at + 24, out.weight) || !field(blob, at + 28, out.bucketHash)
-            || !expression(blob, at + 32, out.condition)) {
+        if (!tables::read(blob, at, out.itemIndex) || !tables::read(blob, at + 2, out.itemType)
+            || !tables::read(blob, at + 4, out.quantity)
+            || !tables::read(blob, at + 8, out.poolIndex)
+            || !tables::read(blob, at + 10, out.mappingIndex)
+            || !tables::read(blob, at + 12, out.scale)
+            || !tables::read(blob, at + 16, out.adjusterIndex)
+            || !tables::read(blob, at + 20, out.categoryHash)
+            || !tables::read(blob, at + 24, out.weight)
+            || !tables::read(blob, at + 28, out.bucketHash)
+            || !conditions.read(blob, at + 32, instructions, out.condition)) {
             return false;
         }
         tables::Array rows{};
-        if (!array(blob, at + 48, kModifierClass, 24, rows)) {
+        if (!array(blob, at + 48, kModifierClass, kModifierStride, rows)) {
             return false;
         }
         out.modifiers = {static_cast<std::uint32_t>(modifiers.size()),
                          static_cast<std::uint32_t>(rows.count)};
         for (std::size_t i = 0; i < rows.count; ++i) {
-            const auto offset = rows.dataOffset + i * 24;
+            const auto offset = rows.dataOffset + i * kModifierStride;
             domain::Modifier modifier{};
-            if (!expression(blob, offset, modifier.condition)
-                || !field(blob, offset + 16, modifier.valueIndex)
-                || !field(blob, offset + 20, modifier.value)
+            if (!conditions.read(blob, offset, instructions, modifier.condition)
+                || !tables::read(blob, offset + 16, modifier.valueIndex)
+                || !tables::read(blob, offset + 20, modifier.value)
                 || !append(modifiers, modifier, domain::kModifierCapacity)) {
                 return false;
             }
@@ -139,13 +140,19 @@ bool root_table(const reader::Source& source,
 bool RewardConditions::load(const reader::Source& source,
                             reader::Scratch& scratch,
                             std::span<const std::byte> root) noexcept {
-    // Root slot 109 holds expressions referenced by native operator 12.
-    return root_table(source, scratch, root, kFlagSlot, flags_, 0x80807D49U)
-           && array(flags_, tables::kTableArrayDescriptor, 0x80807D4FU, 8, flagRows_)
-           && root_table(source, scratch, root, kValueSlot, values_, 0x80807C92U)
-           && array(values_, tables::kTableArrayDescriptor, 0x80807C96U, 8, valueRows_)
-           && root_table(source, scratch, root, 109, expressions_, 0x80807C49U)
-           && array(expressions_, tables::kTableArrayDescriptor, 0x80807C4FU, 24, expressionRows_);
+    // Shared expressions are expanded before the runtime evaluates reward conditions.
+    return root_table(source, scratch, root, kFlagSlot, flags_, kFlagTableClass)
+           && array(flags_, tables::kTableArrayDescriptor, kFlagRowClass, kBindingStride, flagRows_)
+           && root_table(source, scratch, root, kValueSlot, values_, kValueTableClass)
+           && array(
+               values_, tables::kTableArrayDescriptor, kValueRowClass, kBindingStride, valueRows_)
+           && root_table(
+               source, scratch, root, kExpressionSlot, expressions_, kExpressionTableClass)
+           && array(expressions_,
+                    tables::kTableArrayDescriptor,
+                    kExpressionRowClass,
+                    kExpressionRowStride,
+                    expressionRows_);
 }
 
 bool RewardConditions::bind(domain::Instruction& instruction) const noexcept {
@@ -159,19 +166,20 @@ bool RewardConditions::bind(domain::Instruction& instruction) const noexcept {
     if (instruction.operand >= rows.count) {
         return false;
     }
-    const std::size_t at = rows.dataOffset + instruction.operand * 8;
+    const std::size_t at = rows.dataOffset + instruction.operand * kBindingStride;
     std::uint32_t hash = 0;
     std::uint16_t scope = 0;
     std::uint16_t index = domain::kAbsent;
-    if (!field(blob, at, hash) || !field(blob, at + 4, scope) || !field(blob, at + 6, index)) {
+    if (!tables::read(blob, at, hash) || !tables::read(blob, at + 4, scope)
+        || !tables::read(blob, at + 6, index)) {
         return false;
     }
     using B = domain::BankRead;
-    const B kind = scope == 1   ? (flag ? B::accountFlag : B::accountValue)
-                   : scope == 2 ? (flag ? B::characterFlag : B::characterValue)
-                                : (flag ? B::externalFlag : B::externalValue);
+    const B kind = scope == kAccountScope     ? (flag ? B::accountFlag : B::accountValue)
+                   : scope == kCharacterScope ? (flag ? B::characterFlag : B::characterValue)
+                                              : (flag ? B::externalFlag : B::externalValue);
     instruction.opcode = static_cast<std::uint32_t>(kind);
-    instruction.operand = scope == 1 || scope == 2 ? index : hash;
+    instruction.operand = scope == kAccountScope || scope == kCharacterScope ? index : hash;
     return true;
 }
 
@@ -180,20 +188,26 @@ bool RewardConditions::append_expression(std::span<const std::byte> blob,
                                          std::vector<domain::Instruction>& bank,
                                          std::size_t depth) const noexcept {
     tables::Array rows{};
-    if (depth >= domain::kTraversalDepth || !array(blob, at, kExpressionClass, 8, rows)) {
+    if (depth >= domain::kTraversalDepth
+        || !array(blob, at, kExpressionClass, tables::kUnlockInstructionStride, rows)) {
         return false;
     }
     for (std::size_t i = 0; i < rows.count; ++i) {
         domain::Instruction instruction{};
-        if (!field(blob, rows.dataOffset + i * 8, instruction.opcode)
-            || !field(blob, rows.dataOffset + i * 8 + 4, instruction.operand)) {
+        if (!tables::read(
+                blob, rows.dataOffset + i * tables::kUnlockInstructionStride, instruction.opcode)
+            || !tables::read(blob,
+                             rows.dataOffset + i * tables::kUnlockInstructionStride
+                                 + tables::kUnlockInstructionOperandOffset,
+                             instruction.operand)) {
             return false;
         }
         if (static_cast<domain::Opcode>(instruction.opcode) == domain::Opcode::expression) {
             const auto before = bank.size();
             if (instruction.operand >= expressionRows_.count
                 || !append_expression(expressions_,
-                                      expressionRows_.dataOffset + instruction.operand * 24 + 8,
+                                      expressionRows_.dataOffset
+                                          + instruction.operand * kExpressionRowStride + 8,
                                       bank,
                                       depth + 1)
                 || bank.size() == before) {
@@ -226,12 +240,15 @@ bool RewardConditions::read_list(std::span<const std::byte> blob,
     count = 0;
     tables::Array rows{};
     std::vector<domain::Instruction> instructions;
-    if (!array(blob, at, 0x80807D2FU, 16, rows)) {
+    if (!array(blob, at, kConditionClass, tables::kUnlockExpressionFieldSize, rows)) {
         return false;
     }
     for (std::size_t i = 0; i < rows.count; ++i) {
         domain::Range expression{};
-        if (!read(blob, rows.dataOffset + i * 16, instructions, expression)
+        if (!read(blob,
+                  rows.dataOffset + i * tables::kUnlockExpressionFieldSize,
+                  instructions,
+                  expression)
             || expression.count == 0) {
             return false;
         }
@@ -258,15 +275,16 @@ bool read_reward_sockets(std::span<const std::byte> blob,
                          std::size_t& count) noexcept {
     count = 0;
     tables::Array rows{};
-    if (!array(blob, at, kSocketClass, 12, rows) || rows.count > output.size()) {
+    if (!array(blob, at, kSocketClass, kSocketStride, rows) || rows.count > output.size()) {
         return false;
     }
     for (std::size_t i = 0; i < rows.count; ++i) {
-        const std::size_t p = rows.dataOffset + i * 12;
+        const std::size_t p = rows.dataOffset + i * kSocketStride;
         auto& socket = output[i];
-        if (!field(blob, p, socket.socketType) || !field(blob, p + 2, socket.plugItem)
-            || !field(blob, p + 4, socket.plugSet) || !field(blob, p + 6, socket.rollSet)
-            || !field(blob, p + 8, socket.selection)) {
+        if (!tables::read(blob, p, socket.socketType) || !tables::read(blob, p + 2, socket.plugItem)
+            || !tables::read(blob, p + 4, socket.plugSet)
+            || !tables::read(blob, p + 6, socket.rollSet)
+            || !tables::read(blob, p + 8, socket.selection)) {
             return false;
         }
     }
@@ -287,25 +305,29 @@ bool build_rewards(const reader::Source& source,
     tables::Array items{};
     if (!build.conditions.load(source, scratch, root)
         || !root_table(source, scratch, root, kPoolSlot, blob, kPoolClass)
-        || !array(blob, tables::kTableArrayDescriptor, kPoolRowClass, 24, pools) || pools.count == 0
-        || pools.count > domain::kPoolCapacity
+        || !array(blob, tables::kTableArrayDescriptor, kPoolRowClass, kPoolStride, pools)
+        || pools.count == 0 || pools.count > domain::kPoolCapacity
         || !root_table(source, scratch, root, tables::kItemTableSlot, index)
-        || !array(index, tables::kTableArrayDescriptor, tables::kItemIndexTableClass, 24, items)
+        || !array(index,
+                  tables::kTableArrayDescriptor,
+                  tables::kItemIndexTableClass,
+                  tables::kItemIndexRowStride,
+                  items)
         || items.count == 0 || items.count > domain::kItemCapacity) {
         return false;
     }
     for (std::size_t i = 0; i < pools.count; ++i) {
-        const std::size_t at = pools.dataOffset + i * 24;
+        const std::size_t at = pools.dataOffset + i * kPoolStride;
         domain::Pool pool{};
         tables::Array entries{};
-        if (!field(blob, at, pool.definitionHash)
-            || !array(blob, at + 8, kEntryClass, 80, entries)) {
+        if (!tables::read(blob, at, pool.definitionHash)
+            || !array(blob, at + 8, kEntryClass, kEntryStride, entries)) {
             return false;
         }
         pool.entries = {static_cast<std::uint32_t>(build.entries.size()),
                         static_cast<std::uint32_t>(entries.count)};
         for (std::size_t j = 0; j < entries.count; ++j) {
-            if (!build.entry(blob, entries.dataOffset + j * 80)) {
+            if (!build.entry(blob, entries.dataOffset + j * kEntryStride)) {
                 return false;
             }
         }
@@ -321,8 +343,8 @@ bool build_rewards(const reader::Source& source,
         std::int64_t relative = 0;
         if (!tables::index_row(index, items, i, row)
             || !reader::read_tag(source, scratch, row.targetTag, blob, cls)
-            || cls != tables::kItemDefinitionClass || !field(blob, kWrapperField, relative)
-            || !field(blob, kAcquiredFlagField, acquired)) {
+            || cls != tables::kItemDefinitionClass || !tables::read(blob, kWrapperField, relative)
+            || !tables::read(blob, kAcquiredFlagField, acquired)) {
             return false;
         }
         item.definitionHash = row.definitionHash;
@@ -342,19 +364,21 @@ bool build_rewards(const reader::Source& source,
             }
             const auto at = kWrapperField + static_cast<std::size_t>(relative);
             tables::Array selections{};
-            if (!field(blob, at - 4, cls) || cls != kWrapperClass
-                || !field(blob, at, item.poolIndex) || !field(blob, at + 4, item.categoryHash)
-                || !field(blob, at + 24, item.flags)
-                || !array(blob, at + 8, kSelectionClass, 12, selections)
+            if (!tables::read(blob, at - 4, cls) || cls != kWrapperClass
+                || !tables::read(blob, at, item.poolIndex)
+                || !tables::read(blob, at + 4, item.categoryHash)
+                || !tables::read(blob, at + 24, item.flags)
+                || !array(blob, at + 8, kSelectionClass, kSelectionStride, selections)
                 || selections.count > item.selections.size()) {
                 return false;
             }
             item.selectionCount = static_cast<std::uint8_t>(selections.count);
             for (std::size_t j = 0; j < selections.count; ++j) {
                 auto& selection = item.selections[j];
-                const auto p = selections.dataOffset + j * 12;
-                if (!field(blob, p, selection.categoryHash) || !field(blob, p + 4, selection.count)
-                    || !field(blob, p + 8, selection.policy)) {
+                const auto p = selections.dataOffset + j * kSelectionStride;
+                if (!tables::read(blob, p, selection.categoryHash)
+                    || !tables::read(blob, p + 4, selection.count)
+                    || !tables::read(blob, p + 8, selection.policy)) {
                     return false;
                 }
             }

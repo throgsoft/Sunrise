@@ -12,6 +12,7 @@
 #include "../../middleware/bap/activity_message/sensor_auth_update.h"
 #include "../../middleware/bap/frame.h"
 #include "../../middleware/content/packages/tables/scenario_reader.h"
+#include "../../middleware/web_service/messages/opcode2400.h"
 #include "../../state/activity/bubble_authority/definition.h"
 #include "../../state/activity/definition.h"
 #include "../../state/activity/mission/definition.h"
@@ -336,6 +337,13 @@ struct WorldRewardRequest {
     std::uint16_t itemDefinitionIndex{};
     WorldRewardKind kind{};
 };
+
+/** Bound to the requesting character; an empty character cancels the queued claim. */
+struct SeasonPassClaimRequest {
+    std::uint64_t characterSoid{};
+    std::uint16_t rewardIndex{};
+    std::array<std::byte, middleware::web_service::messages::opcode2400::kRequestSize> body{};
+};
 /** The changed character projections still owed after their source state commits. */
 enum class CharacterRefreshScope : std::uint8_t { none, records, recordsAndRoster };
 
@@ -350,6 +358,7 @@ struct Session {
     std::uint32_t activityRosterGroups{};
     std::int32_t pendingSeasonalExperienceAmount{};
     std::uint32_t pendingSeasonalExperienceMutationSerial{};
+    SeasonPassClaimRequest pendingSeasonPassClaim{};
     bool authenticated{};
     /** Owes one family-five snapshot for the unlock overrides an artifact change moved. */
     bool artifactRefreshArmed{};
@@ -517,6 +526,9 @@ struct Session {
 
 /** @return True while any authenticated peer holds a Family-4 subscription. */
 [[nodiscard]] bool has_active_family4_peer() noexcept;
+
+/** Queues a claim for publication on an active account peer. Caller owns the session lock. */
+[[nodiscard]] bool queue_season_pass_claim(std::span<const std::byte> request) noexcept;
 
 /**
  * Finds one exact authenticated ActivityClient while the caller owns the session lock.

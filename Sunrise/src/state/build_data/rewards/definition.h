@@ -61,12 +61,17 @@ enum class BankRead : std::uint32_t {
     externalValue,
 };
 
+/** A fixed override names its plug directly rather than selecting from a set. */
+inline constexpr std::uint32_t kFixedPlugSelection = 0xFFFFFFFFU;
+/** Wrappers without this bit remain inventory items until explicitly opened. */
+inline constexpr std::uint32_t kOpenOnAcquisition = 1;
+
 struct SocketOverride {
     std::uint16_t socketType{kAbsent};
     std::uint16_t plugItem{kAbsent};
     std::uint16_t plugSet{kAbsent};
     std::uint16_t rollSet{kAbsent};
-    std::uint32_t selection{0xFFFFFFFFU};
+    std::uint32_t selection{kFixedPlugSelection};
 };
 
 struct Modifier {

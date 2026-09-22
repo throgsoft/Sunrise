@@ -14,6 +14,8 @@
 #include "../../../../state/runtime/runtime.h"
 #include "../internal.h"
 #include "../push/activity/activity_keepalive_push.h"
+#include "../transactions/service_outcome_commit.h"
+#include "queuez_reward_staging.h"
 #include "queuez_state_validation.h"
 #include "state/investment/store_internal.h"
 
@@ -53,6 +55,72 @@ selected_character(const state::AccountState& account) noexcept {
         }
     }
     return nullptr;
+}
+
+bool consume_season_pass_claim(Session& session,
+                               Scratch& scratch,
+                               std::span<std::byte> response,
+                               std::size_t& written,
+                               bool& touchesScratch) noexcept {
+    if (session.pendingSeasonPassClaim.characterSoid == 0) {
+        return false;
+    }
+    const auto request = session.pendingSeasonPassClaim;
+    session.pendingSeasonPassClaim = {};
+    state::investment::store::Transaction transaction;
+    ServiceRoute route{};
+    route.bodyCodec = BodyCodec::webService;
+    ServiceOutcome outcome{};
+    std::size_t responseBodySize = 0;
+    touchesScratch = true;
+    if (!transaction.ready()
+        || !body::process(route,
+                          session.queuez,
+                          session.activity,
+                          session.activityRosterDecode,
+                          session.matchmakingContext,
+                          request.body,
+                          scratch.responseBody,
+                          responseBodySize,
+                          outcome)) {
+        return false;
+    }
+    const auto* claim = transaction_if<SeasonPassRewardTransaction>(outcome);
+    if (claim == nullptr || claim->pending == nullptr
+        || claim->pending->grant.characterSoid != request.characterSoid) {
+        return false;
+    }
+    auto nextSendNonce = session.sendNonce;
+    queuez::SessionState after{};
+    std::size_t framedSize = 0;
+    if (!queuez::stage_reward_outcome(scratch,
+                                      session.queuez,
+                                      outcome,
+                                      active_acquisition_presentation_rows(session),
+                                      session.sessionKey,
+                                      nextSendNonce,
+                                      scratch.framed,
+                                      framedSize,
+                                      after)
+        || framedSize == 0) {
+        return false;
+    }
+    if (framedSize > response.size()) {
+        session.pendingSeasonPassClaim = request;
+        return false;
+    }
+    transactions::Publication publication{};
+    const char* reason = nullptr;
+    if (!transactions::commit(outcome, publication, reason) || !transaction.commit()) {
+        return false;
+    }
+    std::copy_n(scratch.framed.begin(), framedSize, response.begin());
+    written = framedSize;
+    session.sendNonce = nextSendNonce;
+    session.queuez = after;
+    bap::arm_account_resync_elsewhere(session);
+    bap::arm_acquisition_presentation_hold(session);
+    return true;
 }
 
 bool consume_world_record_reward(const WorldRewardRequest& request,
@@ -733,6 +801,9 @@ bool consume_deferred(Session& session,
     // A failed resync blocks every incremental that could depend on its missing objects.
     if (session.accountResyncArmed) {
         return false;
+    }
+    if (consume_season_pass_claim(session, scratch, response, written, touchesScratch)) {
+        return true;
     }
     WorldRewardRequest reward{};
     if (session.queuez.family4Active && bap::current_world_reward(reward)) {

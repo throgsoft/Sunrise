@@ -345,11 +345,7 @@ apply_dismantle_rewards(const AccountState& before,
     report_dismantle_reward_match(
         dismantledDefinition.definitionHash, tier, gearClass, isMasterworked, payoutCount);
 
-    std::int32_t greatestMutationSerial = 0;
-    for (std::size_t index = 0; index < before.profileItemCount; ++index) {
-        greatestMutationSerial =
-            (std::max)(greatestMutationSerial, before.profileItems[index].mutationSerial);
-    }
+    std::int32_t greatestMutationSerial = account::greatest_profile_serial(before);
 
     for (std::size_t policyIndex = 0; policyIndex < payoutCount; ++policyIndex) {
         const DismantleRewardPolicy& policy = payout[policyIndex];

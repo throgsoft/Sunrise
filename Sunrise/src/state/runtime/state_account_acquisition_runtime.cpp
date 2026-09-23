@@ -452,12 +452,8 @@ finalize_profile_item_acquisition(const AccountState& account,
     std::size_t profileIndex = chargedAccount.profileItemCount;
     std::int32_t previousQuantity = 0;
     std::int32_t previousMutationSerial = 0;
-    std::int32_t greatestMutationSerial = 0;
+    std::int32_t greatestMutationSerial = account::greatest_profile_serial(account);
     bool appended = true;
-    for (std::size_t index = 0; index < account.profileItemCount; ++index) {
-        greatestMutationSerial =
-            (std::max)(greatestMutationSerial, account.profileItems[index].mutationSerial);
-    }
     for (std::size_t index = 0; index < chargedAccount.profileItemCount; ++index) {
         const authored_inventory::ProfileItem& existing = chargedAccount.profileItems[index];
         greatestMutationSerial = (std::max)(greatestMutationSerial, existing.mutationSerial);

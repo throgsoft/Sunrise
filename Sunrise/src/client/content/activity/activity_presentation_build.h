@@ -2,6 +2,7 @@
 
 #include "../../../middleware/content/packages/reader/reader.h"
 #include "../../../middleware/content/packages/tables/activity_presentation_table.h"
+#include "../../../middleware/content/packages/tables/texture_reader.h"
 #include "../../../state/build_data/activities/activity_artwork.h"
 #include "../../../state/build_data/activities/activity_releases.h"
 #include "activity_menu_text_build.h"
@@ -29,24 +30,21 @@ inline void build_artwork(const middleware::content::packages::reader::Source& s
                && actual == expected;
     };
     const auto texture = [&](std::size_t i, std::uint32_t tag) noexcept {
-        std::uint32_t format{}, buffer{}, large{};
-        std::uint16_t cafe{}, width{}, height{}, depth{}, layers{};
-        if (!packages::reader::read_tag(source, scratch, tag, bytes, buffer) || bytes.size() != 40
-            || !parser::read(bytes, 4, format) || format != 28 || !parser::read(bytes, 12, cafe)
-            || cafe != 0xCAFE || !parser::read(bytes, 14, width) || !parser::read(bytes, 16, height)
-            || !parser::read(bytes, 18, depth) || !parser::read(bytes, 20, layers) || width == 0
-            || height == 0 || width > 256 || height > 256 || depth != 1 || layers != 1
-            || !parser::read(bytes, 36, large) || large != 0xFFFFFFFFU) {
+        std::uint32_t buffer{};
+        packages::tables::Rgba8Texture header{};
+        if (!packages::reader::read_tag(source, scratch, tag, bytes, buffer)
+            || !packages::tables::rgba8_texture(bytes, header) || header.width > 256
+            || header.height > 256) {
             return;
         }
-        const auto size = static_cast<std::size_t>(width) * height * 4;
+        const auto size = static_cast<std::size_t>(header.width) * header.height * 4;
         if (!packages::reader::read_tag(source, scratch, buffer, pixels) || pixels.size() < size
             || pixels.size() > 512 * 1024) {
             return;
         }
         images[i].tag = tag;
-        images[i].width = width;
-        images[i].height = height;
+        images[i].width = header.width;
+        images[i].height = header.height;
         images[i].pixels.assign(pixels.begin(), pixels.begin() + static_cast<std::ptrdiff_t>(size));
     };
     for (std::size_t i = 1; i < styles.size(); ++i) {

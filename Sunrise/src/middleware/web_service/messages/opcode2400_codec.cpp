@@ -8,7 +8,7 @@ namespace sunrise::middleware::web_service::messages::opcode2400 {
 namespace {
 
 /** Two 16-bit array elements plus the descriptor's final zero padding byte. */
-constexpr std::size_t kPayloadSize = 5;
+constexpr std::size_t kPayloadSize = kRequestSize - kEnvelopeHeaderSize;
 /** The descriptor pads its four payload bytes out to five. */
 constexpr std::uint8_t kPaddingWidth = 8;
 
@@ -36,6 +36,22 @@ bool parse_request(const Message& message, Request& request) noexcept {
     request.progressionIndex = static_cast<std::uint16_t>(progression);
     request.rewardIndex = static_cast<std::uint16_t>(reward);
     return true;
+}
+
+bool encode_request(const Request& request,
+                    std::uint32_t transactionId,
+                    std::span<std::byte> output,
+                    std::size_t& written) noexcept {
+    written = 0;
+    if (output.size() < kRequestSize || request.progressionIndex >= kBiasedIndexBias
+        || request.rewardIndex >= kBiasedIndexBias) {
+        return false;
+    }
+    encoding::bits::Writer writer(output.first(kRequestSize));
+    return writer.write(kOpcode, 16) && writer.write(transactionId, 32)
+           && writer.write(request.progressionIndex + kBiasedIndexBias, kBiasedIndexWidth)
+           && writer.write(request.rewardIndex + kBiasedIndexBias, kBiasedIndexWidth)
+           && writer.write(0, kPaddingWidth) && writer.finish(written);
 }
 
 } // namespace sunrise::middleware::web_service::messages::opcode2400

@@ -25,6 +25,7 @@
 #include "../../../../state/build_data/season_pass/definition.h"
 #include "../../../../state/build_data/sobjects/sobject_catalog.h"
 #include "package_reward_build.h"
+#include "source.h"
 
 namespace sunrise::client::content::items::packages {
 
@@ -388,13 +389,6 @@ read_investment_constants(const reader::Source& source,
 build_bounties(const reader::Source& source, Storage& storage, std::size_t itemCount) noexcept;
 
 /**
- * Copies the block key material this pass borrows.
- * @param keys Receives the primary, alternate and nonce material.
- * @return True when the installed key table and the bootstrap token are both there.
- */
-[[nodiscard]] bool collect_keys(reader::BlockKeys& keys) noexcept;
-
-/**
  * Collects every catalogue tag carrying the container name.
  * @param candidates Receives the candidate tags.
  * @param count Receives the number of candidates.
@@ -403,9 +397,6 @@ build_bounties(const reader::Source& source, Storage& storage, std::size_t itemC
 [[nodiscard]] bool
 investment_globals_tags(std::array<std::uint32_t, kContainerCandidates>& candidates,
                         std::size_t& count) noexcept;
-
-/** @param directory Receives the installed packages directory. @return True when it exists. */
-[[nodiscard]] bool package_directory(core::path::Buffer& directory) noexcept;
 
 /** @param slot Requested-set position. @param definitionIndex Native item index that failed. */
 void report_detail_failure(std::size_t slot, std::uint16_t definitionIndex) noexcept;

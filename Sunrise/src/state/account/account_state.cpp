@@ -140,6 +140,14 @@ constexpr std::uint8_t kDismantleClassMaskBits =
 
 } // namespace
 
+std::int32_t greatest_profile_serial(const AccountState& state) noexcept {
+    std::int32_t serial = 0;
+    for (std::size_t i = 0; i < state.profileItemCount && i < state.profileItems.size(); ++i) {
+        serial = (std::max)(serial, state.profileItems[i].mutationSerial);
+    }
+    return serial;
+}
+
 /**
  * Checks bounded ids and whole settings for every nonzero account.
  * @param state Account State to check.

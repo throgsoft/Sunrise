@@ -12,6 +12,7 @@
 #include "../../middleware/bap/activity_message/sensor_auth_update.h"
 #include "../../middleware/bap/frame.h"
 #include "../../middleware/content/packages/tables/scenario_reader.h"
+#include "../../middleware/web_service/messages/opcode2400.h"
 #include "../../state/activity/bubble_authority/definition.h"
 #include "../../state/activity/definition.h"
 #include "../../state/activity/mission/definition.h"
@@ -332,12 +333,24 @@ enum class WorldRewardKind : std::uint8_t {
     profileItem,
 };
 
+/** Saves a reward under its item identity. The caller holds the session lock. */
+[[nodiscard]] bool enqueue_world_reward(std::uint16_t definitionIndex,
+                                        std::int32_t quantity,
+                                        WorldRewardKind kind) noexcept;
+
 /** One reward earned in world, held until a Family-4 peer can publish it. */
 struct WorldRewardRequest {
     std::uint64_t id{};
     std::int32_t quantity{};
     std::uint16_t itemDefinitionIndex{};
     WorldRewardKind kind{};
+};
+
+/** Bound to the requesting character; an empty character cancels the queued claim. */
+struct SeasonPassClaimRequest {
+    std::uint64_t characterSoid{};
+    std::uint16_t rewardIndex{};
+    std::array<std::byte, middleware::web_service::messages::opcode2400::kRequestSize> body{};
 };
 /** The changed character projections still owed after their source state commits. */
 enum class CharacterRefreshScope : std::uint8_t { none, records, recordsAndRoster };
@@ -353,6 +366,7 @@ struct Session {
     std::uint32_t activityRosterGroups{};
     std::int32_t pendingSeasonalExperienceAmount{};
     std::uint32_t pendingSeasonalExperienceMutationSerial{};
+    SeasonPassClaimRequest pendingSeasonPassClaim{};
     bool authenticated{};
     /** Owes one family-five snapshot for the unlock overrides an artifact change moved. */
     bool artifactRefreshArmed{};

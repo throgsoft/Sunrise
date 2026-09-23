@@ -310,4 +310,12 @@ void close_files(Scratch& scratch) noexcept;
                             std::vector<std::byte>& output,
                             std::uint32_t& classId) noexcept;
 
+/** Reads an entry only when its declared byte size fits limit, before allocating output. */
+[[nodiscard]] bool read_tag(const Source& source,
+                            Scratch& scratch,
+                            std::uint32_t tag,
+                            std::vector<std::byte>& output,
+                            std::uint32_t& classId,
+                            std::size_t limit) noexcept;
+
 } // namespace sunrise::middleware::content::packages::reader

@@ -190,6 +190,9 @@ struct AccountState {
 
 namespace account {
 
+/** Greatest profile mutation serial, or zero when no profile row has been published. */
+[[nodiscard]] std::int32_t greatest_profile_serial(const AccountState& state) noexcept;
+
 [[nodiscard]] bool valid(const AccountState& state) noexcept;
 
 /** Checks settings-authored State before runtime-only profile stack SOIDs are assigned. */

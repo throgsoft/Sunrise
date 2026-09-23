@@ -26,6 +26,8 @@ constexpr UINT kSingleSample = 1;
 constexpr UINT kDefaultQuality = 0;
 /** A 2D upload has no slice pitch. */
 constexpr UINT kNoSlicePitch = 0;
+/** RGBA8 stores four one-byte channels per pixel. */
+constexpr std::uint32_t kBytesPerPixel = 4;
 
 /** @param object COM object we own. Released and cleared when set. */
 template <typename Interface> void release_com(Interface*& object) noexcept {
@@ -162,22 +164,12 @@ create_texture(ID3D11Device* device, IWICBitmap* bitmap, Uploaded& output) noexc
     bool uploaded = SUCCEEDED(lock->GetStride(&stride))
                     && SUCCEEDED(lock->GetDataPointer(&pixelBytes, &pixels)) && pixels != nullptr;
     if (uploaded) {
-        D3D11_TEXTURE2D_DESC description{};
-        description.Width = width;
-        description.Height = height;
-        description.MipLevels = kSingleLevel;
-        description.ArraySize = kSingleLevel;
-        // Byte order matches the decoded format, so the pixels upload with no conversion.
-        description.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
-        description.SampleDesc.Count = kSingleSample;
-        description.SampleDesc.Quality = kDefaultQuality;
-        // The sheet never changes after upload, so the driver may place it where it likes.
-        description.Usage = D3D11_USAGE_IMMUTABLE;
-        description.BindFlags = D3D11_BIND_SHADER_RESOURCE;
-        const D3D11_SUBRESOURCE_DATA initial{pixels, stride, kNoSlicePitch};
-        uploaded =
-            SUCCEEDED(device->CreateTexture2D(&description, &initial, &created.texture))
-            && SUCCEEDED(device->CreateShaderResourceView(created.texture, nullptr, &created.view));
+        uploaded = upload_rgba8(device,
+                                width,
+                                height,
+                                stride,
+                                {reinterpret_cast<const std::byte*>(pixels), pixelBytes},
+                                created);
     }
     release_com(lock);
     if (!uploaded) {
@@ -190,6 +182,42 @@ create_texture(ID3D11Device* device, IWICBitmap* bitmap, Uploaded& output) noexc
 }
 
 } // namespace
+
+bool upload_rgba8(ID3D11Device* device,
+                  std::uint32_t width,
+                  std::uint32_t height,
+                  std::uint32_t stride,
+                  std::span<const std::byte> pixels,
+                  Uploaded& output) noexcept {
+    if (device == nullptr || width == 0 || height == 0
+        || static_cast<std::uint64_t>(width) * kBytesPerPixel > stride
+        || static_cast<std::uint64_t>(height - 1) * stride
+                   + static_cast<std::uint64_t>(width) * kBytesPerPixel
+               > pixels.size()) {
+        return false;
+    }
+    D3D11_TEXTURE2D_DESC description{};
+    description.Width = width;
+    description.Height = height;
+    description.MipLevels = description.ArraySize = kSingleLevel;
+    // Byte order matches the decoded format, so the pixels upload with no conversion.
+    description.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+    description.SampleDesc.Count = kSingleSample;
+    description.SampleDesc.Quality = kDefaultQuality;
+    // These pixels never change after upload, so the driver may place them where it likes.
+    description.Usage = D3D11_USAGE_IMMUTABLE;
+    description.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+    const D3D11_SUBRESOURCE_DATA initial{pixels.data(), stride, kNoSlicePitch};
+    Uploaded created{};
+    if (FAILED(device->CreateTexture2D(&description, &initial, &created.texture))
+        || FAILED(device->CreateShaderResourceView(created.texture, nullptr, &created.view))) {
+        release_com(created.view);
+        release_com(created.texture);
+        return false;
+    }
+    output = created;
+    return true;
+}
 
 /** Decodes the bundled logo sheet and publishes its view to the Core interface. */
 bool upload_logo_sheet(ID3D11Device* device, Uploaded& output) noexcept {

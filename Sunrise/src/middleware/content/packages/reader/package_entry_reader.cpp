@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <array>
 #include <cstdio>
+#include <limits>
 #include <vector>
 
 #include "../../../../core/logging/log.h"
@@ -165,7 +166,8 @@ bool read_tag(const Source& source,
               Scratch& scratch,
               std::uint32_t tag,
               std::vector<std::byte>& output,
-              std::uint32_t& classId) noexcept {
+              std::uint32_t& classId,
+              std::size_t limit) noexcept {
     output.clear();
     if (source.keys == nullptr || !read_tag_class(source, scratch, tag, classId)) {
         return false;
@@ -184,7 +186,7 @@ bool read_tag(const Source& source,
         return false;
     }
     const layout::EntryPlacement placement = layout::placement(entry);
-    if (placement.size == 0) {
+    if (placement.size == 0 || placement.size > limit) {
         return false;
     }
     output.resize(placement.size);
@@ -222,6 +224,15 @@ bool read_tag(const Source& source,
         }
     }
     return copied == placement.size;
+}
+
+bool read_tag(const Source& source,
+              Scratch& scratch,
+              std::uint32_t tag,
+              std::vector<std::byte>& output,
+              std::uint32_t& classId) noexcept {
+    return read_tag(
+        source, scratch, tag, output, classId, (std::numeric_limits<std::size_t>::max)());
 }
 
 /** Reads one tagged entry without reporting its class. */

@@ -429,10 +429,7 @@ bool reset_artifact(std::int32_t glimmerCost, ArtifactResetResult& result) noexc
               compacted.end(),
               account::inventory::ProfileItem{});
 
-    std::int32_t serial = 0;
-    for (std::size_t index = 0; index < before.profileItemCount; ++index) {
-        serial = (std::max)(serial, before.profileItems[index].mutationSerial);
-    }
+    std::int32_t serial = account::greatest_profile_serial(before);
     std::size_t changedRows = 0;
     for (std::size_t index = 0; index < compactedCount; ++index) {
         changedRows += static_cast<std::size_t>(

@@ -4,6 +4,8 @@
 #include <cmath>
 #include <d3d11.h>
 
+#include "../../hooks/graphics/textures/graphics_texture_upload.h"
+
 namespace sunrise::client::ui::mission_launch::art {
 namespace {
 std::array<ID3D11ShaderResourceView*, state::build_data::activities::kIconCount> g_views{};
@@ -44,22 +46,16 @@ void prepare(ID3D11Device* device) noexcept {
         if (image.pixels.empty()) {
             continue;
         }
-        D3D11_TEXTURE2D_DESC desc{};
-        desc.Width = image.width;
-        desc.Height = image.height;
-        desc.MipLevels = 1;
-        desc.ArraySize = 1;
-        desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
-        desc.SampleDesc.Count = 1;
-        desc.Usage = D3D11_USAGE_IMMUTABLE;
-        desc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
-        D3D11_SUBRESOURCE_DATA data{};
-        data.pSysMem = image.pixels.data();
-        data.SysMemPitch = static_cast<UINT>(image.width) * 4;
-        ID3D11Texture2D* texture{};
-        if (SUCCEEDED(device->CreateTexture2D(&desc, &data, &texture)) && texture != nullptr) {
-            (void)device->CreateShaderResourceView(texture, nullptr, &g_views[i]);
-            texture->Release();
+        client::hooks::graphics::textures::Uploaded uploaded{};
+        if (client::hooks::graphics::textures::upload_rgba8(device,
+                                                            image.width,
+                                                            image.height,
+                                                            static_cast<std::uint32_t>(image.width)
+                                                                * 4,
+                                                            image.pixels,
+                                                            uploaded)) {
+            g_views[i] = uploaded.view;
+            uploaded.texture->Release();
         }
     }
 }

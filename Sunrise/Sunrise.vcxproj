@@ -99,6 +99,9 @@
     <None Include="vendor\lua\UPSTREAM_README" />
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="src\server\bap\investment_actions.cpp" />
+    <ClCompile Include="src\server\bap\bap_investment_edit.cpp" />
+    <ClCompile Include="src\state\investment\state_investment_edit.cpp" />
     <ClCompile Include="src\state\build_data\cache\records\cache_reward_records.cpp" />
     <ClCompile Include="src\client\content\items\packages\package_reward_build.cpp" />
     <ClCompile Include="src\state\rewards\reward_resolver.cpp" />
@@ -237,6 +240,14 @@
     <ClCompile Include="src\client\hooks\egress\winsock\transmission\egress_transmission_replacements.cpp" />
     <ClCompile Include="src\client\hooks\egress\winsock\transmission\egress_datagram_transmission.cpp" />
     <ClCompile Include="src\client\hooks\egress\winsock\transmission\egress_message_transmission.cpp" />
+    <ClCompile Include="src\client\ui\items\items_catalog.cpp" />
+    <ClCompile Include="src\client\ui\items\items_icon_cache.cpp" />
+    <ClCompile Include="src\client\ui\items\items_panel.cpp" />
+    <ClCompile Include="src\client\ui\items\items_presentation_reader.cpp" />
+    <ClCompile Include="src\server\ui\items\items_inventory_service.cpp" />
+    <ClCompile Include="src\state\account\inventory\inventory_edit.cpp" />
+    <ClCompile Include="src\client\ui\items\items_tables.cpp" />
+    <ClCompile Include="src\client\ui\items\items_widgets.cpp" />
     <ClCompile Include="src\client\ui\runtime\client_ui_module_runtime.cpp" />
     <ClCompile Include="src\client\ui\movement\movement_panel.cpp" />
     <ClCompile Include="src\client\movement\movement_settings_store.cpp" />
@@ -1259,6 +1270,7 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="src\middleware\content\packages\tables\field_reader.h" />
+    <ClInclude Include="src\client\content\items\packages\source.h" />
     <ClInclude Include="src\client\content\items\packages\package_reward_build.h" />
     <ClInclude Include="src\state\rewards\reward_resolver.h" />
     <ClInclude Include="src\state\build_data\rewards\reward_catalog.h" />
@@ -1364,6 +1376,14 @@
     <ClInclude Include="src\client\hooks\graphics\renderer\state.h" />
     <ClInclude Include="src\client\hooks\graphics\renderer\graphics_renderer_report.h" />
     <ClInclude Include="src\client\hooks\graphics\renderer\world_lines.h" />
+    <ClInclude Include="src\client\ui\items\items_catalog.h" />
+    <ClInclude Include="src\client\ui\items\items_icon_cache.h" />
+    <ClInclude Include="src\client\ui\items\items_panel.h" />
+    <ClInclude Include="src\client\ui\items\items_presentation_reader.h" />
+    <ClInclude Include="src\server\ui\items\items_inventory_service.h" />
+    <ClInclude Include="src\state\account\inventory\inventory_edit.h" />
+    <ClInclude Include="src\client\ui\items\items_tables.h" />
+    <ClInclude Include="src\client\ui\items\items_widgets.h" />
     <ClInclude Include="src\client\ui\runtime\client_ui_module_runtime.h" />
     <ClInclude Include="src\client\memory\current_process_memory.h" />
     <ClInclude Include="src\client\content\handles\layout.h" />
@@ -1627,6 +1647,9 @@
     <ClInclude Include="src\server\ui\activity_host\activity_host_scriptable_world_links.h" />
     <ClInclude Include="src\server\ui\activity_host\activity_host_sdk_squad_actions.h" />
     <ClInclude Include="src\server\bap\runtime.h" />
+    <ClInclude Include="src\server\bap\investment_actions.h" />
+    <ClInclude Include="src\server\bap\investment_edit.h" />
+    <ClInclude Include="src\state\investment\investment_edit.h" />
     <ClInclude Include="src\server\bap\activity_mission_seed_lease.h" />
     <ClInclude Include="src\server\bap\internal.h" />
     <ClInclude Include="src\server\bap\squad_override_capacity.h" />
@@ -1876,6 +1899,7 @@
     <ClInclude Include="src\middleware\content\packages\tables\authored_squad_reader.h" />
     <ClInclude Include="src\middleware\content\packages\tables\bubble_state_reader.h" />
     <ClInclude Include="src\middleware\content\packages\tables\internal.h" />
+    <ClInclude Include="src\middleware\content\packages\tables\texture_reader.h" />
     <ClInclude Include="src\middleware\content\packages\tables\items.h" />
     <ClInclude Include="src\middleware\content\packages\tables\region_reader.h" />
     <ClInclude Include="src\middleware\content\packages\tables\roster_intersection.h" />

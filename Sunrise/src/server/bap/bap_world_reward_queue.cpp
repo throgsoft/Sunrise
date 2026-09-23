@@ -46,6 +46,8 @@ bool commit_world_reward(const WorldRewardRequest& request) noexcept {
     return committed && complete_world_reward(request.id) && transaction.commit();
 }
 
+} // namespace
+
 /** Saves the reward under its stable definition hash and earning character. */
 bool enqueue_world_reward(std::uint16_t definitionIndex,
                           std::int32_t quantity,
@@ -61,8 +63,6 @@ bool enqueue_world_reward(std::uint16_t definitionIndex,
     }
     return true;
 }
-
-} // namespace
 
 void report_reward_refusal(const char* stage, std::uint16_t index, const char* reason) noexcept {
     core::log::writef(core::log::Channel::server,

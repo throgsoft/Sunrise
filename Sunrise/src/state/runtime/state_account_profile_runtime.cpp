@@ -239,11 +239,7 @@ template <typename Requirement>
         return false;
     }
 
-    std::int32_t greatestMutationSerial = 0;
-    for (std::size_t index = 0; index < before.profileItemCount; ++index) {
-        greatestMutationSerial =
-            (std::max)(greatestMutationSerial, before.profileItems[index].mutationSerial);
-    }
+    std::int32_t greatestMutationSerial = account::greatest_profile_serial(before);
     std::size_t changedRows = 0;
     for (std::size_t index = 0; index < compactedCount; ++index) {
         if (index >= before.profileItemCount
@@ -597,10 +593,7 @@ bool prepare_vendor_exchange(std::uint32_t costDefinitionHash,
 
     // Serials rise from the greatest already in the profile, so every announced row is unique and
     // no existing row is displaced in the Client's ordering.
-    std::int32_t serial = 0;
-    for (std::size_t index = 0; index < after.profileItemCount; ++index) {
-        serial = (std::max)(serial, after.profileItems[index].mutationSerial);
-    }
+    std::int32_t serial = account::greatest_profile_serial(after);
     if (serial
         > (std::numeric_limits<std::int32_t>::max)() - static_cast<std::int32_t>(payouts.size())) {
         return false;

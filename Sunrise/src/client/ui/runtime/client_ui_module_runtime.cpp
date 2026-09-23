@@ -4,6 +4,8 @@
 
 #include "../../../core/ui/modules/registry/ui_module_registry.h"
 #include "../../../core/ui/modules/ui_module_descriptor.h"
+#include "../items/items_panel.h"
+#include "../mission_launch/mission_launch_art.h"
 #include "../mission_launch/mission_launch_panel.h"
 #include "../movement/movement_panel.h"
 #include "../player/player_panel.h"
@@ -22,6 +24,7 @@ constexpr std::string_view kPlayerDisplayName = "Player";
 core::ui::modules::registry::PageRegistration g_movementPage;
 core::ui::modules::registry::PageRegistration g_playerPage;
 core::ui::modules::registry::PageRegistration g_activityLauncherPage;
+core::ui::modules::registry::PageRegistration g_itemsPage;
 
 } // namespace
 
@@ -36,11 +39,19 @@ bool initialize() noexcept {
                                                               "client.mission_launch",
                                                               "Activity Launcher",
                                                               &mission_launch::draw);
-    return movementOwned && playerOwned && launcherOwned;
+    const bool itemsOwned = g_itemsPage.acquire(
+        core::ui::modules::Owner::client, "client.items", "Items", &items::draw);
+    return movementOwned && playerOwned && launcherOwned && itemsOwned;
+}
+
+void release_renderer() noexcept {
+    items::release_renderer();
+    mission_launch::art::release();
 }
 
 /** Removes the Client modules from the Core UI registry. */
 void shutdown() noexcept {
+    g_itemsPage.release(&items::shutdown);
     g_activityLauncherPage.release();
     g_playerPage.release();
     g_movementPage.release();

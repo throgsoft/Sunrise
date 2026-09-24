@@ -16,6 +16,7 @@
 #include "../rewards/reward_resolver.h"
 #include "../unlocks/unlocks_records.h"
 #include "../unlocks/unlocks_runtime.h"
+#include "bucket_admission.h"
 #include "runtime.h"
 #include "state_account_transaction_helpers.h"
 #include "storage/internal.h"
@@ -29,6 +30,108 @@ namespace inventory_buckets = build_data::inventory::buckets;
 namespace family4_loadout = middleware::datagen::family4::loadout;
 
 static_assert(build_data::rewards::kSocketsPerItem == item_details::kInitialPlugCapacity);
+
+/** Checks whether a reward's mutation identity survives the completed batch. */
+[[nodiscard]] static bool
+reward_retained(const PreparedRecordReward& reward,
+                const CharacterState& character,
+                std::span<const authored_inventory::ProfileItem> profile) noexcept {
+    switch (reward.kind) {
+    case RecordRewardKind::characterInstance:
+        return reward.stateIndex < character.inventory.count
+               && character.inventory.values[reward.stateIndex].instanceSoid == reward.instanceSoid;
+    case RecordRewardKind::characterStack:
+        return reward.stateIndex < character.stacks.count
+               && character.stacks.values[reward.stateIndex].mutationSerial
+                      == reward.mutationSerial;
+    case RecordRewardKind::profileStack:
+        return reward.stateIndex < profile.size()
+               && profile[reward.stateIndex].mutationSerial == reward.mutationSerial;
+    case RecordRewardKind::accountUnlock:
+        return true;
+    }
+    return false;
+}
+
+/** Recomputes positions after FIFO compaction may have moved an earlier grant. */
+[[nodiscard]] static bool
+refresh_reward_position(PreparedRecordReward& reward,
+                        const CharacterState& character,
+                        const family4_loadout::ResolvedLoadout& loadout) noexcept {
+    if (reward.kind == RecordRewardKind::characterInstance) {
+        reward.stateIndex = character.inventory.count;
+        for (std::size_t row = 0; row < character.inventory.count; ++row) {
+            if (character.inventory.values[row].instanceSoid == reward.instanceSoid) {
+                reward.stateIndex = row;
+                std::uint8_t slot = 0;
+                if (!find_unequipped_row(loadout, reward.instanceSoid, reward.inventoryRow, slot)) {
+                    return false;
+                }
+                break;
+            }
+        }
+    } else if (reward.kind == RecordRewardKind::characterStack) {
+        reward.stateIndex = character.stacks.count;
+        for (std::size_t row = 0; row < character.stacks.count; ++row) {
+            if (character.stacks.values[row].mutationSerial == reward.mutationSerial) {
+                reward.stateIndex = row;
+                break;
+            }
+        }
+    }
+    return true;
+}
+
+/** Merges a stack with headroom or admits a new row under the installed bucket policy. */
+[[nodiscard]] static bool stage_character_stack(AccountState& working,
+                                                std::size_t characterIndex,
+                                                std::uint32_t definitionHash,
+                                                const item_details::Definition& detail,
+                                                const inventory_buckets::Descriptor& bucket,
+                                                std::int32_t quantity,
+                                                PreparedRecordReward& prepared) noexcept {
+    CharacterState& character = working.characters[characterIndex];
+    if (quantity > detail.maxStackSize
+        || character.nextInventorySerial
+               >= static_cast<std::uint32_t>((std::numeric_limits<std::int32_t>::max)())) {
+        return false;
+    }
+    BucketAdmission occupancy;
+    std::size_t stackIndex = character.stacks.count;
+    for (std::size_t candidate = 0; candidate < character.stacks.count; ++candidate) {
+        const auto& heldStack = character.stacks.values[candidate];
+        if (heldStack.definitionHash == definitionHash
+            && heldStack.quantity <= detail.maxStackSize - quantity
+            && stackIndex == character.stacks.count) {
+            stackIndex = candidate;
+        }
+    }
+    const bool newStack = stackIndex == character.stacks.count;
+    if (newStack) {
+        if (!character_bucket_admission(character, bucket, occupancy)) {
+            return false;
+        }
+        std::size_t selected = kCharacterAdmissionCapacity;
+        if (!occupancy.select(bucket, kCharacterAdmissionCapacity, selected)
+            || (selected != kCharacterAdmissionCapacity
+                && !erase_character_bucket_row(character, selected))) {
+            return false;
+        }
+        if (character.stacks.count >= character.stacks.values.size()) {
+            return false;
+        }
+        stackIndex = character.stacks.count++;
+        character.stacks.values[stackIndex] = {definitionHash};
+    }
+    auto& stack = character.stacks.values[stackIndex];
+    stack.quantity += quantity;
+    stack.mutationSerial = static_cast<std::int32_t>(character.nextInventorySerial++);
+    prepared.stateIndex = stackIndex;
+    prepared.afterQuantity = stack.quantity;
+    prepared.mutationSerial = stack.mutationSerial;
+    prepared.kind = RecordRewardKind::characterStack;
+    return true;
+}
 
 namespace {
 
@@ -136,7 +239,7 @@ bool uses_reward_definition(const build_data::items::Definition& item) noexcept 
         return false;
     }
     return reward.poolIndex != build_data::rewards::kAbsent
-           || (item.bucketId == inventory_buckets::kNonInventoryBucketId
+           || (item.bucketId == inventory_buckets::kReceiptBucketId
                && reward.acquiredFlag != build_data::rewards::kAbsent);
 }
 
@@ -212,7 +315,7 @@ enum class PassResolution { claim, replay };
             || prepared.acquiredFlag != source.acquiredFlag) {
             return false;
         }
-        if (planned.socketCount != 0) {
+        if (planned.socketCount != 0 && prepared.retained) {
             item_details::Definition detail{};
             authored_inventory::Sockets sockets{};
             if (prepared.kind != RecordRewardKind::characterInstance
@@ -440,7 +543,7 @@ namespace {
         if (reward.kind == RecordRewardKind::accountUnlock) {
             build_data::rewards::Item source{};
             if (reward.quantity != 1 || reward.afterQuantity != 1 || reward.instanceSoid != 0
-                || item.bucketId != build_data::inventory::buckets::kNonInventoryBucketId
+                || item.bucketId != build_data::inventory::buckets::kReceiptBucketId
                 || !build_data::rewards::find_item(item.definitionIndex, source)
                 || source.acquiredFlag == build_data::rewards::kAbsent
                 || source.acquiredFlag != reward.acquiredFlag) {
@@ -453,6 +556,29 @@ namespace {
             || detail.definitionHash != item.definitionHash || detail.bucketId != item.bucketId
             || !build_data::find_inventory_bucket_descriptor(item.bucketId, bucket)) {
             return false;
+        }
+        const bool remains = reward_retained(
+            reward,
+            mutation.afterCharacter,
+            std::span(mutation.afterProfileItems).first(mutation.afterProfileItemCount));
+        if (remains != reward.retained) {
+            return false;
+        }
+        if (!remains) {
+            if (reward.kind == RecordRewardKind::characterInstance
+                && (reward.inventoryRow < bucket.firstSlot
+                    || reward.inventoryRow >= bucket.firstSlot + bucket.slotCount)) {
+                if (!build_data::find_inventory_bucket_descriptor(
+                        inventory_buckets::kPostmasterBucketId, bucket)
+                    || reward.inventoryRow < bucket.firstSlot
+                    || reward.inventoryRow >= bucket.firstSlot + bucket.slotCount) {
+                    return false;
+                }
+            }
+            if ((bucket.policyFlags & inventory_buckets::kFifo) == 0) {
+                return false;
+            }
+            continue;
         }
         if (reward.kind == RecordRewardKind::characterInstance) {
             if (reward.quantity != 1 || reward.afterQuantity != 1 || reward.instanceSoid == 0
@@ -538,6 +664,7 @@ bool prepare_record_reward_grant(std::span<const DirectRecordReward> rewards,
     }
 
     AccountState working = account;
+    std::uint64_t nextBatchInstanceSoid = 0;
     for (std::size_t index = 0; index < rewards.size(); ++index) {
         reason = "item_identity";
         const DirectRecordReward& requested = rewards[index];
@@ -571,10 +698,10 @@ bool prepare_record_reward_grant(std::span<const DirectRecordReward> rewards,
                 prepared.previousFlag = static_cast<std::uint8_t>(before);
             }
         }
-        if (item.bucketId == build_data::inventory::buckets::kNonInventoryBucketId) {
+        if (item.bucketId == build_data::inventory::buckets::kReceiptBucketId
+            && prepared.acquiredFlag != build_data::rewards::kAbsent) {
             reason = "perk_acquisition";
-            if (prepared.acquiredFlag == build_data::rewards::kAbsent || requested.quantity != 1
-                || !requested.sockets.empty()) {
+            if (requested.quantity != 1 || !requested.sockets.empty()) {
                 return false;
             }
             prepared.kind = RecordRewardKind::accountUnlock;
@@ -641,11 +768,22 @@ bool prepare_record_reward_grant(std::span<const DirectRecordReward> rewards,
                 return false;
             }
             reason = "instance_capacity";
-            PendingItemAcquisition staged{};
-            if (!finalize_item_acquisition(
-                    working, working, item.definitionHash, false, {.direct = true}, staged)) {
+            if (nextBatchInstanceSoid == 0
+                && !next_item_instance_soid(account, nextBatchInstanceSoid)) {
                 return false;
             }
+            PendingItemAcquisition staged{};
+            if (!finalize_item_acquisition(
+                    working,
+                    working,
+                    item.definitionHash,
+                    false,
+                    {.direct = true, .minimumInstanceSoid = nextBatchInstanceSoid},
+                    staged)
+                || staged.acquiredInstanceSoid == (std::numeric_limits<std::uint64_t>::max)()) {
+                return false;
+            }
+            nextBatchInstanceSoid = staged.acquiredInstanceSoid + 1;
             if (!apply_reward_sockets(
                     detail,
                     requested.sockets,
@@ -666,37 +804,15 @@ bool prepare_record_reward_grant(std::span<const DirectRecordReward> rewards,
                           == item_details::InstancedDefinitionState::stackable
                    && !detail.equipmentSlot.has_value()) {
             reason = "character_stack_capacity";
-            CharacterState& character = working.characters[characterIndex];
-            if (requested.quantity > detail.maxStackSize
-                || character.nextInventorySerial
-                       >= static_cast<std::uint32_t>((std::numeric_limits<std::int32_t>::max)())) {
+            if (!stage_character_stack(working,
+                                       characterIndex,
+                                       item.definitionHash,
+                                       detail,
+                                       bucket,
+                                       requested.quantity,
+                                       prepared)) {
                 return false;
             }
-            std::size_t stackIndex = character.stacks.count;
-            for (std::size_t candidate = 0; candidate < character.stacks.count; ++candidate) {
-                if (character.stacks.values[candidate].definitionHash == item.definitionHash) {
-                    stackIndex = candidate;
-                    break;
-                }
-            }
-            const bool appended = stackIndex == character.stacks.count;
-            if ((appended && stackIndex >= character.stacks.values.size())
-                || (!appended
-                    && character.stacks.values[stackIndex].quantity
-                           > detail.maxStackSize - requested.quantity)) {
-                return false;
-            }
-            auto& stack = character.stacks.values[stackIndex];
-            if (appended) {
-                stack.definitionHash = item.definitionHash;
-                ++character.stacks.count;
-            }
-            stack.quantity += requested.quantity;
-            stack.mutationSerial = static_cast<std::int32_t>(character.nextInventorySerial++);
-            prepared.stateIndex = stackIndex;
-            prepared.afterQuantity = stack.quantity;
-            prepared.mutationSerial = stack.mutationSerial;
-            prepared.kind = RecordRewardKind::characterStack;
         } else {
             return false;
         }
@@ -719,6 +835,16 @@ bool prepare_record_reward_grant(std::span<const DirectRecordReward> rewards,
     mutation.characterIndex = characterIndex;
     mutation.beforeProfileItemCount = account.profileItemCount;
     mutation.afterProfileItemCount = working.profileItemCount;
+    for (std::size_t index = 0; index < rewards.size(); ++index) {
+        auto& reward = mutation.rewards[index];
+        if (!refresh_reward_position(reward, mutation.afterCharacter, loadout)) {
+            return false;
+        }
+        reward.retained = reward_retained(
+            reward,
+            mutation.afterCharacter,
+            std::span(mutation.afterProfileItems).first(mutation.afterProfileItemCount));
+    }
     mutation.rewardCount = rewards.size();
     reason = nullptr;
     mutation.prepared = true;

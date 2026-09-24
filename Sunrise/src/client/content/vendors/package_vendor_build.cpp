@@ -243,6 +243,21 @@ read_index(const reader::Source& source, reader::Scratch& scratch, Storage& stor
     definition.thirdCount = third.count;
     definition.saleRowOffset = static_cast<std::uint32_t>(storage.saleRowCount);
     definition.installedRowOffset = static_cast<std::uint32_t>(storage.installedRowCount);
+    ArrayView transfers{};
+    if (read_array(blob, kTransferArrayDescriptor, sizeof(domain::TransferRule), transfers)
+        && transfers.count <= definition.transferRules.size()
+        && (transfers.count == 0 || transfers.classId == domain::kTransferRuleClass)) {
+        definition.transferRulesAvailable = true;
+        definition.transferRuleCount = static_cast<std::uint8_t>(transfers.count);
+        for (std::size_t row = 0; row < transfers.count; ++row) {
+            auto& rule = definition.transferRules[row];
+            (void)read(
+                blob, transfers.base + row * sizeof(domain::TransferRule), rule.sourceBucket);
+            (void)read(blob,
+                       transfers.base + row * sizeof(domain::TransferRule) + 1,
+                       rule.destinationBucket);
+        }
+    }
     // A skipped definition must leave both banks exactly as it found them; an orphan sale row
     // shifts the next definition's offset and `valid()` then rejects the whole set.
     const std::size_t saleRowsBefore = storage.saleRowCount;

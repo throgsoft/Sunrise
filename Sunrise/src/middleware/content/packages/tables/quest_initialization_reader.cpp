@@ -197,7 +197,7 @@ Quest read_quest_initialization(std::span<const std::byte> definition,
         std::uint8_t parentBucket = 0;
         std::int64_t parentObjective = 0;
         if (parentIndex == itemIndex || !read(parent, kBucketIdOffset, parentBucket)
-            || parentBucket != state::build_data::inventory::buckets::kNonInventoryBucketId
+            || parentBucket != state::build_data::inventory::buckets::kReceiptBucketId
             || !read(parent, kItemObjectiveBlockOffset, parentObjective) || parentObjective != 0) {
             return {};
         }

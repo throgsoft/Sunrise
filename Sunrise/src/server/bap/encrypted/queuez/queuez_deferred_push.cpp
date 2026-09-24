@@ -145,6 +145,7 @@ bool consume_world_record_reward(const WorldRewardRequest& request,
                                                        pending.characterSoid,
                                                        pending.acquiredInstanceSoid,
                                                        pending.updates_account(),
+                                                       pending.evictedInstanceSoid,
                                                        acquisition);
     auto nextSendNonce = session.sendNonce;
     std::size_t framedSize = 0;

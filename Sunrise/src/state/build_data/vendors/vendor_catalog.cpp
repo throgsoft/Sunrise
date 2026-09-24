@@ -56,8 +56,17 @@ Table<InstalledRow, kInstalledRowCapacity> g_installedRows;
     if (definition.index >= index.size() || definition.definitionClass != kDefinitionClass
         || definition.definitionSize == 0
         || definition.definitionHash != index[definition.index].definitionHash
-        || definition.definitionTag != index[definition.index].definitionTag) {
+        || definition.definitionTag != index[definition.index].definitionTag
+        || definition.transferRuleCount > definition.transferRules.size()
+        || (!definition.transferRulesAvailable && definition.transferRuleCount != 0)) {
         return false;
+    }
+    for (std::size_t row = definition.transferRuleCount; row < definition.transferRules.size();
+         ++row) {
+        const auto& rule = definition.transferRules[row];
+        if (rule.sourceBucket != 0 || rule.destinationBucket != 0) {
+            return false;
+        }
     }
     return array_fits(definition.installedCount,
                       definition.installedRowBase,

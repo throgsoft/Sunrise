@@ -6,6 +6,7 @@
 #include <optional>
 #include <string_view>
 
+#include "../../build_data/inventory/buckets/definition.h"
 #include "item_state.h"
 
 namespace sunrise::state::account::inventory {
@@ -58,12 +59,16 @@ inline constexpr std::size_t kProfileItemCapacity = 701;
 inline constexpr std::size_t kProfileActionSourceCapacity = 100;
 /** Runtime-owned SOIDs for profile stacks use a namespace separate from created item instances. */
 inline constexpr std::uint64_t kFirstProfileItemInstanceSoid = 0x5000000000000001ULL;
-/**
- * 151 native rows minus the 16 equipped rows leaves 135 unequipped item rows.
- */
-inline constexpr std::size_t kCharacterItemCapacity = 135;
-/** Runtime-owned non-instanced character stacks. */
-inline constexpr std::size_t kCharacterStackCapacity = 32;
+/** Unequipped instances can occupy every character row not reserved for equipped items. */
+inline constexpr std::size_t kCharacterItemCapacity =
+    build_data::inventory::buckets::kCharacterSlotCapacity - kEquipmentSlotCount;
+/** Lost Items reserves 21 rows within the same character inventory. */
+inline constexpr std::size_t kPostmasterItemCapacity = 21;
+inline constexpr std::size_t kOrdinaryCharacterItemCapacity =
+    kCharacterItemCapacity - kPostmasterItemCapacity;
+/** Stacks and instances share the native character array; encoding enforces each bucket span. */
+inline constexpr std::size_t kCharacterStackCapacity =
+    build_data::inventory::buckets::kCharacterSlotCapacity;
 
 /**
  * Definition hash of the real, non-equippable "Emotes" collection item. The Client opens its own
@@ -105,6 +110,9 @@ struct ProfileItem {
     bool seen{};
 };
 
+/** Saved ownership location, independent of the item's normal definition bucket. */
+enum class ItemPlacement : std::uint8_t { inventory, postmaster };
+
 /** One authored equipment item without native table or wire-layout fields. */
 struct Item {
     std::uint64_t instanceSoid{};
@@ -132,6 +140,7 @@ struct Item {
     std::uint8_t classAbilityEntry{2};
     /** The client has dismissed this item's new-item marker. */
     bool seen{};
+    ItemPlacement placement{ItemPlacement::inventory};
 };
 
 /** Ordered unequipped items placed into their native character-inventory bucket ranges. */

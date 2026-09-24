@@ -11,6 +11,7 @@
 
 #include "../../middleware/web_service/messages/opcode206.h"
 #include "../../state/account/inventory/seen_state.h"
+#include "../../state/runtime/postmaster_runtime.h"
 #include "../../state/runtime/runtime.h"
 
 namespace sunrise::server::web_service {
@@ -33,6 +34,7 @@ struct Outcome {
     bool profileSetupRefused{};
     /** A request prepares at most one State mutation and allocates only that exact payload. */
     using Mutation = std::variant<std::monostate,
+                                  std::unique_ptr<state::PendingPostmasterClaim>,
                                   std::unique_ptr<state::PendingEquipmentSwap>,
                                   std::unique_ptr<state::PendingSubclassSelection>,
                                   std::unique_ptr<state::PendingItemAcquisition>,

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 
@@ -51,6 +52,18 @@ struct IndexEntry {
     std::uint16_t index{};
 };
 
+/** Bounded accepted-bucket list; installed definitions contain at most three rows. */
+inline constexpr std::size_t kTransferRuleCapacity = 8;
+inline constexpr std::uint32_t kTransferRuleClass = 0x8080785FU;
+inline constexpr std::uint8_t kAuthoredDestination = 0xFFU;
+
+/** Accepted source bucket and destination; FF selects the item's authored bucket. */
+struct TransferRule {
+    std::uint8_t sourceBucket{};
+    std::uint8_t destinationBucket{};
+};
+static_assert(sizeof(TransferRule) == 2);
+
 /** One extracted vendor definition and the flat-bank ranges its rows occupy. */
 struct Definition {
     std::uint32_t definitionHash{};
@@ -81,6 +94,10 @@ struct Definition {
     std::uint16_t installedCount{};
     std::uint16_t saleCount{};
     std::uint16_t thirdCount{};
+    /** Unknown or oversized arrays disable transfer alone, not this vendor's sales. */
+    bool transferRulesAvailable{};
+    std::uint8_t transferRuleCount{};
+    std::array<TransferRule, kTransferRuleCapacity> transferRules{};
 };
 
 /** A sale row charging nothing carries this instead of a cost item. */

@@ -79,6 +79,68 @@ bool Statement::text(int column, std::string_view& value) const noexcept {
     return true;
 }
 
+static_assert(account::inventory::kCharacterItemCapacity == 333);
+static_assert(account::inventory::kCharacterStackCapacity == 350);
+
+/** Widen saved row bounds to the character ABI and preserve socket identities during migration. */
+static bool migrate_postmaster_storage() noexcept {
+    // SQLite cannot change foreign_keys inside a savepoint. The open-time mutex is held and
+    // no account readers exist yet; restore enforcement after the savepoint ends on either path.
+    if (!execute("PRAGMA foreign_keys=OFF")) {
+        return false;
+    }
+    const bool migrated = []() noexcept {
+        Transaction transaction;
+        if (!transaction.ready() || !execute(R"sql(
+CREATE TABLE items_postmaster_migration (
+    character_slot INTEGER NOT NULL REFERENCES characters(slot),
+    location INTEGER NOT NULL CHECK (location IN (0, 1)),
+    position INTEGER NOT NULL CHECK (position >= 0),
+    instance_soid INTEGER NOT NULL UNIQUE,
+    definition_hash INTEGER NOT NULL CHECK (definition_hash BETWEEN 1 AND 4294967295),
+    level INTEGER NOT NULL,
+    quantity INTEGER NOT NULL CHECK (quantity > 0),
+    mutation_serial INTEGER NOT NULL CHECK (mutation_serial >= 0),
+    flags INTEGER NOT NULL CHECK (flags BETWEEN 0 AND 7),
+    socket_policy INTEGER NOT NULL CHECK (socket_policy IN (0, 1)),
+    plug_count INTEGER NOT NULL CHECK (plug_count BETWEEN 0 AND 12),
+    movement_ability INTEGER NOT NULL,
+    grenade_ability INTEGER NOT NULL,
+    super_ability INTEGER NOT NULL,
+    melee_ability INTEGER NOT NULL,
+    class_ability INTEGER NOT NULL,
+    seen INTEGER NOT NULL CHECK (seen IN (0, 1)),
+    placement INTEGER NOT NULL DEFAULT 0 CHECK (placement IN (0, 1)),
+    PRIMARY KEY (character_slot, location, position),
+    CHECK ((location = 0 AND position < 17 AND placement = 0)
+           OR (location = 1 AND position < 333)),
+    CHECK (placement = 0 OR quantity = 1)
+) STRICT;
+INSERT INTO items_postmaster_migration SELECT items.*, 0 FROM items;
+DROP TABLE items;
+ALTER TABLE items_postmaster_migration RENAME TO items;
+CREATE TABLE character_stacks_migration (
+    character_slot INTEGER NOT NULL REFERENCES characters(slot),
+    position INTEGER NOT NULL CHECK (position BETWEEN 0 AND 349),
+    definition_hash INTEGER NOT NULL,
+    quantity INTEGER NOT NULL CHECK (quantity > 0),
+    mutation_serial INTEGER NOT NULL CHECK (mutation_serial >= 0),
+    PRIMARY KEY (character_slot, position)
+) STRICT;
+INSERT INTO character_stacks_migration SELECT * FROM character_stacks;
+DROP TABLE character_stacks;
+ALTER TABLE character_stacks_migration RENAME TO character_stacks;
+PRAGMA user_version=3;
+)sql")) {
+            return false;
+        }
+        Statement foreignKeys("PRAGMA foreign_key_check");
+        return foreignKeys.step() == SQLITE_DONE && transaction.commit();
+    }();
+    const bool enforced = execute("PRAGMA foreign_keys=ON");
+    return migrated && enforced;
+}
+
 /** New databases receive schema and defaults in one durable transaction. */
 bool open(std::string_view path,
           std::string_view schema,
@@ -119,12 +181,12 @@ bool open(std::string_view path,
                 && execute(preferenceSchema.c_str()) && execute(preferenceDefaults.c_str())
                 && transaction.commit();
     } else if (ready) {
-        // Version 2 adds account preferences and per-item seen state.
-        constexpr int kSchemaVersion = 2;
+        // Version 3 adds saved item placement and room for Lost Items.
+        constexpr int kSchemaVersion = 3;
         constexpr int kApplicationId = 1397902921;
         int application = 0;
         Statement query("PRAGMA application_id");
-        ready = (version == 1 || version == kSchemaVersion) && query.step() == SQLITE_ROW
+        ready = (version >= 1 && version <= kSchemaVersion) && query.step() == SQLITE_ROW
                 && query.column(0, application) && application == kApplicationId;
     }
     if (ready && version == 1) {
@@ -138,6 +200,17 @@ bool open(std::string_view path,
             && execute(preferenceSchema.c_str()) && execute(preferenceDefaults.c_str())
             && execute("PRAGMA user_version=2") && transaction.commit();
     }
+    if (ready) {
+        int currentVersion = 0;
+        {
+            Statement query("PRAGMA user_version");
+            ready = query.step() == SQLITE_ROW && query.column(0, currentVersion);
+        }
+        if (ready && currentVersion == 2) {
+            ready = migrate_postmaster_storage();
+        }
+    }
+
     if (!ready) {
         shutdown();
     }

@@ -136,6 +136,8 @@ struct PendingItemAcquisition {
     std::size_t expectedProfileItemCount{};
     std::size_t afterProfileItemCount{};
     std::size_t inventoryIndex{};
+    /** Resident replaced by FIFO eviction, or zero. */
+    std::uint64_t evictedInstanceSoid{};
     std::uint16_t collectibleIndex{};
     std::uint16_t inventoryRow{};
     std::uint8_t equipmentSlot{};
@@ -204,6 +206,8 @@ struct PendingProfileItemAcquisition {
     /** Skips Collections revalidation for direct rewards. */
     bool directGrant{};
     bool prepared{};
+    /** A new non-resident FIFO stack replaces an older row; appended remains false. */
+    bool replaced{};
 };
 
 /** Shared batch capacity bounds one reward transaction. */
@@ -238,6 +242,8 @@ struct PreparedRecordReward {
     bool appendedProfileResident{};
     std::uint16_t acquiredFlag{build_data::rewards::kAbsent};
     std::uint8_t previousFlag{};
+    /** Later arrivals in this batch can evict an earlier FIFO reward. */
+    bool retained{true};
 };
 
 /** A reward grant that claims no record carries this instead of a record row. */

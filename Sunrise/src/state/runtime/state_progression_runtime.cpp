@@ -344,7 +344,7 @@ progression::season_pass::progress_flag(const build_data::season_pass::Reward& r
     rewards::Item acquisition{};
     if (build_data::find_item_definition_index(reward.itemIndex, item)
         && item.definitionHash == reward.itemHash
-        && item.bucketId == build_data::inventory::buckets::kNonInventoryBucketId
+        && item.bucketId == build_data::inventory::buckets::kReceiptBucketId
         && rewards::find_item(reward.itemIndex, acquisition)
         && acquisition.definitionHash == reward.itemHash
         && acquisition.poolIndex == rewards::kAbsent) {

@@ -32,7 +32,7 @@ namespace sunrise::state::build_data::cache::records {
 /** These 8 ASCII bytes mark a Sunrise build-data file. */
 inline constexpr std::array<char, 8> kCacheMagic{'S', 'U', 'N', 'R', 'I', 'S', 'E', 'B'};
 /** Bump when stored layouts or extracted values change; other versions are rebuilt. */
-inline constexpr std::uint32_t kCacheFormatVersion = 69;
+inline constexpr std::uint32_t kCacheFormatVersion = 70;
 /** Signed -1 on disk means there is no equipment slot. */
 inline constexpr std::int8_t kAbsentEquipmentSlot = -1;
 /** The standard 64-bit FNV-1a offset basis starts the payload checksum. */
@@ -276,7 +276,7 @@ struct InventoryBucketRecord {
     std::uint16_t firstSlot{};
     std::uint16_t slotCount{};
     std::int8_t equipmentSlot{inventory::buckets::kUnavailableEquipmentSlot};
-    std::uint8_t reserved{};
+    std::uint8_t policyFlags{};
 };
 
 /** Disk form of the buckets one subclass publishes under one ability selection. */
@@ -560,6 +560,10 @@ struct VendorDefinitionRecord {
     std::uint16_t installedCount{};
     std::uint16_t saleCount{};
     std::uint16_t thirdCount{};
+    std::uint8_t transferRulesAvailable{};
+    std::uint8_t transferRuleCount{};
+    std::array<std::uint8_t, vendors::kTransferRuleCapacity * sizeof(vendors::TransferRule)>
+        transferRules{};
 };
 
 /** Disk form of one vendor sale row. */
@@ -667,7 +671,8 @@ static_assert(sizeof(SpawnPointRecord)
                      + sizeof(std::uint16_t) + 2 * sizeof(std::uint8_t));
 static_assert(sizeof(VendorIndexRecord) == 2 * sizeof(std::uint32_t) + 2 * sizeof(std::uint16_t));
 static_assert(sizeof(VendorDefinitionRecord)
-              == 14 * sizeof(std::uint32_t) + 4 * sizeof(std::uint16_t));
+              == 14 * sizeof(std::uint32_t) + 4 * sizeof(std::uint16_t) + 2
+                     + vendors::kTransferRuleCapacity * sizeof(vendors::TransferRule));
 static_assert(sizeof(VendorSaleRowRecord) == 4 * sizeof(std::uint16_t) + 2 * sizeof(std::uint32_t));
 static_assert(sizeof(VendorInstalledRowRecord) == sizeof(std::uint32_t));
 static_assert(sizeof(HashNameRecord)

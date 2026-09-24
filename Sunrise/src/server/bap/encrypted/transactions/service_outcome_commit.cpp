@@ -240,6 +240,17 @@ bool commit(ServiceOutcome& outcome, Publication& publication, const char*& reas
                                    : "ev=ws701 stage=transaction_commit result=fail");
         return committed;
     }
+    if (auto* transaction = transaction_if<PostmasterClaimTransaction>(outcome)) {
+        reason = "postmaster_claim";
+        const bool committed =
+            transaction->pending && state::commit_postmaster_claim(*transaction->pending);
+        core::log::write(core::log::Channel::server,
+                         committed ? core::log::Level::info : core::log::Level::warn,
+                         committed ? "ev=postmaster stage=commit result=ok"
+                                   : "ev=postmaster stage=commit result=refused");
+        return committed;
+    }
+
     if (auto* transaction = transaction_if<EquipmentSwapTransaction>(outcome)) {
         if (transaction->pending == nullptr) {
             return false;

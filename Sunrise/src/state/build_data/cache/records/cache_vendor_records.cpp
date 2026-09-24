@@ -42,6 +42,14 @@ bool encode(const vendors::Definition& value, VendorDefinitionRecord& record) no
     record.installedCount = value.installedCount;
     record.saleCount = value.saleCount;
     record.thirdCount = value.thirdCount;
+    record.transferRulesAvailable = value.transferRulesAvailable ? 1 : 0;
+    record.transferRuleCount = value.transferRuleCount;
+    for (std::size_t row = 0; row < value.transferRules.size(); ++row) {
+        record.transferRules[row * sizeof(vendors::TransferRule)] =
+            value.transferRules[row].sourceBucket;
+        record.transferRules[row * sizeof(vendors::TransferRule) + 1] =
+            value.transferRules[row].destinationBucket;
+    }
     return true;
 }
 
@@ -50,7 +58,8 @@ bool decode(const VendorDefinitionRecord& record, vendors::Definition& value) no
     value = {};
     // The catalog checks every range against the whole domain. Only the class is checked here.
     // A row of another class is not a vendor definition, whatever its ranges say.
-    if (record.definitionClass != vendors::kDefinitionClass) {
+    if (record.definitionClass != vendors::kDefinitionClass || record.transferRulesAvailable > 1
+        || record.transferRuleCount > vendors::kTransferRuleCapacity) {
         return false;
     }
     value.definitionHash = record.definitionHash;
@@ -71,6 +80,14 @@ bool decode(const VendorDefinitionRecord& record, vendors::Definition& value) no
     value.installedCount = record.installedCount;
     value.saleCount = record.saleCount;
     value.thirdCount = record.thirdCount;
+    value.transferRulesAvailable = record.transferRulesAvailable != 0;
+    value.transferRuleCount = record.transferRuleCount;
+    for (std::size_t row = 0; row < value.transferRules.size(); ++row) {
+        value.transferRules[row].sourceBucket =
+            record.transferRules[row * sizeof(vendors::TransferRule)];
+        value.transferRules[row].destinationBucket =
+            record.transferRules[row * sizeof(vendors::TransferRule) + 1];
+    }
     return true;
 }
 

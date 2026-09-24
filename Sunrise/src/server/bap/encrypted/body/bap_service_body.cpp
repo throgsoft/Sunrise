@@ -240,6 +240,9 @@ bool process(const ServiceRoute& route,
         outcome.subscription = webOutcome.subscription;
         const auto* equipmentSwap =
             web_service::mutation_if<state::PendingEquipmentSwap>(webOutcome);
+        const auto* postmasterClaim =
+            web_service::mutation_if<state::PendingPostmasterClaim>(webOutcome);
+
         const auto* subclassSelection =
             web_service::mutation_if<state::PendingSubclassSelection>(webOutcome);
         const auto* socketPlug = web_service::mutation_if<state::PendingSocketPlug>(webOutcome);
@@ -306,6 +309,29 @@ bool process(const ServiceRoute& route,
                 return refuse_web_action(message, output, written);
             }
         }
+        if (postmasterClaim != nullptr) {
+            auto* transaction = emplace_transaction<PostmasterClaimTransaction>(outcome);
+            if (!transaction
+                || !queuez::stage_equipment_swap(
+                    queuezState, postmasterClaim->characterSoid, transaction->update)) {
+                clear_transaction(outcome);
+                return refuse_web_action(message, output, written);
+            }
+            middleware::web_service::StatusResponse status{};
+            status.value = transaction->update.after.family4Version;
+            if (!middleware::web_service::encode_response(
+                    message,
+                    middleware::web_service::ResponseShape::statusPair,
+                    status,
+                    output,
+                    written)) {
+                clear_transaction(outcome);
+                return refuse_web_action(message, output, written);
+            }
+            transaction->pending =
+                web_service::take_mutation<state::PendingPostmasterClaim>(webOutcome);
+        }
+
         if (equipmentSwap != nullptr) {
             // Promise the Family-4 revision carrying this optimistic equip.
             auto* transaction = emplace_transaction<EquipmentSwapTransaction>(outcome);
@@ -436,6 +462,7 @@ bool process(const ServiceRoute& route,
                                                    itemAcquisition->characterSoid,
                                                    itemAcquisition->acquiredInstanceSoid,
                                                    itemAcquisition->updates_account(),
+                                                   itemAcquisition->evictedInstanceSoid,
                                                    transaction->update)) {
                 core::log::write(core::log::Channel::server,
                                  core::log::Level::warn,

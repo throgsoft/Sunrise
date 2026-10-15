@@ -9,9 +9,9 @@
 #include <cstdio>
 #include <string_view>
 
-#include "../../client/diagnostics/studio/studio_protocol.h"
 #include "../../core/logging/log.h"
 #include "../../core/settings/settings.h"
+#include "../../middleware/studio/studio_mapping.h"
 #include "../../state/mods/mods_runtime.h"
 #include "../activity/mission/mission_script_runtime.h"
 #include "studio_command_protocol.h"
@@ -21,7 +21,6 @@ namespace {
 
 namespace wire = command_wire;
 namespace mission = activity::mission;
-namespace editor = client::diagnostics::studio;
 
 HANDLE g_mapping{};
 wire::SharedCommand* g_view{};
@@ -36,7 +35,7 @@ std::array<char, wire::kModIdBytes> g_requestedMod{};
 /** The bridge lock keeps a requester check from reading an unmapped view. */
 std::uint64_t detach() noexcept {
     const auto ticket = g_ticket;
-    editor::close_editor_view(g_mapping, g_view);
+    middleware::studio::close_editor_view(g_mapping, g_view);
     g_servingRequest = 0;
     g_ticket = 0;
     g_editorPid = 0;
@@ -51,11 +50,13 @@ void disconnect() noexcept {
 
 /** @return True only when an editor created a mapping of this exact protocol. */
 [[nodiscard]] bool connect() noexcept {
-    g_view = editor::open_editor_view<wire::SharedCommand>(wire::kMappingFormat, g_mapping);
+    g_view =
+        middleware::studio::open_editor_view<wire::SharedCommand>(wire::kMappingFormat, g_mapping);
     if (g_view == nullptr) {
         return false;
     }
-    if (!editor::editor_header_ok(*g_view, wire::kMagic, wire::kVersion, wire::kMappingBytes)) {
+    if (!middleware::studio::editor_header_ok(
+            *g_view, wire::kMagic, wire::kVersion, wire::kMappingBytes)) {
         disconnect();
         return false;
     }
@@ -123,17 +124,18 @@ bool requester_present(std::uint64_t ticket) noexcept {
         && core::settings::get().studioAttach) {
         const auto request = static_cast<std::uint32_t>(
             InterlockedCompareExchange(reinterpret_cast<volatile LONG*>(&g_view->request), 0, 0));
-        present =
-            editor::editor_header_ok(*g_view, wire::kMagic, wire::kVersion, wire::kMappingBytes)
-            && g_view->editorPid == g_editorPid && g_view->kind == wire::Kind::reloadMod
-            && g_view->modId == g_requestedMod && request == g_servingRequest
-            && editor::editor_alive(g_view->heartbeat, GetTickCount64(), wire::kHeartbeatTimeoutMs)
-            && static_cast<std::uint32_t>(InterlockedCompareExchange(
-                   reinterpret_cast<volatile LONG*>(&g_view->response), 0, 0))
-                   != request
-            && static_cast<std::uint32_t>(InterlockedCompareExchange(
-                   reinterpret_cast<volatile LONG*>(&g_view->request), 0, 0))
-                   == request;
+        present = middleware::studio::editor_header_ok(
+                      *g_view, wire::kMagic, wire::kVersion, wire::kMappingBytes)
+                  && g_view->editorPid == g_editorPid && g_view->kind == wire::Kind::reloadMod
+                  && g_view->modId == g_requestedMod && request == g_servingRequest
+                  && middleware::studio::editor_alive(
+                      g_view->heartbeat, GetTickCount64(), wire::kHeartbeatTimeoutMs)
+                  && static_cast<std::uint32_t>(InterlockedCompareExchange(
+                         reinterpret_cast<volatile LONG*>(&g_view->response), 0, 0))
+                         != request
+                  && static_cast<std::uint32_t>(InterlockedCompareExchange(
+                         reinterpret_cast<volatile LONG*>(&g_view->request), 0, 0))
+                         == request;
     }
     ReleaseSRWLockShared(&g_linkLock);
     return present;
@@ -194,7 +196,7 @@ void service_locked(std::uint64_t now) noexcept {
     if (g_view == nullptr) {
         return;
     }
-    if (!editor::editor_alive(g_view->heartbeat, now, wire::kHeartbeatTimeoutMs)) {
+    if (!middleware::studio::editor_alive(g_view->heartbeat, now, wire::kHeartbeatTimeoutMs)) {
         disconnect();
         return;
     }

@@ -1693,6 +1693,7 @@
     <ClInclude Include="src\server\runtime\server_runtime.h" />
     <ClInclude Include="src\server\studio\studio_command_link.h" />
     <ClInclude Include="src\server\studio\studio_command_protocol.h" />
+    <ClInclude Include="src\middleware\studio\studio_mapping.h" />
     <ClInclude Include="src\server\activity\activity_sdk_scriptable_route.h" />
     <ClInclude Include="src\server\activity\activity_sdk_device_runtime.h" />
     <ClInclude Include="src\server\activity\activity_sdk_lifetime_runtime.h" />

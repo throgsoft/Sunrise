@@ -176,6 +176,10 @@ struct ServiceOutcome {
 
     bool hasSelectCharacter{};
 
+    /** Static label of the Web Service action the handler refused, or null. */
+
+    const char* refusal{};
+
     /** One service owns at most one independently versioned, exact-sized transaction. */
 
     using Transaction = std::variant<std::monostate,
@@ -642,6 +646,46 @@ append_select_character_notification(Scratch& scratch,
     const queuez::EquipmentSwap& update,
 
     const state::PendingItemState& mutation,
+
+    std::span<const queuez::AcquisitionPresentationRow> acquisitionPresentationRows,
+
+    std::span<const std::byte, state::kAesKeySize> key,
+
+    std::span<const std::byte, state::kBapNonceSize> nonce,
+
+    std::span<std::byte> response,
+
+    std::size_t& written) noexcept;
+
+/** Appends the selected character's current object as one upsert above the peer version. */
+
+[[nodiscard]] bool append_selected_character_refresh_notification(
+
+    Scratch& scratch,
+
+    const queuez::EquipmentSwap& update,
+
+    std::uint64_t accountSoid,
+
+    std::size_t characterIndex,
+
+    std::span<const queuez::AcquisitionPresentationRow> acquisitionPresentationRows,
+
+    std::span<const std::byte, state::kAesKeySize> key,
+
+    std::span<const std::byte, state::kBapNonceSize> nonce,
+
+    std::span<std::byte> response,
+
+    std::size_t& written) noexcept;
+
+/** Appends the current account and selected-character objects as one upsert. */
+
+[[nodiscard]] bool append_account_refresh_notification(
+
+    Scratch& scratch,
+
+    const queuez::EquipmentSwap& update,
 
     std::span<const queuez::AcquisitionPresentationRow> acquisitionPresentationRows,
 

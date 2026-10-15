@@ -1007,6 +1007,7 @@
     <ClCompile Include="src\server\bap\bap_scriptable_override_route.cpp" />
     <ClCompile Include="src\server\bap\bap_squad_override_route.cpp" />
     <ClCompile Include="src\server\bap\bap_world_reward_queue.cpp" />
+    <ClCompile Include="src\server\bap\investment_operations.cpp" />
     <ClCompile Include="src\server\bap\encrypted\queuez\queuez_reward_staging.cpp" />
     <ClCompile Include="src\server\bap\encrypted\push\snapshot\family4_reward_updates.cpp" />
     <ClCompile Include="src\server\bap\encrypted\push\snapshot\family4_socket_updates.cpp" />
@@ -1031,6 +1032,8 @@
     <ClCompile Include="src\server\bap\encrypted\queuez\staging\queuez_family_refresh_staging.cpp" />
     <ClCompile Include="src\server\bap\encrypted\queuez\staging\queuez_character_staging.cpp" />
     <ClCompile Include="src\server\bap\encrypted\queuez\queuez_deferred_push.cpp" />
+    <ClCompile Include="src\server\bap\encrypted\queuez\queuez_investment_push.cpp" />
+    <ClCompile Include="src\server\bap\encrypted\queuez\queuez_item_grant_push.cpp" />
     <ClCompile Include="src\server\bap\encrypted\queuez\queuez_outcome_staging.cpp" />
     <ClCompile Include="src\server\bap\encrypted\push\queuez\queuez_update_frame.cpp" />
     <ClCompile Include="src\server\bap\encrypted\push\queuez\queuez_account_preflight.cpp" />
@@ -1787,6 +1790,7 @@
     <ClInclude Include="src\server\bap\runtime.h" />
     <ClInclude Include="src\server\bap\activity_mission_seed_lease.h" />
     <ClInclude Include="src\server\bap\internal.h" />
+    <ClInclude Include="src\server\bap\investment_operations.h" />
     <ClInclude Include="src\server\bap\squad_override_capacity.h" />
     <ClInclude Include="src\server\bap\encrypted\internal.h" />
     <ClInclude Include="src\server\bap\encrypted\activity_transaction\activity_transaction_notifications.h" />
@@ -2285,6 +2289,8 @@
     <ClInclude Include="src\server\activity\activity_sdk_behavior_scope.h" />
     <ClInclude Include="src\server\bap\encrypted\push\activity\mission_seed_world_change.h" />
     <ClInclude Include="src\server\bap\encrypted\queuez\queuez_reward_staging.h" />
+    <ClInclude Include="src\server\bap\encrypted\queuez\queuez_investment_push.h" />
+    <ClInclude Include="src\server\bap\encrypted\queuez\queuez_item_grant_push.h" />
     <ClInclude Include="src\server\gameplay\entity_identities.h" />
     <ClInclude Include="src\server\gameplay\squad_entity_retirement.h" />
     <ClInclude Include="src\server\transport\bap_frame_batch.h" />

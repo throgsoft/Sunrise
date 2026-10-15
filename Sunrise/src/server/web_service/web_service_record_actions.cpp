@@ -118,15 +118,15 @@ void claim_season_pass_reward(const middleware::web_service::Message& message,
     state::build_data::season_pass::Reward reward{};
     state::build_data::items::Definition item{};
     const std::uint16_t rank = state::seasonal_rank();
-    const auto fail = [&](std::string_view reason) noexcept {
+    const auto fail = [&](const char* reason) noexcept {
+        outcome.refusal = reason;
         std::array<char, core::log::kLineCapacity> line{};
         const int count = std::snprintf(
             line.data(),
             line.size(),
-            "ev=ws2400 stage=claim result=fail reason=%.*s transaction=%u progression=%u "
+            "ev=ws2400 stage=claim result=fail reason=%s transaction=%u progression=%u "
             "reward=%u rank=%u item_hash=0x%08X item_index=%u",
-            static_cast<int>(reason.size()),
-            reason.data(),
+            reason,
             static_cast<unsigned>(message.transactionId),
             static_cast<unsigned>(request.progressionIndex),
             static_cast<unsigned>(request.rewardIndex),

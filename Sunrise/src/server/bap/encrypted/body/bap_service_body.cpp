@@ -258,6 +258,7 @@ bool process(const ServiceRoute& route,
         outcome.hasArtifactReset = webOutcome.hasArtifactReset;
         outcome.artifactReset = webOutcome.artifactReset;
         outcome.subscription = webOutcome.subscription;
+        outcome.refusal = webOutcome.refusal;
         const auto* equipmentSwap =
             web_service::mutation_if<state::PendingEquipmentSwap>(webOutcome);
         const auto* postmasterClaim =

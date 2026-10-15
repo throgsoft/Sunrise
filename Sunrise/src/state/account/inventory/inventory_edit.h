@@ -20,6 +20,8 @@ struct QuantityEdit {
     std::int32_t expectedQuantity{};
     /** Zero removes the row without dismantle materials. */
     std::int32_t quantity{};
+
+    bool operator==(const QuantityEdit&) const = default;
 };
 
 /** Identities one committed edit changed, filled only on success. */

@@ -870,16 +870,11 @@ struct ProfileExchangePayout {
 [[nodiscard]] AccountState account_snapshot() noexcept;
 
 /**
- * @param revision Receives investment_revision() read under the same lock as the copy.
+ * @param revision Receives the account change generation, never zero, read under the same lock
+ * as the copy. Equal values mean no save committed and the selection held.
  * @return A copy of the active account state.
  */
 [[nodiscard]] AccountState account_snapshot(std::uint64_t& revision) noexcept;
-
-/**
- * Reads without side effects; equal values mean no save committed and the selection held.
- * @return Account change generation, never zero.
- */
-[[nodiscard]] std::uint64_t investment_revision() noexcept;
 
 /**
  * Copies the evaluated content state and adds build-derived catalyst completion overrides.

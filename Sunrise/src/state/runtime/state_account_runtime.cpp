@@ -587,14 +587,6 @@ AccountState account_snapshot(std::uint64_t& revision) noexcept {
     return investment::store::account();
 }
 
-/** @return The saved account's change generation, read under the lock. */
-std::uint64_t investment_revision() noexcept {
-    investment::store::g_mutex.lock();
-    const std::uint64_t revision = investment::store::g_session.revision;
-    investment::store::g_mutex.unlock();
-    return revision;
-}
-
 /** Grants each character the other 2 subclasses of its equipped subclass's class. */
 bool ensure_character_subclasses() noexcept {
     // Index of the subclass slot in the authored equipment array.

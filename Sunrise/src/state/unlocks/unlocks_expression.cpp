@@ -180,15 +180,27 @@ bool valid(const Instruction& instruction) noexcept {
     return instruction.bank == Bank::none;
 }
 
-/** Evaluates one expression program. */
-bool evaluate(std::span<const Instruction> program, const Inputs& inputs, bool& result) noexcept {
-    result = false;
+/** Reports whether a program needs an identity no saved bank holds. */
+bool reads_external(std::span<const Instruction> program) noexcept {
+    for (const Instruction& instruction : program) {
+        if (instruction.bank == Bank::external) {
+            return true;
+        }
+    }
+    return false;
+}
+
+/** Evaluates one expression program to its final value. */
+bool evaluate(std::span<const Instruction> program,
+              const Inputs& inputs,
+              std::int32_t& result) noexcept {
+    result = 0;
     if (program.empty() || inputs.flag == nullptr || inputs.value == nullptr) {
         return false;
     }
     Stack stack;
     for (const Instruction& instruction : program) {
-        if (!step(instruction, inputs, stack)) {
+        if (!valid(instruction) || !step(instruction, inputs, stack)) {
             return false;
         }
     }
@@ -196,8 +208,16 @@ bool evaluate(std::span<const Instruction> program, const Inputs& inputs, bool& 
     if (stack.depth() != 1 || !stack.pop(final)) {
         return false;
     }
-    result = final != 0;
+    result = final;
     return true;
+}
+
+/** Evaluates one condition program as a nonzero final value. */
+bool evaluate(std::span<const Instruction> program, const Inputs& inputs, bool& result) noexcept {
+    std::int32_t value = 0;
+    const bool evaluated = evaluate(program, inputs, value);
+    result = evaluated && value != 0;
+    return evaluated;
 }
 
 } // namespace sunrise::state::unlocks

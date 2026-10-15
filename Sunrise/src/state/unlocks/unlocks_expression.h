@@ -78,6 +78,9 @@ struct Inputs {
 /** Checks one instruction's bank and its operand against that bank's capacity. */
 [[nodiscard]] bool valid(const Instruction& instruction) noexcept;
 
+/** @return True when any instruction reads an identity outside the saved banks. */
+[[nodiscard]] bool reads_external(std::span<const Instruction> program) noexcept;
+
 /**
  * Evaluates one expression program.
  * Every failure is refused, never defaulted: bad opcode, bad stack, unreadable flag or value.
@@ -88,5 +91,15 @@ struct Inputs {
  */
 [[nodiscard]] bool
 evaluate(std::span<const Instruction> program, const Inputs& inputs, bool& result) noexcept;
+
+/**
+ * Evaluates one numeric expression program, such as an objective's progress source.
+ * @param program Instructions in evaluation order.
+ * @param inputs Flag and value readers.
+ * @param result Receives the final value, and is cleared on any refusal.
+ * @return True only when the whole program evaluated to one value.
+ */
+[[nodiscard]] bool
+evaluate(std::span<const Instruction> program, const Inputs& inputs, std::int32_t& result) noexcept;
 
 } // namespace sunrise::state::unlocks

@@ -75,15 +75,11 @@ bool read_value(const void* raw,
     }
 }
 
-/** An empty program is unconditional; external identities are not in the saved banks. */
-bool condition(std::span<const definitions::Instruction> program,
-               const Context& context,
-               bool& result,
-               const AcquiredFlags* acquiredFlags = nullptr) noexcept {
-    result = program.empty();
-    if (program.empty()) {
-        return true;
-    }
+/** External identities are not in the saved banks, so a program reading one is refused. */
+bool evaluate_program(std::span<const definitions::Instruction> program,
+                      const Context& context,
+                      std::int32_t& result,
+                      const AcquiredFlags* acquiredFlags = nullptr) noexcept {
     for (const auto& instruction : program) {
         if (!unlocks::valid(instruction)) {
             return refuse(context, "condition_shape");
@@ -97,6 +93,23 @@ bool condition(std::span<const definitions::Instruction> program,
     const ConditionInputs conditionInputs{context, acquiredFlags};
     const unlocks::Inputs inputs{read_flag, read_value, &conditionInputs};
     return unlocks::evaluate(program, inputs, result) || refuse(context, "condition_shape");
+}
+
+/** An empty program is unconditional; otherwise a nonzero value holds. */
+bool condition(std::span<const definitions::Instruction> program,
+               const Context& context,
+               bool& result,
+               const AcquiredFlags* acquiredFlags = nullptr) noexcept {
+    result = program.empty();
+    if (result) {
+        return true;
+    }
+    std::int32_t value = 0;
+    if (!evaluate_program(program, context, value, acquiredFlags)) {
+        return false;
+    }
+    result = value != 0;
+    return true;
 }
 
 bool condition(definitions::View data,
@@ -456,6 +469,13 @@ bool eligible(std::span<const definitions::Instruction> instructions,
               const Context& context,
               bool& result) noexcept {
     return condition(instructions, context, result);
+}
+
+bool evaluate(std::span<const definitions::Instruction> program,
+              const Context& context,
+              std::int32_t& value) noexcept {
+    value = 0;
+    return evaluate_program(program, context, value);
 }
 
 Resolution resolve(const Context& context,

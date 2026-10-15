@@ -7,6 +7,16 @@ std::recursive_mutex g_mutex;
 Session g_session;
 std::uint64_t g_failureSerial{};
 
+namespace {
+
+/** SQLite calls this only when a write transaction commits; zero lets the commit proceed. */
+int count_committed_write(void* /*context*/) noexcept {
+    ++g_session.revision;
+    return 0;
+}
+
+} // namespace
+
 /** SQLite requires this sentinel to copy text borrowed from a caller. */
 sqlite3_destructor_type copy_text() noexcept {
     return SQLITE_TRANSIENT; // NOLINT(performance-no-int-to-ptr)
@@ -192,6 +202,7 @@ bool open(std::string_view path,
     // One short busy wait permits a local database editor to finish its transaction.
     constexpr int kBusyMilliseconds = 5000;
     sqlite3_busy_timeout(g_database, kBusyMilliseconds);
+    sqlite3_commit_hook(g_database, count_committed_write, nullptr);
     bool ready = execute("PRAGMA foreign_keys=ON; PRAGMA synchronous=FULL;");
     int version = -1;
     {
@@ -298,6 +309,7 @@ bool use_session_copy() noexcept {
         sqlite3_close_v2(memory);
         return false;
     }
+    sqlite3_commit_hook(memory, count_committed_write, nullptr);
     sqlite3_close_v2(g_database);
     g_database = memory;
     return true;

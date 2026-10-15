@@ -30,6 +30,8 @@ struct Session {
     std::uint64_t signInSeconds{};
     /** Set while an earned-perk walk is owed; a rolled-back transaction restores it. */
     bool perkWalkOwed{true};
+    /** Counts committed writes and selection changes from one, leaving zero for unknown. */
+    std::uint64_t revision{1};
 };
 extern Session g_session;
 

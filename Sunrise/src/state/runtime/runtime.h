@@ -852,6 +852,12 @@ struct ProfileExchangePayout {
 [[nodiscard]] AccountState account_snapshot() noexcept;
 
 /**
+ * Reads without side effects; equal values mean no save committed and the selection held.
+ * @return Account change generation, never zero.
+ */
+[[nodiscard]] std::uint64_t investment_revision() noexcept;
+
+/**
  * Copies the evaluated content state and adds build-derived catalyst completion overrides.
  * @param output Receives one complete Family-5 snapshot on success.
  * @return False when the fixed override banks cannot hold the complete state.

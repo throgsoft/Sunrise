@@ -237,8 +237,12 @@ bool set_selected_character(std::uint64_t characterSoid) noexcept {
         return false;
     }
     // Publish only after the whole account still meets its identity rules.
+    const auto previousSelection = investment::store::g_session.selected;
     for (std::size_t index = 0; index < candidate.characters.size(); ++index) {
         investment::store::g_session.selected[index] = candidate.characters[index].selected;
+    }
+    if (investment::store::g_session.selected != previousSelection) {
+        ++investment::store::g_session.revision;
     }
     investment::store::g_mutex.unlock();
     (void)seed_seasonal_progression();
@@ -574,6 +578,14 @@ AccountState account_snapshot() noexcept {
     const AccountState snapshot = investment::store::account();
     investment::store::g_mutex.unlock();
     return snapshot;
+}
+
+/** @return The saved account's change generation, read under the lock. */
+std::uint64_t investment_revision() noexcept {
+    investment::store::g_mutex.lock();
+    const std::uint64_t revision = investment::store::g_session.revision;
+    investment::store::g_mutex.unlock();
+    return revision;
 }
 
 /** Grants each character the other 2 subclasses of its equipped subclass's class. */

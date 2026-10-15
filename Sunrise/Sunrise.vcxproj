@@ -962,6 +962,8 @@
     <ClCompile Include="src\server\activity\mission\mission_script_runtime_attach.cpp" />
     <ClCompile Include="src\server\activity\mission\mission_script_runtime_reload.cpp" />
     <ClCompile Include="src\server\studio\studio_command_link.cpp" />
+    <ClCompile Include="src\server\studio\studio_investment_link.cpp" />
+    <ClCompile Include="src\server\studio\studio_investment_payloads.cpp" />
     <ClCompile Include="src\server\activity\mission\mission_script_sources.cpp" />
     <ClCompile Include="src\server\activity\mission\mission_script_source_owner.cpp" />
     <ClCompile Include="src\server\activity\mission\mission_script_runtime_diagnostics.cpp" />
@@ -1710,7 +1712,10 @@
     <ClInclude Include="src\server\runtime\server_runtime.h" />
     <ClInclude Include="src\server\studio\studio_command_link.h" />
     <ClInclude Include="src\server\studio\studio_command_protocol.h" />
+    <ClInclude Include="src\server\studio\studio_investment_link.h" />
+    <ClInclude Include="src\server\studio\studio_investment_payloads.h" />
     <ClInclude Include="src\middleware\studio\studio_mapping.h" />
+    <ClInclude Include="src\middleware\studio\studio_investment_wire.h" />
     <ClInclude Include="src\server\activity\activity_sdk_scriptable_route.h" />
     <ClInclude Include="src\server\activity\activity_sdk_device_runtime.h" />
     <ClInclude Include="src\server\activity\activity_sdk_lifetime_runtime.h" />

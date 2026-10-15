@@ -117,11 +117,13 @@ struct InvestmentReceipt {
 
 /** How a submission was taken. */
 enum class InvestmentSubmission : std::uint8_t {
+    /** The receipt is retained; its state says whether the operation was queued or refused. */
     accepted,
     /** The identity was already submitted with the same request; nothing ran again. */
     existing,
     /** The identity was already submitted with another request; nothing changed. */
     reused,
+    /** No storage was left, so nothing was retained. */
     refused,
 };
 

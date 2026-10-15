@@ -368,8 +368,7 @@ InvestmentSubmission submit_investment_operation(const InvestmentOperation& oper
     }
     report_receipt("submit", entry.receipt);
     receipt = present(entry);
-    return entry.receipt.state == InvestmentReceiptState::refused ? InvestmentSubmission::refused
-                                                                  : InvestmentSubmission::accepted;
+    return InvestmentSubmission::accepted;
 }
 
 /** Answers from the retained receipt alone; nothing runs. */

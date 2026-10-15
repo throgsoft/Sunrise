@@ -357,6 +357,14 @@ inline constexpr std::uint32_t kInvestmentExpressionRowClass = 0x80807D31U;
 /** Catalyst progress items reference objective rows through this one-row array. */
 inline constexpr std::uint32_t kObjectiveReferenceArrayClass = 0x808087B1U;
 inline constexpr std::uint32_t kObjectiveReferenceRowClass = 0x808077E3U;
+/** Item +0x30 holds a signed 64-bit offset relative to that field. */
+inline constexpr std::size_t kItemObjectiveBlockOffset = 0x30;
+/** This block holds objective indices, completion controls and the item that owns the quest set. */
+inline constexpr std::uint32_t kItemObjectiveBlockClass = 0x808077EBU;
+/** Objective block +0x1C holds a 16-bit item-table index, not a definition hash. */
+inline constexpr std::size_t kObjectiveParentItemOffset = 0x1C;
+/** Objective array entries are 16-bit table indices. */
+inline constexpr std::size_t kObjectiveReferenceStride = sizeof(std::uint16_t);
 /** The investment root holds the dense objective definition table at this slot. */
 inline constexpr std::size_t kObjectiveTableSlot = 58;
 /** Installed objective table and row layout. */

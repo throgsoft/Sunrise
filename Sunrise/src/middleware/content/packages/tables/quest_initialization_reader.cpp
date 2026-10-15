@@ -17,15 +17,6 @@ constexpr std::size_t kBlockClassPrefixSize = sizeof(std::uint32_t);
 /** Policy: keep the full fixed block prefix before reading nested arrays. */
 constexpr std::size_t kMinimumQuestBlockSize = 0x20;
 
-/** Item +0x30 holds a signed 64-bit offset relative to that field. */
-constexpr std::size_t kItemObjectiveBlockOffset = 0x30;
-/** This block holds objective indices and the item index that owns the quest set. */
-constexpr std::uint32_t kItemObjectiveBlockClass = 0x808077EBU;
-/** Objective block +0x1C holds a 16-bit item-table index, not a definition hash. */
-constexpr std::size_t kObjectiveParentItemOffset = 0x1C;
-/** Objective array entries are 16-bit table indices. */
-constexpr std::size_t kObjectiveReferenceStride = sizeof(std::uint16_t);
-
 /** Item +0x60 holds the quest-set block offset relative to that field. */
 constexpr std::size_t kItemQuestSetBlockOffset = 0x60;
 /** This block holds ordered quest members and the value slot that selects the active step. */

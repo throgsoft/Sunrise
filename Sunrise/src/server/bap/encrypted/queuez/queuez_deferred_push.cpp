@@ -605,6 +605,10 @@ bool consume_deferred(Session& session,
     if (consume_investment_operation(session, scratch, response, written, touchesScratch)) {
         return true;
     }
+    // A grant committed without a frame holds later incrementals until the resync lands.
+    if (session.accountResyncArmed) {
+        return false;
+    }
     if (consume_ability_refresh(session, scratch, response, written, touchesScratch)) {
         return true;
     }

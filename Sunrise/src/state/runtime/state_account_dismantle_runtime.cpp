@@ -30,7 +30,7 @@ bool prepare_item_dismantle(std::uint64_t instanceSoid, PendingItemDismantle& mu
         }
     }
     if (characterIndex >= account.characterCount
-        || !stage_item_dismantle(account, characterIndex, instanceSoid, mutation)) {
+        || !stage_item_dismantle(account, characterIndex, instanceSoid, true, mutation)) {
         report_dismantle(
             "prepare", "fail", "ownership_or_resolve", 0, 0, instanceSoid, 0, 0, 0, 0, 0);
         return false;
@@ -47,6 +47,74 @@ bool prepare_item_dismantle(std::uint64_t instanceSoid, PendingItemDismantle& mu
                      mutation.equipmentSlot,
                      mutation.movedInventoryItemCount,
                      mutation.afterCharacter.nextInventorySerial);
+    return true;
+}
+
+/** Prepares one exact expected unequipped instance's removal, crediting no dismantle materials. */
+bool prepare_item_removal(std::uint64_t characterSoid,
+                          std::uint64_t instanceSoid,
+                          std::uint32_t definitionHash,
+                          std::int32_t mutationSerial,
+                          PendingItemDismantle& mutation,
+                          const char** refusal) noexcept {
+    const char* unused = nullptr;
+    auto& reason = refusal != nullptr ? *refusal : unused;
+    mutation = {};
+    reason = "account_state";
+    const AccountState account = account_snapshot();
+    if (!account::valid(account)) {
+        return false;
+    }
+    reason = "character_changed";
+    const std::size_t characterIndex = selected_character_index(account);
+    if (characterIndex >= account.characterCount
+        || account.characters[characterIndex].soid != characterSoid) {
+        return false;
+    }
+    const CharacterState& character = account.characters[characterIndex];
+    CharacterItemLocation location{};
+    reason = "inventory_row";
+    if (instanceSoid == 0 || !find_character_item_location(character, instanceSoid, location)) {
+        return false;
+    }
+    reason = "equipped";
+    if (location.equipped) {
+        return false;
+    }
+    reason = "inventory_row";
+    const account::inventory::Item* item = character_item_at(character, location);
+    if (item == nullptr || item->definitionHash != definitionHash
+        || item->mutationSerial != mutationSerial) {
+        return false;
+    }
+    // Locked items and rows the loadout cannot place stay with the in-game dismantle rules.
+    reason = "unsupported_removal";
+    if (!stage_item_dismantle(account, characterIndex, instanceSoid, false, mutation)) {
+        report_dismantle("prepare_removal",
+                         "fail",
+                         reason,
+                         definitionHash,
+                         characterSoid,
+                         instanceSoid,
+                         0,
+                         0,
+                         0,
+                         0,
+                         0);
+        return false;
+    }
+    report_dismantle("prepare_removal",
+                     "ok",
+                     "ready",
+                     mutation.dismantledItem.definitionHash,
+                     mutation.characterSoid,
+                     mutation.dismantledInstanceSoid,
+                     mutation.inventoryIndex,
+                     mutation.inventoryRow,
+                     mutation.equipmentSlot,
+                     mutation.movedInventoryItemCount,
+                     mutation.afterCharacter.nextInventorySerial);
+    reason = nullptr;
     return true;
 }
 

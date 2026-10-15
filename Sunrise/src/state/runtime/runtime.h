@@ -372,6 +372,8 @@ struct PendingItemDismantle {
     std::uint16_t inventoryRow{};
     std::uint8_t equipmentSlot{};
     bool profileChanged{};
+    /** False for an editor removal, which credits no dismantle materials. */
+    bool paysRewards{true};
     bool prepared{};
 };
 
@@ -749,6 +751,22 @@ commit_profile_item_acquisition(PendingProfileItemAcquisition& mutation) noexcep
 [[nodiscard]] bool prepare_item_dismantle(std::uint64_t instanceSoid,
                                           PendingItemDismantle& mutation) noexcept;
 
+/**
+ * Prepares the same removal for an exact expected instance, crediting no dismantle materials.
+ * @param characterSoid Character expected to be selected.
+ * @param instanceSoid Unequipped item instance to remove.
+ * @param definitionHash Definition the instance is expected to carry.
+ * @param mutationSerial Serial the instance is expected to carry.
+ * @param mutation Gets checked before/after images without changing account State.
+ * @param refusal Receives a static reason on failure.
+ */
+[[nodiscard]] bool prepare_item_removal(std::uint64_t characterSoid,
+                                        std::uint64_t instanceSoid,
+                                        std::uint32_t definitionHash,
+                                        std::int32_t mutationSerial,
+                                        PendingItemDismantle& mutation,
+                                        const char** refusal = nullptr) noexcept;
+
 /** Builds the exact account after-image while a prepared dismantle remains current. */
 [[nodiscard]] bool preview_item_dismantle(const PendingItemDismantle& mutation,
                                           AccountState& after) noexcept;
@@ -852,6 +870,12 @@ struct ProfileExchangePayout {
 [[nodiscard]] AccountState account_snapshot() noexcept;
 
 /**
+ * @param revision Receives investment_revision() read under the same lock as the copy.
+ * @return A copy of the active account state.
+ */
+[[nodiscard]] AccountState account_snapshot(std::uint64_t& revision) noexcept;
+
+/**
  * Reads without side effects; equal values mean no save committed and the selection held.
  * @return Account change generation, never zero.
  */
@@ -895,6 +919,17 @@ inline constexpr std::uint16_t kArtifactUnlockProgressionIndex = 39;
  */
 [[nodiscard]] bool grant_seasonal_experience(std::int32_t amount) noexcept;
 
+/**
+ * Replaces the exact published XP total and republishes every value derived from it.
+ * An increase walks newly earned perks; a decrease leaves earned and claimed flags set.
+ * @param expected XP total the caller read.
+ * @param replacement New total; it must still earn the artifact points already spent.
+ * @param refusal Receives a static reason on failure.
+ */
+[[nodiscard]] bool replace_seasonal_experience(std::int32_t expected,
+                                               std::int32_t replacement,
+                                               const char** refusal = nullptr) noexcept;
+
 /** @param rewardIndex Native reward-array index. @return True when the row is claimed. */
 [[nodiscard]] bool season_pass_reward_claimed(std::uint16_t rewardIndex) noexcept;
 
@@ -907,6 +942,17 @@ inline constexpr std::uint16_t kArtifactUnlockProgressionIndex = 39;
 
 /** Undoes one Season pass claim so a refused commit cannot leave it held. */
 void revoke_season_pass_reward(std::uint16_t rewardIndex) noexcept;
+
+/**
+ * Clears one claimed row's claim flag; granted items and acquisition flags stay.
+ * Rows the earned-perk walk grants are refused; that walk owns their claim flag.
+ * @param rewardIndex Native reward-array index.
+ * @param itemHash Item the row is expected to grant.
+ * @param refusal Receives a static reason on failure.
+ */
+[[nodiscard]] bool reset_season_pass_reward(std::uint16_t rewardIndex,
+                                            std::uint32_t itemHash,
+                                            const char** refusal = nullptr) noexcept;
 
 /** @return Purchased artifact sale rows, one bit per row. */
 [[nodiscard]] std::uint32_t artifact_mod_mask() noexcept;

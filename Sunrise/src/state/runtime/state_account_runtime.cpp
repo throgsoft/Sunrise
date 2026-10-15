@@ -580,6 +580,13 @@ AccountState account_snapshot() noexcept {
     return snapshot;
 }
 
+/** @return A copy of the active account state and its change generation, read under one lock. */
+AccountState account_snapshot(std::uint64_t& revision) noexcept {
+    const std::lock_guard lock(investment::store::g_mutex);
+    revision = investment::store::g_session.revision;
+    return investment::store::account();
+}
+
 /** @return The saved account's change generation, read under the lock. */
 std::uint64_t investment_revision() noexcept {
     investment::store::g_mutex.lock();

@@ -346,6 +346,32 @@ bool publish_experience_lanes(std::int32_t experience) noexcept {
                                                    : experience - kMaximumPassExperience);
 }
 
+/**
+ * Publishes a new XP total with its artifact values and commits the caller's transaction.
+ * @param rankReached True when the total reaches a higher rank; an owed perk walk runs anyway.
+ */
+[[nodiscard]] bool publish_experience_total(investment::store::Transaction& transaction,
+                                            std::int32_t total,
+                                            bool rankReached) noexcept {
+    const bool walkPerks = investment::store::g_session.perkWalkOwed || rankReached;
+    Family5State family;
+    if (!investment::store::read_family5(family)) {
+        return false;
+    }
+    SaleRows rows{};
+    std::size_t count = 0;
+    const std::uint32_t mask = sale_rows(rows, count) ? artifact_mask(rows, count) : 0U;
+    bool walked = false;
+    const bool published = publish_experience_lanes(total)
+                           && publish_artifact_locked(family, mask, total)
+                           && investment::store::write_family5(family)
+                           && (!walkPerks || grant_progress_flags(walked)) && transaction.commit();
+    if (published && walked) {
+        investment::store::g_session.perkWalkOwed = false;
+    }
+    return published;
+}
+
 } // namespace
 
 /** Packages share the perk bucket; only rewards without a pool grant the flag directly. */
@@ -456,25 +482,50 @@ bool grant_seasonal_experience(std::int32_t amount) noexcept {
         return false;
     }
     const auto total = previous + amount;
-    const bool walkPerks = investment::store::g_session.perkWalkOwed
-                           || seasonal_rank_for(previous) != seasonal_rank_for(total);
+    return publish_experience_total(
+        transaction, total, seasonal_rank_for(previous) != seasonal_rank_for(total));
+}
 
-    Family5State family;
-    if (!investment::store::read_family5(family)) {
+/** Replaces the exact published XP total, refusing a decrease below spent artifact points. */
+bool replace_seasonal_experience(std::int32_t expected,
+                                 std::int32_t replacement,
+                                 const char** refusal) noexcept {
+    const char* unused = nullptr;
+    auto& reason = refusal != nullptr ? *refusal : unused;
+    reason = "experience_range";
+    if (replacement < 0) {
         return false;
     }
+    reason = "transaction";
+    investment::store::Transaction transaction;
+    if (!transaction.ready()) {
+        return false;
+    }
+    reason = "experience_changed";
+    const std::int32_t previous = seasonal_experience();
+    if (previous != expected) {
+        return false;
+    }
+    reason = "not_ready";
     SaleRows rows{};
     std::size_t count = 0;
-    const std::uint32_t mask = sale_rows(rows, count) ? artifact_mask(rows, count) : 0U;
-    bool walked = false;
-    const bool granted = publish_experience_lanes(total)
-                         && publish_artifact_locked(family, mask, total)
-                         && investment::store::write_family5(family)
-                         && (!walkPerks || grant_progress_flags(walked)) && transaction.commit();
-    if (granted && walked) {
-        investment::store::g_session.perkWalkOwed = false;
+    if (!sale_rows(rows, count)) {
+        return false;
     }
-    return granted;
+    // Family 5 would otherwise publish more points spent than the new total earns.
+    reason = "experience_spent";
+    if (replacement < previous
+        && points_used(artifact_mask(rows, count)) > artifact_points_earned_for(replacement)) {
+        return false;
+    }
+    reason = "transaction";
+    const bool rankReached =
+        replacement > previous && seasonal_rank_for(previous) != seasonal_rank_for(replacement);
+    if (!publish_experience_total(transaction, replacement, rankReached)) {
+        return false;
+    }
+    reason = nullptr;
+    return true;
 }
 
 /** @return True when this Season pass reward row is already claimed. */
@@ -503,6 +554,49 @@ void revoke_season_pass_reward(std::uint16_t rewardIndex) noexcept {
         && reward.claimFlagIndex != build_data::season_pass::kUnavailableFlagIndex) {
         (void)unlocks::set_account_flag(reward.claimFlagIndex, unlocks::kFlagClear);
     }
+}
+
+/** Clears one claimed row's claim flag while the row still names the expected item. */
+bool reset_season_pass_reward(std::uint16_t rewardIndex,
+                              std::uint32_t itemHash,
+                              const char** refusal) noexcept {
+    const char* unused = nullptr;
+    auto& reason = refusal != nullptr ? *refusal : unused;
+    // The automatic-row check reads the item and reward catalogs.
+    reason = "not_ready";
+    if (!build_data::season_pass_ready() || !build_data::reward_definitions_ready()
+        || !build_data::item_definitions_ready()) {
+        return false;
+    }
+    reason = "transaction";
+    investment::store::Transaction transaction;
+    if (!transaction.ready()) {
+        return false;
+    }
+    reason = "reward_index";
+    build_data::season_pass::Reward reward{};
+    if (!build_data::find_season_pass_reward(rewardIndex, reward)) {
+        return false;
+    }
+    reason = "reward_hash";
+    if (reward.itemHash != itemHash) {
+        return false;
+    }
+    reason = "automatic_reward";
+    if (pass::progress_flag(reward) != build_data::rewards::kAbsent) {
+        return false;
+    }
+    reason = "not_claimed";
+    if (!season_pass_reward_claimed(rewardIndex)) {
+        return false;
+    }
+    revoke_season_pass_reward(rewardIndex);
+    reason = "transaction";
+    if (season_pass_reward_claimed(rewardIndex) || !transaction.commit()) {
+        return false;
+    }
+    reason = nullptr;
+    return true;
 }
 
 /** @return Purchased artifact sale rows, one bit per row. */

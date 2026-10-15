@@ -114,6 +114,7 @@
     <ClCompile Include="src\state\build_data\pursuits\pursuit_build_data_runtime.cpp" />
     <ClCompile Include="src\state\runtime\pursuit_completion_runtime.cpp" />
     <ClCompile Include="src\state\runtime\pursuit_snapshot_runtime.cpp" />
+    <ClCompile Include="src\state\runtime\season_pass_snapshot_runtime.cpp" />
     <ClCompile Include="src\client\diagnostics\studio\studio_link.cpp" />
     <ClCompile Include="src\client\diagnostics\studio\studio_world_reader.cpp" />
     <ClCompile Include="src\client\diagnostics\studio\studio_world_link.cpp" />
@@ -1376,6 +1377,7 @@
     <ClInclude Include="src\state\build_data\pursuits\definition.h" />
     <ClInclude Include="src\state\runtime\pursuit_completion_runtime.h" />
     <ClInclude Include="src\state\runtime\pursuit_snapshot_runtime.h" />
+    <ClInclude Include="src\state\runtime\season_pass_snapshot_runtime.h" />
     <ClInclude Include="resources\resource.h" />
     <ClInclude Include="src\core\logging\log.h" />
     <ClInclude Include="src\core\logging\snapshot\snapshot.h" />
@@ -2367,6 +2369,8 @@
   <ItemGroup>
     <ClCompile Include="src\state\account\inventory\inventory_seen_runtime.cpp" />
     <ClInclude Include="src\state\account\inventory\seen_state.h" />
+    <ClCompile Include="src\state\account\inventory\inventory_edit.cpp" />
+    <ClInclude Include="src\state\account\inventory\inventory_edit.h" />
     <None Include="resources\database\account_settings_schema.sql" />
     <None Include="resources\database\account_settings_defaults.sql" />
     <None Include="resources\database\character_starter.sql" />

@@ -48,6 +48,9 @@ void invalidate_cache() noexcept;
  */
 void bind_content(std::uint64_t contentHash) noexcept;
 
+/** @return The content hash bound at boot; zero without a content manifest. */
+[[nodiscard]] std::uint64_t content_hash() noexcept;
+
 /**
  * Loads the one build-data cache next to the module, when there is one.
  * Once a snapshot is on disk, later replacements are refused until State restarts. A failed first

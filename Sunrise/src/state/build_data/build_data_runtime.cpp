@@ -50,6 +50,10 @@ void bind_content(std::uint64_t contentHash) noexcept {
     g_contentHash = contentHash;
 }
 
+std::uint64_t content_hash() noexcept {
+    return g_contentHash;
+}
+
 /** Loads one full cache, or leaves every domain ready for first-boot extraction. */
 bool initialize(void* module, std::uint64_t configuredEquipmentHash) noexcept {
     runtime::persistence::Context& persistenceState = runtime::persistence::context();

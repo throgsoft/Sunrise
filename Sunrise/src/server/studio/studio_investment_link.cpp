@@ -44,6 +44,11 @@ std::uint64_t g_gameStarted{};
 
 /** Operations and receipts outlive the link, so an editor that returns can still read them. */
 void disconnect() noexcept {
+    if (g_view != nullptr) {
+        core::log::write(core::log::Channel::server,
+                         core::log::Level::info,
+                         "ev=studio stage=investment result=disconnected");
+    }
     middleware::studio::close_editor_view(g_mapping, g_view);
 }
 
@@ -319,6 +324,15 @@ template <typename Payload>
     return invalid("request_opcode");
 }
 
+/**
+ * Open views repeat hello, snapshot and receipt requests every second, so a served one is debug;
+ * mutations, withdrawals and every answer other than ok stay at info.
+ */
+[[nodiscard]] core::log::Level answer_level(wire::Opcode opcode, wire::Status status) noexcept {
+    const bool read = !wire::is_mutation(opcode) && opcode != wire::Opcode::withdrawOperation;
+    return read && status == wire::Status::ok ? core::log::Level::debug : core::log::Level::info;
+}
+
 /** Writes the response block, then the response id, so Studio never reads half an answer. */
 void answer(std::uint32_t request,
             const wire::Request& copy,
@@ -337,10 +351,8 @@ void answer(std::uint32_t request,
     MemoryBarrier();
     InterlockedExchange(reinterpret_cast<volatile LONG*>(&g_view->control.response),
                         static_cast<LONG>(request));
-    // Receipt polls repeat while an operation runs, and the operation owner logs each change.
-    const bool poll = copy.opcode == wire::Opcode::readReceipt && result.status == wire::Status::ok;
     core::log::writef(core::log::Channel::server,
-                      poll ? core::log::Level::debug : core::log::Level::info,
+                      answer_level(copy.opcode, result.status),
                       "ev=studio stage=investment result=answered request=%u opcode=%u status=%u "
                       "op=%llu reason=%s",
                       request,

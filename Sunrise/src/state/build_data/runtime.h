@@ -21,7 +21,9 @@
 #include "items/socket_plugs/definition.h"
 #include "material_requirements/material_requirement_catalog.h"
 #include "nodes/definition.h"
+#include "objectives/definition.h"
 #include "progressions/definition.h"
+#include "pursuits/definition.h"
 #include "records/definition.h"
 #include "rewards/definition.h"
 #include "scenarios/definition.h"
@@ -452,6 +454,61 @@ publish_progression_definitions(std::span<const progressions::Definition> defini
  */
 [[nodiscard]] bool read_reward_definitions(void* context,
                                            bool (*consume)(void*, rewards::View) noexcept) noexcept;
+
+/** @return True when the objective table read from the installed packages is in State. */
+[[nodiscard]] bool objective_definitions_ready() noexcept;
+
+/** @return Dense objective row count, read under the lock. */
+[[nodiscard]] std::size_t objective_definition_count() noexcept;
+
+/**
+ * Publishes the whole objective table for this process; it is never cached.
+ * @param rows Dense rows in native objective-index order.
+ * @return True when every row passes the checks and the table is stored.
+ */
+[[nodiscard]] bool
+publish_objective_definitions(std::span<const objectives::Definition> rows) noexcept;
+
+/**
+ * Reads one objective row.
+ * @param index Native objective-table index.
+ * @param output Receives a copy of the row.
+ * @return True when the table holds that row.
+ */
+[[nodiscard]] bool find_objective_definition(std::uint16_t index,
+                                             objectives::Definition& output) noexcept;
+
+/** Withdraws the objective table. */
+void clear_objective_definitions() noexcept;
+
+/** @return True when the pursuit completion contracts are in State. */
+[[nodiscard]] bool pursuit_definitions_ready() noexcept;
+
+/** @return Published pursuit contract count, read under the lock. */
+[[nodiscard]] std::size_t pursuit_definition_count() noexcept;
+
+/** @return A generation that changes only after a complete publication or clear. */
+[[nodiscard]] std::uint64_t pursuit_definitions_revision() noexcept;
+
+/**
+ * Publishes every pursuit completion contract for this process; they are never cached.
+ * Requires the item and objective tables, which every contract edge is checked against.
+ * @param rows Contracts in ascending item-index order.
+ * @return True when every contract passes the checks and the set is stored.
+ */
+[[nodiscard]] bool publish_pursuit_definitions(std::span<const pursuits::Definition> rows) noexcept;
+
+/**
+ * Reads one pursuit completion contract.
+ * @param index Native item-definition index.
+ * @param output Receives a copy of the contract.
+ * @return True when the item has a published contract.
+ */
+[[nodiscard]] bool find_pursuit_definition(std::uint16_t index,
+                                           pursuits::Definition& output) noexcept;
+
+/** Withdraws every pursuit completion contract. */
+void clear_pursuit_definitions() noexcept;
 
 /** @return True when the repeatable bounty table is in State. */
 [[nodiscard]] bool repeatable_bounties_ready() noexcept;

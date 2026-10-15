@@ -60,6 +60,8 @@ bool initialize(void* module, std::uint64_t configuredEquipmentHash) noexcept {
     AcquireSRWLockExclusive(&persistenceState.lock);
     runtime::persistence::clear_locked(persistenceState);
     runtime::clear_catalogs();
+    clear_objective_definitions();
+    clear_pursuit_definitions();
     gameplay::entity_position_profiles::reset();
     gameplay::entity_object_types::reset();
     if (module == nullptr) {
@@ -196,6 +198,8 @@ void shutdown() noexcept {
     runtime::persistence::Context& persistenceState = runtime::persistence::context();
     AcquireSRWLockExclusive(&persistenceState.lock);
     runtime::clear_catalogs();
+    clear_objective_definitions();
+    clear_pursuit_definitions();
     gameplay::entity_position_profiles::reset();
     gameplay::entity_object_types::reset();
     runtime::persistence::clear_locked(persistenceState);

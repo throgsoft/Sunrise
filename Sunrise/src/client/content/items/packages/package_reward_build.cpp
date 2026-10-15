@@ -50,6 +50,14 @@ constexpr std::size_t kBindingStride = 8;
 constexpr std::size_t kExpressionRowStride = 24;
 constexpr std::size_t kSocketStride = 12;
 constexpr std::size_t kSelectionStride = 12;
+/** A value binding row holds its identity hash, then its source kind and aggregation bytes. */
+constexpr std::size_t kBindingKindOffset = 4;
+constexpr std::size_t kBindingAggregationOffset = 5;
+/** Per-item sources read the inspected instance, or the maximum over held instances. */
+constexpr std::uint8_t kItemValueKind = 4;
+constexpr std::uint8_t kContextItemValueMode = 0;
+constexpr std::uint8_t kMaximumItemValueMode = 2;
+constexpr std::uint8_t kContextOnlyItemValueMode = 4;
 /** Item headers hold a relative wrapper pointer and an acquired-unlock slot. */
 constexpr std::size_t kWrapperField = 0x58;
 constexpr std::size_t kAcquiredFlagField = 0xDA;
@@ -373,6 +381,40 @@ bool RewardConditions::loaded() const noexcept {
     return loaded_;
 }
 
+bool RewardConditions::item_value(
+    std::uint32_t hash,
+    std::uint16_t& index,
+    state::build_data::objectives::ItemValueMode& mode) const noexcept {
+    index = state::build_data::objectives::kNoItemValue;
+    mode = state::build_data::objectives::ItemValueMode::context;
+    const std::span<const std::byte> blob{values_};
+    for (std::size_t i = 0; i < valueRows_.count; ++i) {
+        const std::size_t at = valueRows_.dataOffset + i * kBindingStride;
+        std::uint32_t identity = 0;
+        std::uint8_t kind = 0;
+        std::uint8_t aggregation = 0;
+        if (!tables::read(blob, at, identity) || !tables::read(blob, at + kBindingKindOffset, kind)
+            || !tables::read(blob, at + kBindingAggregationOffset, aggregation)) {
+            return false;
+        }
+        if (identity != hash) {
+            continue;
+        }
+        if (kind != kItemValueKind
+            || (aggregation != kContextItemValueMode && aggregation != kMaximumItemValueMode
+                && aggregation != kContextOnlyItemValueMode)
+            || i >= state::build_data::objectives::kNoItemValue) {
+            return false;
+        }
+        mode = aggregation == kMaximumItemValueMode
+                   ? state::build_data::objectives::ItemValueMode::maximum
+                   : state::build_data::objectives::ItemValueMode::context;
+        index = static_cast<std::uint16_t>(i);
+        return true;
+    }
+    return false;
+}
+
 bool RewardConditions::bind(std::uint32_t native,
                             std::uint32_t operand,
                             domain::Instruction& instruction) const noexcept {
@@ -482,6 +524,25 @@ bool RewardConditions::read(std::span<const std::byte> blob,
         return false;
     }
     range = {static_cast<std::uint32_t>(first), static_cast<std::uint32_t>(bank.size() - first)};
+    return true;
+}
+
+bool RewardConditions::read_index(std::uint16_t index,
+                                  std::vector<domain::Instruction>& output,
+                                  BankFailure& failure) const noexcept {
+    output.clear();
+    failure = BankFailure::none;
+    domain::Range range{};
+    if (!loaded_ || index >= expressionRows_.count
+        || !read(expressions_,
+                 expressionRows_.dataOffset + index * kExpressionRowStride + kExpressionBodyOffset,
+                 output,
+                 range,
+                 failure)
+        || output.empty()) {
+        output.clear();
+        return false;
+    }
     return true;
 }
 

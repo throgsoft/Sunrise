@@ -61,6 +61,12 @@ bool build_item_rows(const reader::Source& source,
                      const tables::Array& table,
                      std::size_t& rowCount,
                      const char*& reason) noexcept {
+    // Contracts are checked against the objective table, so a walk without it would be wasted.
+    const bool needPursuits =
+        !pursuit_catalog_settled() && state::build_data::objective_definitions_ready();
+    const bool pursuitStorageReady =
+        needPursuits
+        && storage.pursuitBuild.begin(source, storage.scratch, storage.root, storage.slotMaps);
     const bool needRewards = !reward_definitions_settled();
     const bool rewardStorageReady =
         needRewards && storage.rewardBuild.begin_items(static_cast<std::size_t>(table.count));
@@ -74,7 +80,8 @@ bool build_item_rows(const reader::Source& source,
     const bool needDetailRows = needDetails || needSocketRows;
     // Bucket equipment slots are derived from this same complete item walk, so a partial retry
     // must still revisit the table even when definitions and detail domains already published.
-    const bool needRows = needDefinitions || needDetailRows || needBuckets || rewardStorageReady;
+    const bool needRows = needDefinitions || needDetailRows || needBuckets || rewardStorageReady
+                          || pursuitStorageReady;
     bool published = !needRows;
     if (retainDetails && storage.details.size() != kDetailCapacity) {
         storage.details.assign(kDetailCapacity, build_details::Definition{});
@@ -104,6 +111,9 @@ bool build_item_rows(const reader::Source& source,
     for (; needRows && index < table.count && rowCount < storage.rows.size(); ++index) {
         tables::IndexRow row{};
         if (!tables::index_row(container, table, index, row)) {
+            if (pursuitStorageReady) {
+                storage.pursuitBuild.unread(static_cast<std::uint16_t>(index));
+            }
             continue;
         }
         tables::items::Row item{};
@@ -112,6 +122,9 @@ bool build_item_rows(const reader::Source& source,
         std::uint32_t itemClass = 0;
         if (!reader::read_tag(
                 source, storage.scratch, row.targetTag, storage.definition, itemClass)) {
+            if (pursuitStorageReady) {
+                storage.pursuitBuild.unread(item.definitionIndex);
+            }
             // The published catalog read this row before, so its reward waits for a retry; a row
             // the catalog lacks stays pruned from both.
             state::build_data::items::Definition cataloged{};
@@ -122,7 +135,14 @@ bool build_item_rows(const reader::Source& source,
             continue;
         }
         if (!tables::items::read_definition(std::span<const std::byte>{storage.definition}, item)) {
+            if (pursuitStorageReady) {
+                storage.pursuitBuild.unread(item.definitionIndex);
+            }
             continue;
+        }
+        if (pursuitStorageReady
+            && (itemClass != tables::kItemDefinitionClass || !storage.pursuitBuild.item(item))) {
+            storage.pursuitBuild.unread(item.definitionIndex);
         }
         if (rewardStorageReady && itemClass == tables::kItemDefinitionClass) {
             storage.rewardBuild.item(item.definitionIndex, item.definitionHash, storage.definition);
@@ -203,6 +223,10 @@ bool build_item_rows(const reader::Source& source,
         !needRewards
         || (rewardStorageReady && state::build_data::item_definitions_ready()
             && storage.rewardBuild.publish(state::build_data::item_definition_count()));
+    // Pursuit contracts settle on their own and never block the other item domains either.
+    if (pursuitStorageReady) {
+        storage.pursuitBuild.publish();
+    }
     if (!published) {
         reason = !detailStorageReady ? "detail_storage"
                  : !requestsFit      ? "detail_capacity"

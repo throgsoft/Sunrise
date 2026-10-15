@@ -9,6 +9,7 @@
 #include "../../../../middleware/content/packages/reader/reader.h"
 #include "../../../../middleware/content/packages/tables/definition_index_table.h"
 #include "../../../../state/account/account_state.h"
+#include "../../../../state/build_data/objectives/definition.h"
 #include "../../../../state/build_data/rewards/definition.h"
 
 namespace sunrise::client::content::items::packages {
@@ -32,12 +33,27 @@ public:
     [[nodiscard]] bool bind(std::uint32_t native,
                             std::uint32_t operand,
                             state::build_data::rewards::Instruction& instruction) const noexcept;
+    /**
+     * Resolves an external value identity to its per-item source.
+     * @param hash External identity a bound value instruction carries.
+     * @param index Receives the native value-table index of the per-item source.
+     * @param mode Receives whether the source reads the inspected instance or held maximum.
+     * @return True when the identity names a per-item source.
+     */
+    [[nodiscard]] bool
+    item_value(std::uint32_t hash,
+               std::uint16_t& index,
+               state::build_data::objectives::ItemValueMode& mode) const noexcept;
     /** Appends one expanded expression; the bank is unchanged on failure. */
     [[nodiscard]] bool read(std::span<const std::byte> blob,
                             std::size_t at,
                             std::vector<state::build_data::rewards::Instruction>& bank,
                             state::build_data::rewards::Range& range,
                             BankFailure& failure) const noexcept;
+    /** Expands one shared expression row by native index; the output is empty on refusal. */
+    [[nodiscard]] bool read_index(std::uint16_t index,
+                                  std::vector<state::build_data::rewards::Instruction>& output,
+                                  BankFailure& failure) const noexcept;
     /** Expands a list of expressions into one program where every expression must hold. */
     [[nodiscard]] bool read_list(std::span<const std::byte> blob,
                                  std::size_t at,

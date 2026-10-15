@@ -197,6 +197,37 @@ void strip_artifact_flags_locked(Family5State& family,
     return used;
 }
 
+/**
+ * Reads the largest artifact points-used count across every character bank.
+ * @param most Receives the count; ownership lives in each character's own bank.
+ * @return False when the account or a character bank cannot be read.
+ */
+[[nodiscard]] bool most_artifact_points_used_locked(const SaleRows& rows,
+                                                    std::size_t count,
+                                                    std::uint16_t& most) noexcept {
+    most = 0;
+    AccountState account;
+    if (!investment::store::read_account(account)) {
+        return false;
+    }
+    for (std::size_t character = 0; character < account.characterCount; ++character) {
+        unlocks::Table banks;
+        if (!investment::store::read_unlocks(banks, static_cast<int>(character))) {
+            return false;
+        }
+        std::uint32_t mask = 0;
+        for (std::size_t row = 0; row < count && row < 32; ++row) {
+            const auto flag = rows[row].characterFlagIndex;
+            if (flag < banks.characterObjectFlags.size()
+                && banks.characterObjectFlags[flag] == unlocks::kFlagSet) {
+                mask |= 1U << row;
+            }
+        }
+        most = (std::max)(most, points_used(mask));
+    }
+    return true;
+}
+
 /** Character-bank write of an artifact publish; the family-5 overrides carry only the counters. */
 struct CharacterArtifactWrite {
     const SaleRows* rows{};
@@ -512,10 +543,15 @@ bool replace_seasonal_experience(std::int32_t expected,
     if (!sale_rows(rows, count)) {
         return false;
     }
-    // Family 5 would otherwise publish more points spent than the new total earns.
+    reason = "transaction";
+    std::uint16_t spent = 0;
+    if (replacement < previous && !most_artifact_points_used_locked(rows, count, spent)) {
+        return false;
+    }
+    // Selecting the character that spent the most would otherwise publish more points spent than
+    // the new total earns.
     reason = "experience_spent";
-    if (replacement < previous
-        && points_used(artifact_mask(rows, count)) > artifact_points_earned_for(replacement)) {
+    if (spent > artifact_points_earned_for(replacement)) {
         return false;
     }
     reason = "transaction";

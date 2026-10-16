@@ -1,5 +1,6 @@
 #include "pursuit_snapshot_runtime.h"
 
+#include <algorithm>
 #include <cstddef>
 #include <mutex>
 #include <utility>
@@ -139,6 +140,34 @@ PursuitSnapshotRefusal read_pursuit_snapshot(std::uint64_t characterSoid,
     } catch (...) {
         return PursuitSnapshotRefusal::storage;
     }
+}
+
+/** Each source is evaluated alone, as a one-instruction program over the same saved copy. */
+PursuitSnapshotRefusal read_unlock_values(std::uint64_t characterSoid,
+                                          std::span<const unlocks::Instruction> sources,
+                                          std::span<UnlockRead> output,
+                                          UnlockReadOrigin& origin) noexcept {
+    origin = {};
+    std::fill(output.begin(), output.end(), UnlockRead{});
+    AccountState account{};
+    unlocks::Table values{};
+    std::size_t slot = 0;
+    std::uint64_t investmentRevision = 0;
+    const PursuitSnapshotRefusal refusal =
+        read_saved_state(characterSoid, account, values, slot, investmentRevision);
+    if (refusal != PursuitSnapshotRefusal::none) {
+        return refusal;
+    }
+    const CharacterState& character = account.characters[slot];
+    // Evaluation never draws, so no seed is needed.
+    const reward_resolution::Context context{values, character.characterClass, 0, nullptr};
+    const std::size_t count = (std::min)(sources.size(), output.size());
+    for (std::size_t index = 0; index < count; ++index) {
+        UnlockRead& read = output[index];
+        read.known = reward_resolution::evaluate(sources.subspan(index, 1), context, read.value);
+    }
+    origin = {account.primarySoid, character.soid, investmentRevision};
+    return PursuitSnapshotRefusal::none;
 }
 
 } // namespace sunrise::state

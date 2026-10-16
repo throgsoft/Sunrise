@@ -34,7 +34,8 @@ constexpr std::uint64_t kAdvertisedCapabilities =
     | wire::capability(wire::Opcode::resetSeasonPassClaim)
     | wire::capability(wire::Opcode::readReceipt)
     | wire::capability(wire::Opcode::acknowledgeReceipt)
-    | wire::capability(wire::Opcode::withdrawOperation);
+    | wire::capability(wire::Opcode::withdrawOperation)
+    | wire::capability(wire::Opcode::unlockValues);
 
 HANDLE g_mapping{};
 wire::SharedInvestment* g_view{};
@@ -306,6 +307,8 @@ template <typename Payload>
         return acknowledge_receipt(request.operationId, payload);
     case wire::Opcode::withdrawOperation:
         return withdraw_operation(request.operationId, payload);
+    case wire::Opcode::unlockValues:
+        return encode_unlock_values(payload_of<wire::UnlockValuesRequest>(request), payload);
     case wire::Opcode::grantItem:
     case wire::Opcode::setQuantity:
     case wire::Opcode::setSeasonalExperience:
@@ -325,8 +328,8 @@ template <typename Payload>
 }
 
 /**
- * Open views repeat hello, snapshot and receipt requests every second, so a served one is debug;
- * mutations, withdrawals and every answer other than ok stay at info.
+ * Open views repeat hello, snapshot, unlock and receipt requests every second, so a served one is
+ * debug; mutations, withdrawals and every answer other than ok stay at info.
  */
 [[nodiscard]] core::log::Level answer_level(wire::Opcode opcode, wire::Status status) noexcept {
     const bool read = !wire::is_mutation(opcode) && opcode != wire::Opcode::withdrawOperation;

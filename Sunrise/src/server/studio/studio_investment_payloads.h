@@ -42,6 +42,14 @@ struct InvestmentAnswer {
 [[nodiscard]] InvestmentAnswer encode_pursuit_snapshot(InvestmentPayload payload) noexcept;
 
 /**
+ * Encodes the selected character's saved flag and value rows the request names.
+ * @return Invalid with request_field when a source is malformed.
+ */
+[[nodiscard]] InvestmentAnswer
+encode_unlock_values(const middleware::studio::investment_wire::UnlockValuesRequest& request,
+                     InvestmentPayload payload) noexcept;
+
+/**
  * Encodes a receipt bound to its operation's target; an empty receipt answers unknown.
  * @param operationId The id the editor asked about, echoed even when no receipt is retained.
  */

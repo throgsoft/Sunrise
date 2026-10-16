@@ -1,7 +1,9 @@
 #include "studio_investment_payloads.h"
 
 #include <algorithm>
+#include <array>
 #include <cstring>
+#include <limits>
 #include <memory>
 #include <new>
 #include <span>
@@ -11,6 +13,8 @@
 #include "../../state/runtime/pursuit_snapshot_runtime.h"
 #include "../../state/runtime/runtime.h"
 #include "../../state/runtime/season_pass_snapshot_runtime.h"
+#include "../../state/unlocks/definition.h"
+#include "../../state/unlocks/unlocks_expression.h"
 
 namespace sunrise::server::studio {
 namespace {
@@ -39,6 +43,13 @@ static_assert(state::account::inventory::kEquipmentSlotCount < wire::kUnequipped
 static_assert(static_cast<std::uint8_t>(state::account::inventory::SocketPolicy::nativeDefaults)
                   == 0
               && static_cast<std::uint8_t>(state::account::inventory::SocketPolicy::authored) == 1);
+// A source's 16-bit index addresses every row of each bank it can name.
+static_assert((std::max)({state::unlocks::kAccountFlagCapacity,
+                          state::unlocks::kProfileFlagCapacity,
+                          state::unlocks::kCharacterObjectFlagCapacity,
+                          state::unlocks::kObjectiveValueCapacity,
+                          state::unlocks::kCharacterObjectValueCapacity})
+              <= (std::numeric_limits<decltype(wire::UnlockSource::index)>::max)());
 
 /** @return A refusal that carries one static label and no payload. */
 [[nodiscard]] InvestmentAnswer refused(const char* reason) noexcept {
@@ -375,6 +386,73 @@ pursuit_objective(const state::PursuitObjectiveStatus& objective) noexcept {
     return wire::ReceiptState::unknown;
 }
 
+/** @return False for a kind the wire does not define. */
+[[nodiscard]] bool unlock_opcode(wire::UnlockKind kind, state::unlocks::Opcode& output) noexcept {
+    switch (kind) {
+    case wire::UnlockKind::flag:
+        output = state::unlocks::Opcode::flag;
+        return true;
+    case wire::UnlockKind::value:
+        output = state::unlocks::Opcode::loadValue;
+        return true;
+    }
+    return false;
+}
+
+/** @return False for a bank the wire does not define. */
+[[nodiscard]] bool unlock_bank(wire::UnlockBank bank, state::unlocks::Bank& output) noexcept {
+    switch (bank) {
+    case wire::UnlockBank::account:
+        output = state::unlocks::Bank::account;
+        return true;
+    case wire::UnlockBank::profile:
+        output = state::unlocks::Bank::profile;
+        return true;
+    case wire::UnlockBank::character:
+        output = state::unlocks::Bank::character;
+        return true;
+    }
+    return false;
+}
+
+/** @return False for an undefined kind or bank, or for a value in the flag-only profile bank. */
+[[nodiscard]] bool unlock_instruction(const wire::UnlockSource& source,
+                                      state::unlocks::Instruction& output) noexcept {
+    const bool profileValue =
+        source.kind == wire::UnlockKind::value && source.bank == wire::UnlockBank::profile;
+    output.operand = source.index;
+    return !profileValue && unlock_opcode(source.kind, output.opcode)
+           && unlock_bank(source.bank, output.bank);
+}
+
+/** @return True for a source slot past the request's count, which carries nothing. */
+[[nodiscard]] bool unlock_source_empty(const wire::UnlockSource& source) noexcept {
+    return source.kind == wire::UnlockKind{} && source.bank == wire::UnlockBank{}
+           && source.index == 0;
+}
+
+/**
+ * Decodes the counted sources; an index outside its bank is left for State to answer unknown.
+ * @return False for a count, reserved field or source the request may not carry.
+ */
+[[nodiscard]] bool decode_unlock_sources(
+    const wire::UnlockValuesRequest& request,
+    std::span<state::unlocks::Instruction, wire::kUnlockReadCapacity> output) noexcept {
+    if (request.count == 0 || request.count > wire::kUnlockReadCapacity || request.reserved != 0) {
+        return false;
+    }
+    const auto unused = std::span(request.sources).subspan(request.count);
+    if (!std::all_of(unused.begin(), unused.end(), unlock_source_empty)) {
+        return false;
+    }
+    for (std::size_t index = 0; index < request.count; ++index) {
+        if (!unlock_instruction(request.sources[index], output[index])) {
+            return false;
+        }
+    }
+    return true;
+}
+
 } // namespace
 
 /** An unreadable account leaves the context empty; Hello still names the instance it serves. */
@@ -472,6 +550,34 @@ InvestmentAnswer encode_pursuit_snapshot(InvestmentPayload payload) noexcept {
         *snapshot,
         {pursuits.accountSoid, pursuits.characterSoid, state::build_data::content_hash()},
         payload);
+}
+
+/** Reads the selected character, as pursuit snapshots do; every value after count stays zero. */
+InvestmentAnswer encode_unlock_values(const wire::UnlockValuesRequest& request,
+                                      InvestmentPayload payload) noexcept {
+    std::array<state::unlocks::Instruction, wire::kUnlockReadCapacity> sources{};
+    if (!decode_unlock_sources(request, sources)) {
+        return {.status = wire::Status::invalid, .reason = "request_field"};
+    }
+    std::array<state::UnlockRead, wire::kUnlockReadCapacity> reads{};
+    state::UnlockReadOrigin origin{};
+    const state::PursuitSnapshotRefusal refusal =
+        state::read_unlock_values(0, std::span(sources).first(request.count), reads, origin);
+    if (refusal != state::PursuitSnapshotRefusal::none) {
+        return refused(pursuit_refusal_label(refusal));
+    }
+    wire::UnlockValues values{};
+    values.count = request.count;
+    values.investmentRevision = origin.investmentRevision;
+    for (std::size_t index = 0; index < request.count; ++index) {
+        wire::UnlockValue& value = values.values[index];
+        value.state =
+            reads[index].known ? wire::UnlockReadState::known : wire::UnlockReadState::invalid;
+        value.value = reads[index].value;
+    }
+    return deliver(values,
+                   {origin.accountSoid, origin.characterSoid, state::build_data::content_hash()},
+                   payload);
 }
 
 /** A retained receipt is bound to its operation's target, and an unknown one to no context. */

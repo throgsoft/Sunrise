@@ -1,10 +1,12 @@
 #pragma once
 
 #include <cstdint>
+#include <span>
 #include <vector>
 
 #include "../account/account_state.h"
 #include "../build_data/pursuits/definition.h"
+#include "../unlocks/unlocks_expression.h"
 #include "pursuit_completion_runtime.h"
 
 namespace sunrise::state {
@@ -66,5 +68,33 @@ struct PursuitSnapshot {
  */
 [[nodiscard]] PursuitSnapshotRefusal read_pursuit_snapshot(std::uint64_t characterSoid,
                                                            PursuitSnapshot& output) noexcept;
+
+/** One saved flag or value row; a flag reads 0 or 1. */
+struct UnlockRead {
+    bool known{};
+    std::int32_t value{};
+};
+
+/** The saved account, character and revision one unlock read came from. */
+struct UnlockReadOrigin {
+    std::uint64_t accountSoid{};
+    std::uint64_t characterSoid{};
+    std::uint64_t investmentRevision{};
+};
+
+/**
+ * Reads saved flag and value rows under one store lock, through the evaluator pursuit snapshots
+ * use. Never writes, never draws, never publishes.
+ * @param characterSoid A character of the saved account, or zero for the selected character.
+ * @param sources One flag or value instruction per row; one the banks cannot answer is unknown.
+ * @param output Receives one read per source, in order; must be at least as long as sources.
+ * @param origin Receives the saved identity and revision the reads came from.
+ * @return None on success, otherwise why nothing was read.
+ */
+[[nodiscard]] PursuitSnapshotRefusal
+read_unlock_values(std::uint64_t characterSoid,
+                   std::span<const unlocks::Instruction> sources,
+                   std::span<UnlockRead> output,
+                   UnlockReadOrigin& origin) noexcept;
 
 } // namespace sunrise::state

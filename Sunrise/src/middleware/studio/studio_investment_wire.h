@@ -42,6 +42,8 @@ inline constexpr std::size_t kHeldPursuitCapacity = 333;
 /** A native item instance carries eight objective values; lane 0 of a bounty is its expiry. */
 inline constexpr std::size_t kObjectiveLaneCount = 8;
 inline constexpr std::size_t kPursuitObjectiveCapacity = 7;
+/** Sources one unlockValues request reads: a 4-byte header and nine 4-byte sources fill it. */
+inline constexpr std::size_t kUnlockReadCapacity = 9;
 /** An item whose definition names no installed bucket. */
 inline constexpr std::uint8_t kNoBucket = 0xFF;
 /** A character item that occupies no equipment slot. */
@@ -64,6 +66,7 @@ enum class Opcode : std::uint32_t {
     readReceipt,
     acknowledgeReceipt,
     withdrawOperation,
+    unlockValues,
     count,
 };
 static_assert(static_cast<std::uint32_t>(Opcode::count) <= 64);
@@ -86,6 +89,15 @@ enum class ReceiptState : std::uint32_t {
 enum class Wait : std::uint32_t { none, publicationPeer, accountResync, responseCapacity, catalog };
 
 enum class InventoryScope : std::uint8_t { profile, characterItem, characterStack };
+
+/** What one source reads; zero is never valid, so unused sources stay zero. */
+enum class UnlockKind : std::uint8_t { flag = 1, value };
+
+/** Saved bank of one source, bound from the installed slot tables; a value names no profile row. */
+enum class UnlockBank : std::uint8_t { account = 1, profile, character };
+
+/** Invalid: the bank cannot hold this kind or the index is outside its capacity. */
+enum class UnlockReadState : std::uint8_t { invalid, known };
 
 /** Why a held pursuit's completion stands where it does, in the game's priority order. */
 enum class PursuitReason : std::uint16_t {
@@ -237,13 +249,35 @@ static_assert(sizeof(ResetSeasonPassClaimRequest) == 8
               && offsetof(ResetSeasonPassClaimRequest, reserved) == 3
               && offsetof(ResetSeasonPassClaimRequest, itemHash) == 4);
 
+/** The index is a row of the named bank. */
+struct UnlockSource final {
+    UnlockKind kind{};
+    UnlockBank bank{};
+    std::uint16_t index{};
+};
+static_assert(sizeof(UnlockSource) == 4 && offsetof(UnlockSource, bank) == 1
+              && offsetof(UnlockSource, index) == 2);
+
+/** Sources after count stay zero. */
+struct UnlockValuesRequest final {
+    std::uint16_t count{};
+    std::uint16_t reserved{};
+    std::array<UnlockSource, kUnlockReadCapacity> sources{};
+};
+static_assert(sizeof(UnlockValuesRequest) == 40);
+static_assert(offsetof(UnlockValuesRequest, reserved) == 2
+              && offsetof(UnlockValuesRequest, sources) == 4);
+
 inline constexpr std::size_t kRequestPayloadBytes =
     (std::max)({sizeof(GrantItemRequest),
                 sizeof(SetQuantityRequest),
                 sizeof(SetSeasonalExperienceRequest),
                 sizeof(ClaimSeasonPassRewardRequest),
-                sizeof(ResetSeasonPassClaimRequest)});
+                sizeof(ResetSeasonPassClaimRequest),
+                sizeof(UnlockValuesRequest)});
 static_assert(kRequestPayloadBytes == 40);
+static_assert(sizeof(UnlockValuesRequest) == kRequestPayloadBytes,
+              "kUnlockReadCapacity sources fill the request payload");
 
 /** @return The payload size a request with this opcode carries; zero for those with none. */
 [[nodiscard]] constexpr std::size_t request_bytes(Opcode opcode) noexcept {
@@ -258,6 +292,8 @@ static_assert(kRequestPayloadBytes == 40);
         return sizeof(ClaimSeasonPassRewardRequest);
     case Opcode::resetSeasonPassClaim:
         return sizeof(ResetSeasonPassClaimRequest);
+    case Opcode::unlockValues:
+        return sizeof(UnlockValuesRequest);
     default:
         return 0;
     }
@@ -497,11 +533,36 @@ static_assert(offsetof(Receipt, opcode) == 8 && offsetof(Receipt, state) == 12
               && offsetof(Receipt, family4Version) == 24 && offsetof(Receipt, changedRows) == 28
               && offsetof(Receipt, submittedTick) == 32 && offsetof(Receipt, finishedTick) == 40);
 
+struct UnlockValue final {
+    UnlockReadState state{};
+    std::uint8_t reserved{};
+    std::uint16_t reserved2{};
+    /** A flag reads 0 or 1. */
+    std::int32_t value{};
+};
+static_assert(sizeof(UnlockValue) == 8);
+static_assert(offsetof(UnlockValue, reserved) == 1 && offsetof(UnlockValue, reserved2) == 2
+              && offsetof(UnlockValue, value) == 4);
+
+/** Value i answers request source i, all read from one saved state of the selected character. */
+struct UnlockValues final {
+    std::uint16_t count{};
+    std::uint16_t reserved{};
+    std::uint32_t reserved2{};
+    std::uint64_t investmentRevision{};
+    std::array<UnlockValue, kUnlockReadCapacity> values{};
+};
+static_assert(sizeof(UnlockValues) == 88);
+static_assert(offsetof(UnlockValues, reserved) == 2 && offsetof(UnlockValues, reserved2) == 4
+              && offsetof(UnlockValues, investmentRevision) == 8
+              && offsetof(UnlockValues, values) == 16);
+
 inline constexpr std::size_t kResponsePayloadBytes = (std::max)({sizeof(Hello),
                                                                  sizeof(InventorySnapshot),
                                                                  sizeof(SeasonPassSnapshot),
                                                                  sizeof(PursuitSnapshot),
-                                                                 sizeof(Receipt)});
+                                                                 sizeof(Receipt),
+                                                                 sizeof(UnlockValues)});
 static_assert(kResponsePayloadBytes == 58'632);
 
 // --- The mapping ---

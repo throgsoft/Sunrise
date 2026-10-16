@@ -114,6 +114,7 @@
     <ClCompile Include="src\state\build_data\pursuits\pursuit_build_data_runtime.cpp" />
     <ClCompile Include="src\state\runtime\pursuit_completion_runtime.cpp" />
     <ClCompile Include="src\state\runtime\pursuit_snapshot_runtime.cpp" />
+    <ClCompile Include="src\state\runtime\pursuit_edit.cpp" />
     <ClCompile Include="src\state\runtime\season_pass_snapshot_runtime.cpp" />
     <ClCompile Include="src\client\diagnostics\studio\studio_link.cpp" />
     <ClCompile Include="src\client\diagnostics\studio\studio_world_reader.cpp" />
@@ -1381,6 +1382,7 @@
     <ClInclude Include="src\state\build_data\objectives\definition.h" />
     <ClInclude Include="src\state\build_data\pursuits\definition.h" />
     <ClInclude Include="src\state\runtime\pursuit_completion_runtime.h" />
+    <ClInclude Include="src\state\runtime\pursuit_edit.h" />
     <ClInclude Include="src\state\runtime\pursuit_snapshot_runtime.h" />
     <ClInclude Include="src\state\runtime\season_pass_snapshot_runtime.h" />
     <ClInclude Include="resources\resource.h" />

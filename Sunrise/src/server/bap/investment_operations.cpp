@@ -25,7 +25,7 @@ namespace {
 template <InvestmentOperationKind kind>
 using KindRequest = std::variant_alternative_t<static_cast<std::size_t>(kind), InvestmentRequest>;
 static_assert(std::variant_size_v<InvestmentRequest>
-              == static_cast<std::size_t>(InvestmentOperationKind::resetSeasonPassClaim) + 1);
+              == static_cast<std::size_t>(InvestmentOperationKind::completePursuitObjectives) + 1);
 static_assert(std::is_same_v<KindRequest<InvestmentOperationKind::grantItem>, GrantItemOperation>);
 static_assert(std::is_same_v<KindRequest<InvestmentOperationKind::setQuantity>,
                              state::account::inventory::QuantityEdit>);
@@ -35,6 +35,10 @@ static_assert(std::is_same_v<KindRequest<InvestmentOperationKind::claimSeasonPas
                              SeasonPassClaimOperation>);
 static_assert(std::is_same_v<KindRequest<InvestmentOperationKind::resetSeasonPassClaim>,
                              SeasonPassResetOperation>);
+static_assert(std::is_same_v<KindRequest<InvestmentOperationKind::setPursuitObjective>,
+                             ObjectiveProgressOperation>);
+static_assert(std::is_same_v<KindRequest<InvestmentOperationKind::completePursuitObjectives>,
+                             ObjectiveCompletionOperation>);
 
 /** One submitted operation and where it stands. */
 struct RetainedOperation {
@@ -229,6 +233,31 @@ check_request(const state::account::inventory::QuantityEdit& edit,
         return refused_transition("reward_hash");
     }
     return {};
+}
+
+/** A pursuit edit names an installed item; State checks the held copy when the edit runs. */
+[[nodiscard]] InvestmentTransition check_pursuit_item(std::uint32_t itemHash) noexcept {
+    if (!state::build_data::item_definitions_ready()
+        || !state::build_data::objective_definitions_ready()
+        || !state::build_data::pursuit_definitions_ready()) {
+        return deferred_transition(InvestmentWait::catalog);
+    }
+    state::build_data::items::Definition item{};
+    return state::build_data::find_item_definition_hash(itemHash, item)
+               ? InvestmentTransition{}
+               : refused_transition("item_definition");
+}
+
+/** The objective, its source and the value it replaces are State's to check. */
+[[nodiscard]] InvestmentTransition check_request(const ObjectiveProgressOperation& request,
+                                                 const InvestmentTarget& /*target*/) noexcept {
+    return check_pursuit_item(request.itemHash);
+}
+
+/** Which objectives are incomplete is State's to decide. */
+[[nodiscard]] InvestmentTransition check_request(const ObjectiveCompletionOperation& request,
+                                                 const InvestmentTarget& /*target*/) noexcept {
+    return check_pursuit_item(request.itemHash);
 }
 
 /** @return The operation's request checked against its kind's rules. */

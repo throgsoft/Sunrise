@@ -14,6 +14,7 @@
 #include "../../../../state/build_data/runtime.h"
 #include "../../../../state/investment/store_internal.h"
 #include "../../../../state/progression/season_pass_reward_catalog.h"
+#include "../../../../state/runtime/pursuit_edit.h"
 #include "../../../../state/runtime/runtime.h"
 #include "../transactions/service_outcome_commit.h"
 #include "queuez_item_grant_push.h"
@@ -376,6 +377,80 @@ commit_and_publish(state::investment::store::Transaction& transaction,
     }
     return commit_and_publish(
         transaction, frame, kEditedRowCount, session, scratch, response, written);
+}
+
+/** Publishes the objects a pursuit edit changed, then commits the operation's savepoint. */
+[[nodiscard]] InvestmentTransition
+publish_pursuit_edit(state::investment::store::Transaction& transaction,
+                     const state::PursuitEditChange& change,
+                     Session& session,
+                     Scratch& scratch,
+                     std::span<std::byte> response,
+                     std::size_t& written) noexcept {
+    StagedFrame frame{};
+    const char* reason = nullptr;
+    if (!stage_changed_objects(
+            {change.accountSoid, change.characterSoid, change.characterIndex, change.accountRows},
+            session,
+            scratch,
+            frame,
+            reason)) {
+        return refused_transition(reason);
+    }
+    return commit_and_publish(
+        transaction, frame, change.changedRows, session, scratch, response, written);
+}
+
+/** Replaces the saved row one objective of a held pursuit reads. */
+[[nodiscard]] InvestmentTransition publish_operation(const ObjectiveProgressOperation& request,
+                                                     const InvestmentTarget& target,
+                                                     Session& session,
+                                                     Scratch& scratch,
+                                                     std::span<std::byte> response,
+                                                     std::size_t& written,
+                                                     bool& touchesScratch) noexcept {
+    state::investment::store::Transaction transaction;
+    if (!transaction.ready()) {
+        return refused_transition("transaction");
+    }
+    state::PursuitEditChange change{};
+    const char* reason = nullptr;
+    if (!state::set_pursuit_objective(
+            {target.characterSoid, request.instanceSoid, request.itemHash, request.mutationSerial},
+            request.ordinal,
+            request.objectiveHash,
+            request.expected,
+            request.value,
+            change,
+            &reason)) {
+        return state_refusal_transition(reason);
+    }
+    touchesScratch = true;
+    return publish_pursuit_edit(transaction, change, session, scratch, response, written);
+}
+
+/** Sets each incomplete objective of a held pursuit to its target; the pursuit is not redeemed. */
+[[nodiscard]] InvestmentTransition publish_operation(const ObjectiveCompletionOperation& request,
+                                                     const InvestmentTarget& target,
+                                                     Session& session,
+                                                     Scratch& scratch,
+                                                     std::span<std::byte> response,
+                                                     std::size_t& written,
+                                                     bool& touchesScratch) noexcept {
+    state::investment::store::Transaction transaction;
+    if (!transaction.ready()) {
+        return refused_transition("transaction");
+    }
+    state::PursuitEditChange change{};
+    const char* reason = nullptr;
+    if (!state::complete_pursuit_objectives(
+            {target.characterSoid, request.instanceSoid, request.itemHash, request.mutationSerial},
+            change,
+            &reason)) {
+        return state_refusal_transition(reason);
+    }
+    touchesScratch = true;
+    return publish_pursuit_edit(transaction, change, session, scratch, response, written);
 }
 
 /**

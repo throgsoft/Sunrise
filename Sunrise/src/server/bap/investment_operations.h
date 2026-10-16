@@ -51,6 +51,28 @@ struct SeasonPassResetOperation {
     bool operator==(const SeasonPassResetOperation&) const = default;
 };
 
+/** Replaces the saved row one objective of one held pursuit reads. */
+struct ObjectiveProgressOperation {
+    std::uint64_t instanceSoid{};
+    std::uint32_t itemHash{};
+    std::int32_t mutationSerial{};
+    std::uint32_t objectiveHash{};
+    std::uint8_t ordinal{};
+    std::int32_t expected{};
+    std::int32_t value{};
+
+    bool operator==(const ObjectiveProgressOperation&) const = default;
+};
+
+/** Sets every incomplete objective of one held pursuit to its target. */
+struct ObjectiveCompletionOperation {
+    std::uint64_t instanceSoid{};
+    std::uint32_t itemHash{};
+    std::int32_t mutationSerial{};
+
+    bool operator==(const ObjectiveCompletionOperation&) const = default;
+};
+
 /** What one operation changes, in the order of InvestmentRequest's alternatives. */
 enum class InvestmentOperationKind : std::uint8_t {
     grantItem,
@@ -58,6 +80,8 @@ enum class InvestmentOperationKind : std::uint8_t {
     setSeasonalExperience,
     claimSeasonPassReward,
     resetSeasonPassClaim,
+    setPursuitObjective,
+    completePursuitObjectives,
 };
 
 /** One operation's request; each alternative's position is its InvestmentOperationKind. */
@@ -65,7 +89,9 @@ using InvestmentRequest = std::variant<GrantItemOperation,
                                        state::account::inventory::QuantityEdit,
                                        SeasonalExperienceOperation,
                                        SeasonPassClaimOperation,
-                                       SeasonPassResetOperation>;
+                                       SeasonPassResetOperation,
+                                       ObjectiveProgressOperation,
+                                       ObjectiveCompletionOperation>;
 
 /** One editor operation, copied out of the editor mapping before it is submitted. */
 struct InvestmentOperation {
@@ -108,7 +134,7 @@ struct InvestmentReceipt {
     const char* reason{""};
     /** Family-4 version of the frame that published the operation; zero until published. */
     std::int32_t family4Version{};
-    /** Inventory rows granted or edited; one for an XP total or a pass flag. */
+    /** Inventory or unlock rows granted or edited; one for an XP total or a pass flag. */
     std::uint32_t changedRows{};
     std::uint64_t submittedTick{};
     /** Zero while the operation is pending. */

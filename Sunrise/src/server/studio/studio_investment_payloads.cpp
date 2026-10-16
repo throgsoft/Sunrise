@@ -343,6 +343,10 @@ pursuit_objective(const state::PursuitObjectiveStatus& objective) noexcept {
         return wire::Opcode::claimSeasonPassReward;
     case bap::InvestmentOperationKind::resetSeasonPassClaim:
         return wire::Opcode::resetSeasonPassClaim;
+    case bap::InvestmentOperationKind::setPursuitObjective:
+        return wire::Opcode::setPursuitObjective;
+    case bap::InvestmentOperationKind::completePursuitObjectives:
+        return wire::Opcode::completePursuitObjectives;
     }
     return wire::Opcode::none;
 }

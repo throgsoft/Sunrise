@@ -67,6 +67,8 @@ enum class Opcode : std::uint32_t {
     acknowledgeReceipt,
     withdrawOperation,
     unlockValues,
+    setPursuitObjective,
+    completePursuitObjectives,
     count,
 };
 static_assert(static_cast<std::uint32_t>(Opcode::count) <= 64);
@@ -172,7 +174,8 @@ enum ObjectiveFlags : std::uint8_t {
 
 /** @return True for opcodes that submit an operation against an expected context. */
 [[nodiscard]] constexpr bool is_mutation(Opcode opcode) noexcept {
-    return opcode >= Opcode::grantItem && opcode <= Opcode::resetSeasonPassClaim;
+    return (opcode >= Opcode::grantItem && opcode <= Opcode::resetSeasonPassClaim)
+           || opcode == Opcode::setPursuitObjective || opcode == Opcode::completePursuitObjectives;
 }
 
 /** @return True for opcodes that name an earlier mutation's operation id. */
@@ -268,13 +271,47 @@ static_assert(sizeof(UnlockValuesRequest) == 40);
 static_assert(offsetof(UnlockValuesRequest, reserved) == 2
               && offsetof(UnlockValuesRequest, sources) == 4);
 
+/** One held pursuit's objective and the saved row value the editor read; a flag reads 0 or 1. */
+struct SetPursuitObjectiveRequest final {
+    std::uint64_t instanceSoid{};
+    std::uint32_t itemHash{};
+    std::int32_t expectedSerial{};
+    std::uint32_t objectiveHash{};
+    /** Position in the installed contract, below kPursuitObjectiveCapacity. */
+    std::uint8_t ordinal{};
+    std::uint8_t reserved{};
+    std::uint16_t reserved2{};
+    std::int32_t expected{};
+    std::int32_t value{};
+};
+static_assert(sizeof(SetPursuitObjectiveRequest) == 32);
+static_assert(offsetof(SetPursuitObjectiveRequest, itemHash) == 8
+              && offsetof(SetPursuitObjectiveRequest, expectedSerial) == 12
+              && offsetof(SetPursuitObjectiveRequest, objectiveHash) == 16
+              && offsetof(SetPursuitObjectiveRequest, ordinal) == 20
+              && offsetof(SetPursuitObjectiveRequest, reserved) == 21
+              && offsetof(SetPursuitObjectiveRequest, reserved2) == 22
+              && offsetof(SetPursuitObjectiveRequest, expected) == 24
+              && offsetof(SetPursuitObjectiveRequest, value) == 28);
+
+struct CompletePursuitObjectivesRequest final {
+    std::uint64_t instanceSoid{};
+    std::uint32_t itemHash{};
+    std::int32_t expectedSerial{};
+};
+static_assert(sizeof(CompletePursuitObjectivesRequest) == 16);
+static_assert(offsetof(CompletePursuitObjectivesRequest, itemHash) == 8
+              && offsetof(CompletePursuitObjectivesRequest, expectedSerial) == 12);
+
 inline constexpr std::size_t kRequestPayloadBytes =
     (std::max)({sizeof(GrantItemRequest),
                 sizeof(SetQuantityRequest),
                 sizeof(SetSeasonalExperienceRequest),
                 sizeof(ClaimSeasonPassRewardRequest),
                 sizeof(ResetSeasonPassClaimRequest),
-                sizeof(UnlockValuesRequest)});
+                sizeof(UnlockValuesRequest),
+                sizeof(SetPursuitObjectiveRequest),
+                sizeof(CompletePursuitObjectivesRequest)});
 static_assert(kRequestPayloadBytes == 40);
 static_assert(sizeof(UnlockValuesRequest) == kRequestPayloadBytes,
               "kUnlockReadCapacity sources fill the request payload");
@@ -294,6 +331,10 @@ static_assert(sizeof(UnlockValuesRequest) == kRequestPayloadBytes,
         return sizeof(ResetSeasonPassClaimRequest);
     case Opcode::unlockValues:
         return sizeof(UnlockValuesRequest);
+    case Opcode::setPursuitObjective:
+        return sizeof(SetPursuitObjectiveRequest);
+    case Opcode::completePursuitObjectives:
+        return sizeof(CompletePursuitObjectivesRequest);
     default:
         return 0;
     }

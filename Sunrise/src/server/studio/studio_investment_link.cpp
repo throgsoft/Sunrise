@@ -35,7 +35,9 @@ constexpr std::uint64_t kAdvertisedCapabilities =
     | wire::capability(wire::Opcode::readReceipt)
     | wire::capability(wire::Opcode::acknowledgeReceipt)
     | wire::capability(wire::Opcode::withdrawOperation)
-    | wire::capability(wire::Opcode::unlockValues);
+    | wire::capability(wire::Opcode::unlockValues)
+    | wire::capability(wire::Opcode::setPursuitObjective)
+    | wire::capability(wire::Opcode::completePursuitObjectives);
 
 HANDLE g_mapping{};
 wire::SharedInvestment* g_view{};
@@ -223,6 +225,27 @@ template <typename Payload>
         operation.request = bap::SeasonPassResetOperation{reset.rowIndex, reset.itemHash};
         return true;
     }
+    case wire::Opcode::setPursuitObjective: {
+        const auto edit = payload_of<wire::SetPursuitObjectiveRequest>(request);
+        if (edit.ordinal >= wire::kPursuitObjectiveCapacity || edit.reserved != 0
+            || edit.reserved2 != 0) {
+            return false;
+        }
+        operation.request = bap::ObjectiveProgressOperation{edit.instanceSoid,
+                                                            edit.itemHash,
+                                                            edit.expectedSerial,
+                                                            edit.objectiveHash,
+                                                            edit.ordinal,
+                                                            edit.expected,
+                                                            edit.value};
+        return true;
+    }
+    case wire::Opcode::completePursuitObjectives: {
+        const auto completion = payload_of<wire::CompletePursuitObjectivesRequest>(request);
+        operation.request = bap::ObjectiveCompletionOperation{
+            completion.instanceSoid, completion.itemHash, completion.expectedSerial};
+        return true;
+    }
     default:
         return false;
     }
@@ -313,7 +336,9 @@ template <typename Payload>
     case wire::Opcode::setQuantity:
     case wire::Opcode::setSeasonalExperience:
     case wire::Opcode::claimSeasonPassReward:
-    case wire::Opcode::resetSeasonPassClaim: {
+    case wire::Opcode::resetSeasonPassClaim:
+    case wire::Opcode::setPursuitObjective:
+    case wire::Opcode::completePursuitObjectives: {
         bap::InvestmentOperation operation{};
         if (!decode_operation(request, operation)) {
             return invalid("request_field");

@@ -264,12 +264,19 @@ struct HeldPursuit {
     return saved_row(source, bank);
 }
 
-/** @return True when every objective the contract requires reads complete. */
-[[nodiscard]] bool required_objectives_complete(const PursuitCompletionStatus& status) noexcept {
-    const auto objectives = std::span(status.objectives).first(status.objectiveCount);
-    return std::all_of(objectives.begin(), objectives.end(), [](const PursuitObjectiveStatus& row) {
-        return row.skipped || row.complete;
-    });
+/** @return True when every required objective reads complete; optional ones never gate it. */
+[[nodiscard]] bool required_objectives_complete(const HeldPursuit& held,
+                                                const PursuitCompletionStatus& status) noexcept {
+    for (std::size_t ordinal = 0; ordinal < held.contract.objectives.size(); ++ordinal) {
+        objectives::Definition objective{};
+        if (!build_data::find_objective_definition(held.contract.objectives[ordinal], objective)) {
+            return false;
+        }
+        if (!objective.optional && !status.objectives[ordinal].complete) {
+            return false;
+        }
+    }
+    return true;
 }
 
 } // namespace
@@ -367,7 +374,7 @@ bool complete_pursuit_objectives(const PursuitIdentity& identity,
         return false;
     }
     reason = "objective_target";
-    if (!required_objectives_complete(status)) {
+    if (!required_objectives_complete(held, status)) {
         return false;
     }
     reason = "transaction";

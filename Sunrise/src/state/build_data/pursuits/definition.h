@@ -1,8 +1,8 @@
 #pragma once
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
-#include <vector>
 
 #include "../../unlocks/unlocks_expression.h"
 #include "../items/details/definition.h"
@@ -11,10 +11,10 @@ namespace sunrise::state::build_data::pursuits {
 
 /** Native item, value and operation references use all bits set for an absent row. */
 inline constexpr std::uint16_t kAbsent = items::details::kUnavailableItemIndex;
+/** The shipped build declares 1,941 pursuit contracts. The domain leaves room above that. */
+inline constexpr std::size_t kDefinitionCapacity = 4096;
 /** The installed pursuit objective block supports seven displayed objectives. */
 inline constexpr std::size_t kObjectiveCapacity = 7;
-/** The serialized reward-preview block has six fixed slots. */
-inline constexpr std::size_t kRewardCapacity = 6;
 
 /** A native value reference and its independently resolved saved or computed source. */
 struct ValueReference {
@@ -36,15 +36,6 @@ struct OperationReference {
     OperationAvailability availability{OperationAvailability::absent};
 };
 
-/** A displayed reward is evidence about the preview, never an executable grant. */
-struct RewardPreview {
-    std::uint16_t itemIndex{kAbsent};
-    std::int32_t quantity{};
-    std::uint16_t conditionIndex{kAbsent};
-    bool conditionReadable{};
-    std::vector<unlocks::Instruction> condition;
-};
-
 /** Installed completion contract for one item, including explicitly unresolved effect edges. */
 struct Definition {
     std::uint16_t definitionIndex{kAbsent};
@@ -56,15 +47,15 @@ struct Definition {
     bool requireAllObjectives{};
     bool requireNonOptionalCompletion{};
     bool automaticCompletion{};
-    std::vector<std::uint16_t> objectives;
+    /** Objective-table indices; slots past objectiveCount stay zero. */
+    std::array<std::uint16_t, kObjectiveCapacity> objectives{};
+    std::uint8_t objectiveCount{};
     /** Unless suppressed, absence removes the step; a present value is incremented by one. */
     ValueReference completionValue;
     ValueReference completionContextValue;
     /** Native completion invokes the secondary reference before the primary reference. */
     OperationReference secondaryOperation;
     OperationReference primaryOperation;
-    bool rewardsReadable{};
-    std::vector<RewardPreview> rewards;
 };
 
 } // namespace sunrise::state::build_data::pursuits

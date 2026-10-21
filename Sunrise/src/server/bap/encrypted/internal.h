@@ -176,10 +176,6 @@ struct ServiceOutcome {
 
     bool hasSelectCharacter{};
 
-    /** Static label of the Web Service action the handler refused, or null. */
-
-    const char* refusal{};
-
     /** One service owns at most one independently versioned, exact-sized transaction. */
 
     using Transaction = std::variant<std::monostate,
@@ -395,6 +391,20 @@ process(const ServiceRoute& route,
         ServiceOutcome& outcome,
 
         std::span<const state::account::inventory::PresentedItemRow> presentation = {}) noexcept;
+
+/**
+ * Emplaces an opcode-2400 claim transaction and stages its Queuez after-image.
+ * @param claim A prepared claim; the caller moves it into the returned transaction.
+ * @return The staged transaction, or null with nothing left in the outcome.
+ */
+
+[[nodiscard]] SeasonPassRewardTransaction*
+
+stage_season_pass_reward(const queuez::SessionState& queuezState,
+
+                         const state::PendingSeasonPassReward& claim,
+
+                         ServiceOutcome& outcome) noexcept;
 
 } // namespace body
 

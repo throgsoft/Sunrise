@@ -20,6 +20,7 @@ Table<Item, kItemCapacity> g_items;
 Table<Instruction, kInstructionCapacity> g_instructions;
 Table<Modifier, kModifierCapacity> g_modifiers;
 Table<SocketOverride, kSocketOverrideCapacity> g_sockets;
+bool g_unsupported{};
 
 /** Borrows every published bank; the caller holds the catalog lock. */
 View view() noexcept {
@@ -90,7 +91,7 @@ bool valid_item(View data, const Item& item) noexcept {
 
 } // namespace
 
-/** Discards the reward graph and every borrowed bank. */
+/** Discards the reward graph and every borrowed bank, and forgets an unsupported settlement. */
 void clear() noexcept {
     const std::lock_guard guard(g_lock);
     g_pools.clear();
@@ -99,12 +100,25 @@ void clear() noexcept {
     g_instructions.clear();
     g_modifiers.clear();
     g_sockets.clear();
+    g_unsupported = false;
 }
 
 /** @return True once pool and item banks have been published. */
 bool ready() noexcept {
     const std::shared_lock guard(g_lock);
     return g_pools.count() != 0 && g_items.count() != 0;
+}
+
+/** @return True once the installed data has settled that no reward graph can be read. */
+bool unsupported() noexcept {
+    const std::shared_lock guard(g_lock);
+    return g_unsupported;
+}
+
+/** Records that the installed data supports no reward graph. */
+void settle_unsupported() noexcept {
+    const std::lock_guard guard(g_lock);
+    g_unsupported = true;
 }
 
 /** Checks bank ranges, item references and bounded acyclic pool and wrapper traversal. */

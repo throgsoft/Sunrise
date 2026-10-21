@@ -135,7 +135,7 @@ struct HeldPursuit {
     reason = "pursuit_contract";
     if (!build_data::find_pursuit_definition(item.definitionIndex, held.contract)
         || !held.contract.readable || held.contract.definitionHash != identity.definitionHash
-        || held.contract.objectives.size() > pursuits::kObjectiveCapacity) {
+        || held.contract.objectiveCount > pursuits::kObjectiveCapacity) {
         return false;
     }
     // Without a saved deadline an expired bounty cannot be told apart, so none is edited.
@@ -242,7 +242,7 @@ struct HeldPursuit {
                                  const char*& reason) noexcept {
     reason = "objective_changed";
     objectives::Definition objective{};
-    if (ordinal >= held.contract.objectives.size()
+    if (ordinal >= held.contract.objectiveCount
         || !build_data::find_objective_definition(held.contract.objectives[ordinal], objective)
         || objective.definitionHash != objectiveHash) {
         return false;
@@ -267,7 +267,7 @@ struct HeldPursuit {
 /** @return True when every required objective reads complete; optional ones never gate it. */
 [[nodiscard]] bool required_objectives_complete(const HeldPursuit& held,
                                                 const PursuitCompletionStatus& status) noexcept {
-    for (std::size_t ordinal = 0; ordinal < held.contract.objectives.size(); ++ordinal) {
+    for (std::size_t ordinal = 0; ordinal < held.contract.objectiveCount; ++ordinal) {
         objectives::Definition objective{};
         if (!build_data::find_objective_definition(held.contract.objectives[ordinal], objective)) {
             return false;
@@ -357,7 +357,7 @@ bool complete_pursuit_objectives(const PursuitIdentity& identity,
     unlocks::Table values;
     PursuitEditChange edited{account.primarySoid, identity.characterSoid, held.characterIndex};
     bool incomplete = false;
-    for (std::size_t ordinal = 0; ordinal < held.contract.objectives.size(); ++ordinal) {
+    for (std::size_t ordinal = 0; ordinal < held.contract.objectiveCount; ++ordinal) {
         if (!complete_objective(held, ordinal, values, incomplete, edited, reason)) {
             return false;
         }

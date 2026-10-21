@@ -48,15 +48,4 @@ struct SeasonPassSnapshot {
 [[nodiscard]] bool read_season_pass_snapshot(SeasonPassSnapshot& output,
                                              const char** refusal = nullptr) noexcept;
 
-/**
- * Applies the opcode-2400 claim's rules that need no draw, so a claim can be refused before it
- * is queued.
- * @param rewardIndex Native reward-array index.
- * @param itemHash Item the row is expected to grant.
- * @param refusal Receives a static reason on failure.
- */
-[[nodiscard]] bool season_pass_reward_claimable(std::uint16_t rewardIndex,
-                                                std::uint32_t itemHash,
-                                                const char** refusal = nullptr) noexcept;
-
 } // namespace sunrise::state

@@ -24,7 +24,7 @@ enum class PursuitObjectiveUnknown : std::uint8_t {
     sourceUnavailable,
 };
 
-/** Why a pursuit's completion stands where it does. The values are stable for external readers. */
+/** Why a pursuit's completion stands where it does, in the game's priority order. */
 enum class PursuitCompletionReason : std::uint8_t {
     contractUnavailable,
     operationBodyUnavailable,

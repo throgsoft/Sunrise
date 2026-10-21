@@ -19,7 +19,9 @@
 #include "../../items/socket_plugs/socket_plug_catalog.h"
 #include "../../material_requirements/material_requirement_catalog.h"
 #include "../../nodes/node_catalog.h"
+#include "../../objectives/objective_catalog.h"
 #include "../../progressions/progression_catalog.h"
+#include "../../pursuits/pursuit_catalog.h"
 #include "../../records/record_catalog.h"
 #include "../../rewards/reward_catalog.h"
 #include "../../runtime.h"
@@ -98,6 +100,9 @@ to_record(const constants::InvestmentConstants& value) noexcept {
            && rewards::snapshot(scratch.rewardInstructions, counts.rewardInstructions)
            && rewards::snapshot(scratch.rewardModifiers, counts.rewardModifiers)
            && rewards::snapshot(scratch.rewardSockets, counts.rewardSockets)
+           && objectives::snapshot(scratch.objectives, counts.objectives)
+           && objectives::snapshot(scratch.objectiveInstructions, counts.objectiveInstructions)
+           && pursuits::snapshot(scratch.pursuits, counts.pursuits)
            && records::snapshot(scratch.records, counts.records)
            && records::snapshot_objectives(scratch.recordObjectives, counts.recordObjectives)
            && records::snapshot_intervals(scratch.recordIntervals, counts.recordIntervals)
@@ -136,6 +141,8 @@ to_record(const constants::InvestmentConstants& value) noexcept {
            && reward_definitions_ready() && record_definitions_ready() && node_definitions_ready()
            && sobject_definitions_ready() && scenario_layouts_ready() && spawn_sets_ready()
            && hash_names_ready() && vendor_catalog_ready()
+           && (pursuit_catalog_unsupported()
+               || (objective_definitions_ready() && pursuit_definitions_ready()))
            && gameplay::entity_position_profiles::available()
            && gameplay::entity_object_types::available() && constants::find(published);
 }
@@ -287,6 +294,10 @@ cache::records::MutableDomains scratch_domains(Context& state) noexcept {
         ensure_scratch<rewards::Modifier, rewards::kModifierCapacity>(state.rewardModifierScratch),
         ensure_scratch<rewards::SocketOverride, rewards::kSocketOverrideCapacity>(
             state.rewardSocketScratch),
+        ensure_scratch<objectives::Row, objectives::kDefinitionCapacity>(state.objectiveScratch),
+        ensure_scratch<unlocks::Instruction, objectives::kInstructionCapacity>(
+            state.objectiveInstructionScratch),
+        ensure_scratch<pursuits::Definition, pursuits::kDefinitionCapacity>(state.pursuitScratch),
     };
 }
 
@@ -323,6 +334,9 @@ void release_scratch_locked(Context& state) noexcept {
     release_bank(state.rewardInstructionScratch);
     release_bank(state.rewardModifierScratch);
     release_bank(state.rewardSocketScratch);
+    release_bank(state.objectiveScratch);
+    release_bank(state.objectiveInstructionScratch);
+    release_bank(state.pursuitScratch);
     release_bank(state.recordScratch);
     release_bank(state.recordObjectiveScratch);
     release_bank(state.recordIntervalScratch);
@@ -437,6 +451,10 @@ cache::records::Domains occupied_domains(Context& state,
                                            counts.rewardModifiers},
         std::span<const rewards::SocketOverride>{state.rewardSocketScratch.data(),
                                                  counts.rewardSockets},
+        std::span<const objectives::Row>{state.objectiveScratch.data(), counts.objectives},
+        std::span<const unlocks::Instruction>{state.objectiveInstructionScratch.data(),
+                                              counts.objectiveInstructions},
+        std::span<const pursuits::Definition>{state.pursuitScratch.data(), counts.pursuits},
     };
 }
 

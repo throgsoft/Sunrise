@@ -1,154 +1,85 @@
-#include <algorithm>
-#include <mutex>
-#include <vector>
-
 #include "../../../core/logging/log.h"
+#include "../objectives/objective_catalog.h"
 #include "../runtime.h"
+#include "../runtime/persistence/publication_transaction.h"
+#include "pursuit_catalog.h"
 
 namespace sunrise::state::build_data {
 namespace {
 
-/** Process-local: contracts are rebuilt from the installed packages on every startup. */
-std::mutex g_pursuitMutex;
-std::vector<pursuits::Definition> g_pursuitDefinitions;
-bool g_pursuitsReady{};
-std::uint64_t g_pursuitsRevision{};
-
-/** An unbound native reference remains inspectable without pretending it is a saved value. */
-[[nodiscard]] bool valid_pursuit_value(const pursuits::ValueReference& value) noexcept {
-    if (value.index == pursuits::kAbsent) {
-        return !value.bound;
-    }
-    return !value.bound
-           || (value.source.opcode == unlocks::Opcode::loadValue && unlocks::valid(value.source));
-}
-
-/** Only an authored absent index can carry the absent status. */
-[[nodiscard]] bool valid_pursuit_operation(const pursuits::OperationReference& operation) noexcept {
-    switch (operation.availability) {
-    case pursuits::OperationAvailability::absent:
-        return operation.index == pursuits::kAbsent;
-    case pursuits::OperationAvailability::missingTable:
-    case pursuits::OperationAvailability::unresolvedBody:
-    case pursuits::OperationAvailability::invalidReference:
-        return operation.index != pursuits::kAbsent;
-    }
-    return false;
-}
-
-/** A shared condition index is readable either as a nonempty program or not at all. */
-[[nodiscard]] bool valid_pursuit_reward(const pursuits::RewardPreview& reward) noexcept {
+/** Each contract must name the installed item it was read from. */
+[[nodiscard]] bool names_installed_item(const pursuits::Definition& row) noexcept {
     items::Definition item{};
-    if (!find_item_definition_index(reward.itemIndex, item) || reward.quantity < 0
-        || !std::all_of(reward.condition.begin(), reward.condition.end(), unlocks::valid)) {
-        return false;
-    }
-    if (reward.conditionIndex == pursuits::kAbsent) {
-        return reward.conditionReadable && reward.condition.empty();
-    }
-    return reward.conditionReadable != reward.condition.empty();
+    return find_item_definition_index(row.definitionIndex, item)
+           && item.definitionHash == row.definitionHash;
 }
 
-/** Validates every declared edge before publishing the complete immutable mapping. */
-[[nodiscard]] bool valid_pursuit(const pursuits::Definition& row) noexcept {
-    items::Definition item{};
-    if (!find_item_definition_index(row.definitionIndex, item)
-        || item.definitionHash != row.definitionHash || row.lifetimeSeconds < 0
-        || row.objectives.size() > pursuits::kObjectiveCapacity
-        || row.rewards.size() > pursuits::kRewardCapacity
-        || !valid_pursuit_value(row.completionValue)
-        || !valid_pursuit_value(row.completionContextValue)
-        || !valid_pursuit_operation(row.secondaryOperation)
-        || !valid_pursuit_operation(row.primaryOperation)
-        || (!row.rewardsReadable && !row.rewards.empty())) {
-        return false;
-    }
-    for (const std::uint16_t index : row.objectives) {
-        objectives::Definition objective{};
-        if (!find_objective_definition(index, objective)) {
-            return false;
-        }
-    }
-    return std::all_of(row.rewards.begin(), row.rewards.end(), valid_pursuit_reward);
+/** Drops both tables after a failed first cache write. */
+void clear_pursuit_catalog() noexcept {
+    objectives::clear();
+    pursuits::clear();
 }
 
 } // namespace
 
+/** @return True when the pursuit contracts are published. */
 bool pursuit_definitions_ready() noexcept {
-    const std::lock_guard lock(g_pursuitMutex);
-    return g_pursuitsReady;
+    return pursuits::ready();
 }
 
-std::size_t pursuit_definition_count() noexcept {
-    const std::lock_guard lock(g_pursuitMutex);
-    return g_pursuitDefinitions.size();
+/** @return True once the installed data has settled that no contract can be read. */
+bool pursuit_catalog_unsupported() noexcept {
+    return pursuits::unsupported();
 }
 
+/** @return A generation that changes after every publication, settlement or clear. */
 std::uint64_t pursuit_definitions_revision() noexcept {
-    const std::lock_guard lock(g_pursuitMutex);
-    return g_pursuitsRevision;
+    return pursuits::revision();
 }
 
-bool publish_pursuit_definitions(std::span<const pursuits::Definition> rows) noexcept {
-    if (!item_definitions_ready() || !objective_definitions_ready()
-        || rows.size() > items::kDefinitionCapacity) {
+/** Logs the first contract that names another item than the one it was read from. */
+bool valid_pursuit_definitions(std::span<const pursuits::Definition> rows) noexcept {
+    if (!item_definitions_ready() || !objective_definitions_ready()) {
         return false;
     }
-    for (std::size_t i = 0; i < rows.size(); ++i) {
-        if (!valid_pursuit(rows[i])
-            || (i != 0 && rows[i - 1].definitionIndex >= rows[i].definitionIndex)) {
+    for (std::size_t index = 0; index < rows.size(); ++index) {
+        if (!names_installed_item(rows[index])) {
             core::log::writef(core::log::Channel::state,
                               core::log::Level::warn,
                               "ev=pursuit_definitions result=rejected item=%u row=%zu total=%zu",
-                              static_cast<unsigned>(rows[i].definitionIndex),
-                              i,
+                              static_cast<unsigned>(rows[index].definitionIndex),
+                              index,
                               rows.size());
             return false;
         }
     }
-    try {
-        std::vector<pursuits::Definition> prepared(rows.begin(), rows.end());
-        const std::lock_guard lock(g_pursuitMutex);
-        g_pursuitDefinitions.swap(prepared);
-        g_pursuitsReady = true;
-        ++g_pursuitsRevision;
-        return true;
-    } catch (...) {
-        core::log::writef(core::log::Channel::state,
-                          core::log::Level::warn,
-                          "ev=pursuit_definitions result=fail reason=storage rows=%zu",
-                          rows.size());
-        return false;
-    }
+    return pursuits::valid(rows, objectives::count());
 }
 
+/** Publishes the contracts once every edge is checked. */
+bool publish_pursuit_definitions(std::span<const pursuits::Definition> rows) noexcept {
+    if (!valid_pursuit_definitions(rows)) {
+        return false;
+    }
+    runtime::persistence::Transaction transaction;
+    return transaction.active()
+           && transaction.finish(pursuits::replace(rows, objectives::count()), pursuits::clear);
+}
+
+/** Withdraws the objective table too, since only contracts read it. */
+void settle_pursuit_catalog_unsupported() noexcept {
+    runtime::persistence::Transaction transaction;
+    if (!transaction.active()) {
+        return;
+    }
+    objectives::clear();
+    pursuits::settle_unsupported();
+    static_cast<void>(transaction.finish(true, clear_pursuit_catalog));
+}
+
+/** Copies one item's completion contract. */
 bool find_pursuit_definition(std::uint16_t index, pursuits::Definition& output) noexcept {
-    output = {};
-    const std::lock_guard lock(g_pursuitMutex);
-    const auto found = std::lower_bound(g_pursuitDefinitions.begin(),
-                                        g_pursuitDefinitions.end(),
-                                        index,
-                                        [](const auto& row, std::uint16_t wanted) noexcept {
-                                            return row.definitionIndex < wanted;
-                                        });
-    if (!g_pursuitsReady || found == g_pursuitDefinitions.end()
-        || found->definitionIndex != index) {
-        return false;
-    }
-    try {
-        output = *found;
-        return true;
-    } catch (...) {
-        output = {};
-        return false;
-    }
-}
-
-void clear_pursuit_definitions() noexcept {
-    const std::lock_guard lock(g_pursuitMutex);
-    g_pursuitDefinitions = {};
-    g_pursuitsReady = false;
-    ++g_pursuitsRevision;
+    return pursuits::find(index, output);
 }
 
 } // namespace sunrise::state::build_data

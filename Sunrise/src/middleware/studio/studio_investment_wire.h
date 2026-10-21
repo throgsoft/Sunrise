@@ -11,8 +11,12 @@ namespace sunrise::middleware::studio::investment_wire {
 
 /** Investment commands use their own local mapping and the ASCII magic SSIV. */
 inline constexpr std::uint32_t kMagic = 0x56495353;
-inline constexpr std::uint32_t kVersion = 1;
+inline constexpr std::uint32_t kVersion = 2;
 inline constexpr wchar_t kMappingFormat[] = L"Local\\SunriseStudio.Investment.%lu";
+/** A missing editor is looked for once a second. */
+inline constexpr std::uint64_t kConnectIntervalMs = 1'000;
+/** An editor that has not refreshed its heartbeat this long is gone. */
+inline constexpr std::uint64_t kHeartbeatTimeoutMs = 3'000;
 /** The NUL-terminated ASCII label a refusal or an invalid request carries. */
 inline constexpr std::size_t kReasonBytes = 64;
 
@@ -39,8 +43,6 @@ inline constexpr std::size_t kCharacterRecordCapacity = 3;
 inline constexpr std::size_t kSeasonPassRowCapacity = 256;
 /** Held pursuits are unequipped character instances. */
 inline constexpr std::size_t kHeldPursuitCapacity = 333;
-/** A native item instance carries eight objective values; lane 0 of a bounty is its expiry. */
-inline constexpr std::size_t kObjectiveLaneCount = 8;
 inline constexpr std::size_t kPursuitObjectiveCapacity = 7;
 /** Sources one unlockValues request reads: a 4-byte header and nine 4-byte sources fill it. */
 inline constexpr std::size_t kUnlockReadCapacity = 9;
@@ -74,7 +76,7 @@ enum class Opcode : std::uint32_t {
 static_assert(static_cast<std::uint32_t>(Opcode::count) <= 64);
 
 /** Transport outcome of one request; a mutation's own outcome is its receipt. */
-enum class Status : std::uint32_t { none, ok, invalid, unsupported, refused };
+enum class Status : std::uint32_t { none, ok, invalid, refused };
 
 /** Unknown means the game holds no receipt with that id in this process. */
 enum class ReceiptState : std::uint32_t {
@@ -82,13 +84,12 @@ enum class ReceiptState : std::uint32_t {
     queued,
     deferred,
     refused,
-    committed,
     published,
     committedUnpublished,
 };
 
 /** Why a non-terminal operation is waiting. */
-enum class Wait : std::uint32_t { none, publicationPeer, accountResync, responseCapacity, catalog };
+enum class Wait : std::uint32_t { none, publicationPeer, accountResync, catalog };
 
 enum class InventoryScope : std::uint8_t { profile, characterItem, characterStack };
 
@@ -152,13 +153,12 @@ enum SeasonPassRowFlags : std::uint16_t {
 
 enum PursuitFlags : std::uint16_t {
     pursuitBounty = 1,
-    pursuitExpired = 2,
-    pursuitBindingMatches = 4,
-    pursuitConditionsKnown = 8,
-    pursuitObjectivesKnown = 16,
-    pursuitObjectivesComplete = 32,
-    pursuitEligible = 64,
-    pursuitEffectsKnown = 128,
+    pursuitBindingMatches = 2,
+    pursuitConditionsKnown = 4,
+    pursuitObjectivesKnown = 8,
+    pursuitObjectivesComplete = 16,
+    pursuitEligible = 32,
+    pursuitEffectsKnown = 64,
 };
 
 enum ObjectiveFlags : std::uint8_t {
@@ -203,25 +203,26 @@ struct GrantItemRequest final {
 };
 static_assert(sizeof(GrantItemRequest) == 8 && offsetof(GrantItemRequest, quantity) == 4);
 
-/** Quantity zero removes the row; instanceSoid is zero for stacks without their own item. */
+/**
+ * Quantity zero removes the row; instanceSoid is zero for stacks without their own item.
+ * A character row belongs to the expected context's character.
+ */
 struct SetQuantityRequest final {
     InventoryScope scope{};
     std::array<std::uint8_t, 7> reserved{};
-    std::uint64_t characterSoid{};
     std::uint64_t instanceSoid{};
     std::uint32_t definitionHash{};
     std::int32_t expectedSerial{};
     std::int32_t expectedQuantity{};
     std::int32_t quantity{};
 };
-static_assert(sizeof(SetQuantityRequest) == 40);
+static_assert(sizeof(SetQuantityRequest) == 32);
 static_assert(offsetof(SetQuantityRequest, reserved) == 1
-              && offsetof(SetQuantityRequest, characterSoid) == 8
-              && offsetof(SetQuantityRequest, instanceSoid) == 16
-              && offsetof(SetQuantityRequest, definitionHash) == 24
-              && offsetof(SetQuantityRequest, expectedSerial) == 28
-              && offsetof(SetQuantityRequest, expectedQuantity) == 32
-              && offsetof(SetQuantityRequest, quantity) == 36);
+              && offsetof(SetQuantityRequest, instanceSoid) == 8
+              && offsetof(SetQuantityRequest, definitionHash) == 16
+              && offsetof(SetQuantityRequest, expectedSerial) == 20
+              && offsetof(SetQuantityRequest, expectedQuantity) == 24
+              && offsetof(SetQuantityRequest, quantity) == 28);
 
 struct SetSeasonalExperienceRequest final {
     std::int32_t expected{};
@@ -230,27 +231,17 @@ struct SetSeasonalExperienceRequest final {
 static_assert(sizeof(SetSeasonalExperienceRequest) == 8
               && offsetof(SetSeasonalExperienceRequest, replacement) == 4);
 
-/** The row index is the native claim index; the item hash must still match it. */
-struct ClaimSeasonPassRewardRequest final {
+/**
+ * Names one pass row for a claim or a claim reset. The row index is the native claim index;
+ * the item hash must still match it.
+ */
+struct SeasonPassRowRequest final {
     std::uint16_t rowIndex{};
     std::uint16_t reserved{};
     std::uint32_t itemHash{};
 };
-static_assert(sizeof(ClaimSeasonPassRewardRequest) == 8
-              && offsetof(ClaimSeasonPassRewardRequest, reserved) == 2
-              && offsetof(ClaimSeasonPassRewardRequest, itemHash) == 4);
-
-struct ResetSeasonPassClaimRequest final {
-    std::uint16_t rowIndex{};
-    /** Always one: the editor read the row as claimed. */
-    std::uint8_t expectedClaimed{};
-    std::uint8_t reserved{};
-    std::uint32_t itemHash{};
-};
-static_assert(sizeof(ResetSeasonPassClaimRequest) == 8
-              && offsetof(ResetSeasonPassClaimRequest, expectedClaimed) == 2
-              && offsetof(ResetSeasonPassClaimRequest, reserved) == 3
-              && offsetof(ResetSeasonPassClaimRequest, itemHash) == 4);
+static_assert(sizeof(SeasonPassRowRequest) == 8 && offsetof(SeasonPassRowRequest, reserved) == 2
+              && offsetof(SeasonPassRowRequest, itemHash) == 4);
 
 /** The index is a row of the named bank. */
 struct UnlockSource final {
@@ -307,8 +298,7 @@ inline constexpr std::size_t kRequestPayloadBytes =
     (std::max)({sizeof(GrantItemRequest),
                 sizeof(SetQuantityRequest),
                 sizeof(SetSeasonalExperienceRequest),
-                sizeof(ClaimSeasonPassRewardRequest),
-                sizeof(ResetSeasonPassClaimRequest),
+                sizeof(SeasonPassRowRequest),
                 sizeof(UnlockValuesRequest),
                 sizeof(SetPursuitObjectiveRequest),
                 sizeof(CompletePursuitObjectivesRequest)});
@@ -326,9 +316,8 @@ static_assert(sizeof(UnlockValuesRequest) == kRequestPayloadBytes,
     case Opcode::setSeasonalExperience:
         return sizeof(SetSeasonalExperienceRequest);
     case Opcode::claimSeasonPassReward:
-        return sizeof(ClaimSeasonPassRewardRequest);
     case Opcode::resetSeasonPassClaim:
-        return sizeof(ResetSeasonPassClaimRequest);
+        return sizeof(SeasonPassRowRequest);
     case Opcode::unlockValues:
         return sizeof(UnlockValuesRequest);
     case Opcode::setPursuitObjective:
@@ -522,7 +511,6 @@ struct HeldPursuit final {
     std::int32_t mutationSerial{};
     std::int32_t quantity{};
     std::uint32_t itemFlags{};
-    std::array<std::int32_t, kObjectiveLaneCount> lanes{};
     /** PursuitFlags. */
     std::uint16_t flags{};
     std::uint8_t objectiveCount{};
@@ -531,28 +519,24 @@ struct HeldPursuit final {
     std::uint16_t reserved2{};
     std::array<PursuitObjective, kPursuitObjectiveCapacity> objectives{};
 };
-static_assert(sizeof(HeldPursuit) == 176);
+static_assert(sizeof(HeldPursuit) == 144);
 static_assert(offsetof(HeldPursuit, itemHash) == 8 && offsetof(HeldPursuit, mutationSerial) == 12
               && offsetof(HeldPursuit, quantity) == 16 && offsetof(HeldPursuit, itemFlags) == 20
-              && offsetof(HeldPursuit, lanes) == 24 && offsetof(HeldPursuit, flags) == 56
-              && offsetof(HeldPursuit, objectiveCount) == 58
-              && offsetof(HeldPursuit, reserved) == 59 && offsetof(HeldPursuit, reason) == 60
-              && offsetof(HeldPursuit, reserved2) == 62 && offsetof(HeldPursuit, objectives) == 64);
+              && offsetof(HeldPursuit, flags) == 24 && offsetof(HeldPursuit, objectiveCount) == 26
+              && offsetof(HeldPursuit, reserved) == 27 && offsetof(HeldPursuit, reason) == 28
+              && offsetof(HeldPursuit, reserved2) == 30 && offsetof(HeldPursuit, objectives) == 32);
 
 struct PursuitSnapshot final {
     std::uint16_t heldCount{};
     std::uint16_t reserved{};
     std::uint32_t reserved2{};
-    /** Investment clock seconds the evaluation used; zero when no clock was read. */
-    std::uint64_t evaluatedAt{};
     std::uint64_t investmentRevision{};
     std::array<HeldPursuit, kHeldPursuitCapacity> held{};
 };
-static_assert(sizeof(PursuitSnapshot) == 58'632);
+static_assert(sizeof(PursuitSnapshot) == 47'968);
 static_assert(offsetof(PursuitSnapshot, reserved) == 2 && offsetof(PursuitSnapshot, reserved2) == 4
-              && offsetof(PursuitSnapshot, evaluatedAt) == 8
-              && offsetof(PursuitSnapshot, investmentRevision) == 16
-              && offsetof(PursuitSnapshot, held) == 24);
+              && offsetof(PursuitSnapshot, investmentRevision) == 8
+              && offsetof(PursuitSnapshot, held) == 16);
 
 /** One mutation's retained outcome; every field after operationId is zero while unknown. */
 struct Receipt final {
@@ -604,7 +588,7 @@ inline constexpr std::size_t kResponsePayloadBytes = (std::max)({sizeof(Hello),
                                                                  sizeof(PursuitSnapshot),
                                                                  sizeof(Receipt),
                                                                  sizeof(UnlockValues)});
-static_assert(kResponsePayloadBytes == 58'632);
+static_assert(kResponsePayloadBytes == 55'008);
 
 // --- The mapping ---
 
@@ -660,7 +644,7 @@ struct Response final {
     Opcode opcode{};
     /** The opcode's fixed payload size, or zero. */
     std::uint32_t payloadBytes{};
-    /** The identity the payload is bound to; zero for invalid and unsupported requests. */
+    /** The identity the payload is bound to; zero for invalid requests. */
     Context context{};
     std::array<char, kReasonBytes> reason{};
     std::array<std::byte, kResponsePayloadBytes> payload{};
@@ -681,7 +665,7 @@ inline constexpr std::size_t kMappingBytes = kControlBytes + sizeof(Request) + s
 static_assert(offsetof(SharedInvestment, request) == kRequestBlockOffset);
 static_assert(offsetof(SharedInvestment, response) == kResponseBlockOffset);
 static_assert(kResponseBlockOffset + offsetof(Response, payload) == kResponsePayloadOffset);
-static_assert(sizeof(SharedInvestment) == kMappingBytes && kMappingBytes == 58'888);
+static_assert(sizeof(SharedInvestment) == kMappingBytes && kMappingBytes == 55'264);
 static_assert(std::is_standard_layout_v<SharedInvestment>);
 
 } // namespace sunrise::middleware::studio::investment_wire

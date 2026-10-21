@@ -5,6 +5,7 @@
 #include <mutex>
 #include <utility>
 
+#include "../account/account_state.h"
 #include "../build_data/runtime.h"
 #include "../investment/store_internal.h"
 #include "../rewards/reward_resolver.h"
@@ -15,13 +16,11 @@ namespace {
 namespace pursuits = build_data::pursuits;
 
 /**
- * Copies the account, one character's unlock banks and the revision under one store lock, so
- * the inventory and banks come from the same saved state.
- * @param characterSoid A character of the saved account, or zero for the selected character.
+ * Copies the account, the selected character's unlock banks and the revision under one store
+ * lock, so the inventory and banks come from the same saved state.
  * @param slot Receives the character's slot, which is also its unlock-bank owner.
  */
-[[nodiscard]] PursuitSnapshotRefusal read_saved_state(std::uint64_t characterSoid,
-                                                      AccountState& account,
+[[nodiscard]] PursuitSnapshotRefusal read_saved_state(AccountState& account,
                                                       unlocks::Table& values,
                                                       std::size_t& slot,
                                                       std::uint64_t& revision) noexcept {
@@ -33,7 +32,7 @@ namespace pursuits = build_data::pursuits;
     }
     for (slot = 0; slot < account.characterCount; ++slot) {
         const CharacterState& character = account.characters[slot];
-        if (characterSoid == 0 ? character.selected : character.soid == characterSoid) {
+        if (character.selected) {
             break;
         }
     }
@@ -43,23 +42,6 @@ namespace pursuits = build_data::pursuits;
     return investment::store::read_unlocks(values, static_cast<int>(slot))
                ? PursuitSnapshotRefusal::none
                : PursuitSnapshotRefusal::storage;
-}
-
-/** Evaluates one displayed reward's condition; the preview itself is never granted. */
-[[nodiscard]] PursuitConditionResult
-reward_condition(const pursuits::RewardPreview& reward,
-                 const reward_resolution::Context& context) noexcept {
-    if (!reward.conditionReadable) {
-        return PursuitConditionResult::unknown;
-    }
-    if (reward.condition.empty()) {
-        return PursuitConditionResult::unconditional;
-    }
-    bool met = false;
-    if (!reward_resolution::eligible(reward.condition, context, met)) {
-        return PursuitConditionResult::unknown;
-    }
-    return met ? PursuitConditionResult::met : PursuitConditionResult::unmet;
 }
 
 /**
@@ -76,7 +58,6 @@ reward_condition(const pursuits::RewardPreview& reward,
     }
     held.instanceSoid = item.instanceSoid;
     held.definitionHash = item.definitionHash;
-    held.definitionIndex = definition.definitionIndex;
     held.quantity = item.quantity;
     held.mutationSerial = item.mutationSerial;
     held.flags = item.flags;
@@ -88,20 +69,17 @@ reward_condition(const pursuits::RewardPreview& reward,
     held.contractFound = true;
     held.lifetimeSeconds = contract.lifetimeSeconds;
     held.completion = inspect_pursuit_completion(contract, context);
-    held.rewardsReadable = contract.rewardsReadable;
-    for (const pursuits::RewardPreview& reward : contract.rewards) {
-        held.rewards.push_back(
-            {reward.itemIndex, reward.quantity, reward_condition(reward, context)});
-    }
     return true;
 }
 
 } // namespace
 
 /** Reads one coherent saved view and evaluates each held pursuit's installed contract. */
-PursuitSnapshotRefusal read_pursuit_snapshot(std::uint64_t characterSoid,
-                                             PursuitSnapshot& output) noexcept {
+PursuitSnapshotRefusal read_pursuit_snapshot(PursuitSnapshot& output) noexcept {
     output = {};
+    if (build_data::pursuit_catalog_unsupported()) {
+        return PursuitSnapshotRefusal::catalogUnsupported;
+    }
     if (!build_data::objective_definitions_ready() || !build_data::pursuit_definitions_ready()) {
         return PursuitSnapshotRefusal::catalogUnavailable;
     }
@@ -111,7 +89,7 @@ PursuitSnapshotRefusal read_pursuit_snapshot(std::uint64_t characterSoid,
     std::size_t slot = 0;
     std::uint64_t investmentRevision = 0;
     const PursuitSnapshotRefusal refusal =
-        read_saved_state(characterSoid, account, values, slot, investmentRevision);
+        read_saved_state(account, values, slot, investmentRevision);
     if (refusal != PursuitSnapshotRefusal::none) {
         return refusal;
     }
@@ -122,13 +100,11 @@ PursuitSnapshotRefusal read_pursuit_snapshot(std::uint64_t characterSoid,
         PursuitSnapshot snapshot{};
         snapshot.accountSoid = account.primarySoid;
         snapshot.characterSoid = character.soid;
-        snapshot.characterClass = character.characterClass;
         snapshot.investmentRevision = investmentRevision;
-        snapshot.definitionsRevision = definitionsRevision;
         for (std::size_t i = 0; i < character.inventory.count; ++i) {
             HeldPursuitStatus held{};
             if (read_held_pursuit(character.inventory.values[i], context, held)) {
-                snapshot.held.push_back(std::move(held));
+                snapshot.held.push_back(held);
             }
         }
         // A republish between the contract reads would mix two catalogs in one snapshot.
@@ -143,8 +119,7 @@ PursuitSnapshotRefusal read_pursuit_snapshot(std::uint64_t characterSoid,
 }
 
 /** Each source is evaluated alone, as a one-instruction program over the same saved copy. */
-PursuitSnapshotRefusal read_unlock_values(std::uint64_t characterSoid,
-                                          std::span<const unlocks::Instruction> sources,
+PursuitSnapshotRefusal read_unlock_values(std::span<const unlocks::Instruction> sources,
                                           std::span<UnlockRead> output,
                                           UnlockReadOrigin& origin) noexcept {
     origin = {};
@@ -154,7 +129,7 @@ PursuitSnapshotRefusal read_unlock_values(std::uint64_t characterSoid,
     std::size_t slot = 0;
     std::uint64_t investmentRevision = 0;
     const PursuitSnapshotRefusal refusal =
-        read_saved_state(characterSoid, account, values, slot, investmentRevision);
+        read_saved_state(account, values, slot, investmentRevision);
     if (refusal != PursuitSnapshotRefusal::none) {
         return refusal;
     }

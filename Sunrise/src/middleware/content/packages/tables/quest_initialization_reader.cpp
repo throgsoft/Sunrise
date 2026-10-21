@@ -1,7 +1,5 @@
 #include "quest_initialization_reader.h"
 
-#include <limits>
-
 #include "definition_index_table.h"
 #include "internal.h"
 
@@ -12,8 +10,6 @@ using Quest = state::build_data::items::QuestInitialization;
 
 /** Policy: shorter item blobs stay outside the supported quest layout. */
 constexpr std::size_t kMinimumQuestDefinitionSize = 0xF0;
-/** A serialized block's 32-bit class ID sits immediately before its payload. */
-constexpr std::size_t kBlockClassPrefixSize = sizeof(std::uint32_t);
 /** Policy: keep the full fixed block prefix before reading nested arrays. */
 constexpr std::size_t kMinimumQuestBlockSize = 0x20;
 
@@ -72,21 +68,9 @@ constexpr std::uint16_t kUnavailableValueMapRow = 0xFFFFU;
                          std::size_t field,
                          std::uint32_t expectedClass,
                          std::size_t& offset) noexcept {
-    std::int64_t relative = 0;
-    if (!read(bytes, field, relative) || relative == 0
-        || relative
-               > (std::numeric_limits<std::int64_t>::max)() - static_cast<std::int64_t>(field)) {
-        return false;
-    }
-    const auto target = relative + static_cast<std::int64_t>(field);
-    if (target < static_cast<std::int64_t>(kBlockClassPrefixSize)
-        || static_cast<std::uint64_t>(target) > bytes.size()
-        || bytes.size() - static_cast<std::size_t>(target) < kMinimumQuestBlockSize) {
-        return false;
-    }
-    offset = static_cast<std::size_t>(target);
-    std::uint32_t actualClass = 0;
-    return read(bytes, offset - kBlockClassPrefixSize, actualClass) && actualClass == expectedClass;
+    bool present = false;
+    return class_block(bytes, field, expectedClass, offset, present) && present
+           && bytes.size() - offset >= kMinimumQuestBlockSize;
 }
 
 /**

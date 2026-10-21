@@ -3,6 +3,7 @@
 #include <Windows.h>
 
 #include <algorithm>
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -15,7 +16,6 @@
 #include "../../middleware/studio/studio_mapping.h"
 #include "../../state/account/inventory/inventory_edit.h"
 #include "../bap/investment_operations.h"
-#include "studio_command_protocol.h"
 #include "studio_investment_payloads.h"
 
 namespace sunrise::server::studio {
@@ -38,19 +38,34 @@ constexpr std::uint64_t kAdvertisedCapabilities =
     | wire::capability(wire::Opcode::unlockValues)
     | wire::capability(wire::Opcode::setPursuitObjective)
     | wire::capability(wire::Opcode::completePursuitObjectives);
+// Every opcode between none and count is served, so no request can be unsupported.
+static_assert(kAdvertisedCapabilities
+              == ((wire::capability(wire::Opcode::count) - 1)
+                  & ~wire::capability(wire::Opcode::none)));
+
+/** The last status and label one read opcode answered with. */
+struct ReadAnswer {
+    wire::Status status{};
+    std::string_view reason{};
+};
 
 HANDLE g_mapping{};
 wire::SharedInvestment* g_view{};
 std::uint64_t g_nextConnect{};
 /** The process instance this link advertised when it connected. */
 std::uint64_t g_gameStarted{};
+/** The connected editor's process id, which tags each operation it submits. */
+std::uint32_t g_editorPid{};
+std::array<ReadAnswer, static_cast<std::size_t>(wire::Opcode::count)> g_lastReads{};
 
-/** Operations and receipts outlive the link, so an editor that returns can still read them. */
+/** Finished receipts outlive the link, so the editor can still read them when it returns. */
 void disconnect() noexcept {
     if (g_view != nullptr) {
         core::log::write(core::log::Channel::server,
                          core::log::Level::info,
                          "ev=studio stage=investment result=disconnected");
+        bap::refuse_pending_investment_operations("editor_disconnected");
+        g_lastReads = {};
     }
     middleware::studio::close_editor_view(g_mapping, g_view);
 }
@@ -71,6 +86,17 @@ void disconnect() noexcept {
     return started.QuadPart;
 }
 
+/** @return True once no process runs under the id; one the game may not open still runs. */
+[[nodiscard]] bool editor_exited(std::uint32_t pid) noexcept {
+    HANDLE process = OpenProcess(SYNCHRONIZE, FALSE, pid);
+    if (process == nullptr) {
+        return GetLastError() == ERROR_INVALID_PARAMETER;
+    }
+    const bool exited = WaitForSingleObject(process, 0) == WAIT_OBJECT_0;
+    CloseHandle(process);
+    return exited;
+}
+
 /** @return True only when an editor created a mapping of this exact protocol. */
 [[nodiscard]] bool connect() noexcept {
     // Every version keeps this control block, so it is mapped alone before the size is known.
@@ -86,6 +112,7 @@ void disconnect() noexcept {
     }
     const bool accepted = middleware::studio::editor_header_ok(
         *control, wire::kMagic, wire::kVersion, wire::kMappingBytes);
+    const std::uint32_t editorPid = control->editorPid;
     UnmapViewOfFile(control);
     const std::uint64_t started = accepted ? process_started() : 0;
     if (started != 0) {
@@ -95,6 +122,8 @@ void disconnect() noexcept {
         disconnect();
         return false;
     }
+    bap::forget_exited_editor_receipts(editor_exited);
+    g_editorPid = editorPid;
     g_gameStarted = started;
     g_view->control.gameStarted = started;
     g_view->control.capabilities = kAdvertisedCapabilities;
@@ -195,7 +224,7 @@ template <typename Payload>
             return false;
         }
         operation.request = state::account::inventory::QuantityEdit{scope,
-                                                                    edit.characterSoid,
+                                                                    request.expected.characterSoid,
                                                                     edit.instanceSoid,
                                                                     edit.definitionHash,
                                                                     edit.expectedSerial,
@@ -210,7 +239,7 @@ template <typename Payload>
         return true;
     }
     case wire::Opcode::claimSeasonPassReward: {
-        const auto claim = payload_of<wire::ClaimSeasonPassRewardRequest>(request);
+        const auto claim = payload_of<wire::SeasonPassRowRequest>(request);
         if (claim.reserved != 0) {
             return false;
         }
@@ -218,8 +247,8 @@ template <typename Payload>
         return true;
     }
     case wire::Opcode::resetSeasonPassClaim: {
-        const auto reset = payload_of<wire::ResetSeasonPassClaimRequest>(request);
-        if (reset.expectedClaimed != 1 || reset.reserved != 0) {
+        const auto reset = payload_of<wire::SeasonPassRowRequest>(request);
+        if (reset.reserved != 0) {
             return false;
         }
         operation.request = bap::SeasonPassResetOperation{reset.rowIndex, reset.itemHash};
@@ -256,7 +285,7 @@ template <typename Payload>
                                       InvestmentPayload payload) noexcept {
     bap::InvestmentReceipt receipt{};
     const bap::InvestmentSubmission submission =
-        bap::submit_investment_operation(operation, receipt);
+        bap::submit_investment_operation(operation, g_editorPid, receipt);
     InvestmentAnswer answer = encode_receipt(operation.id, receipt, payload);
     switch (submission) {
     case bap::InvestmentSubmission::accepted:
@@ -308,9 +337,6 @@ template <typename Payload>
     if (request.opcode == wire::Opcode::none || request.opcode >= wire::Opcode::count) {
         return invalid("request_opcode");
     }
-    if ((kAdvertisedCapabilities & wire::capability(request.opcode)) == 0) {
-        return {.status = wire::Status::unsupported, .reason = "request_unsupported"};
-    }
     if (const char* reason = malformed(request)) {
         return invalid(reason);
     }
@@ -353,12 +379,18 @@ template <typename Payload>
 }
 
 /**
- * Open views repeat hello, snapshot, unlock and receipt requests every second, so a served one is
- * debug; mutations, withdrawals and every answer other than ok stay at info.
+ * Open views repeat hello, snapshot, unlock and receipt requests every second, so a read is info
+ * only when it is refused for a new reason; mutations and withdrawals always stay at info.
  */
-[[nodiscard]] core::log::Level answer_level(wire::Opcode opcode, wire::Status status) noexcept {
-    const bool read = !wire::is_mutation(opcode) && opcode != wire::Opcode::withdrawOperation;
-    return read && status == wire::Status::ok ? core::log::Level::debug : core::log::Level::info;
+[[nodiscard]] core::log::Level
+answer_level(wire::Opcode opcode, wire::Status status, std::string_view reason) noexcept {
+    if (wire::is_mutation(opcode) || opcode == wire::Opcode::withdrawOperation) {
+        return core::log::Level::info;
+    }
+    ReadAnswer& last = g_lastReads[static_cast<std::size_t>(opcode)];
+    const bool changed = last.status != status || last.reason != reason;
+    last = {status, reason};
+    return changed && status != wire::Status::ok ? core::log::Level::info : core::log::Level::debug;
 }
 
 /** Writes the response block, then the response id, so Studio never reads half an answer. */
@@ -380,7 +412,7 @@ void answer(std::uint32_t request,
     InterlockedExchange(reinterpret_cast<volatile LONG*>(&g_view->control.response),
                         static_cast<LONG>(request));
     core::log::writef(core::log::Channel::server,
-                      answer_level(copy.opcode, result.status),
+                      answer_level(copy.opcode, result.status, reason),
                       "ev=studio stage=investment result=answered request=%u opcode=%u status=%u "
                       "op=%llu reason=%s",
                       request,
@@ -402,14 +434,14 @@ void service_investment(std::uint64_t now) noexcept {
         return;
     }
     if (g_view == nullptr && now >= g_nextConnect) {
-        g_nextConnect = now + command_wire::kConnectIntervalMs;
+        g_nextConnect = now + wire::kConnectIntervalMs;
         static_cast<void>(connect());
     }
     if (g_view == nullptr) {
         return;
     }
     if (!middleware::studio::editor_alive(
-            g_view->control.heartbeat, now, command_wire::kHeartbeatTimeoutMs)) {
+            g_view->control.heartbeat, now, wire::kHeartbeatTimeoutMs)) {
         disconnect();
         return;
     }
@@ -432,6 +464,7 @@ void shutdown_investment() noexcept {
     disconnect();
     g_nextConnect = 0;
     g_gameStarted = 0;
+    g_editorPid = 0;
 }
 
 } // namespace sunrise::server::studio

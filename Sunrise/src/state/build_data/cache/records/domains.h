@@ -17,7 +17,9 @@
 #include "../../items/socket_plugs/definition.h"
 #include "../../material_requirements/material_requirement_catalog.h"
 #include "../../nodes/definition.h"
+#include "../../objectives/definition.h"
 #include "../../progressions/definition.h"
+#include "../../pursuits/definition.h"
 #include "../../records/definition.h"
 #include "../../rewards/definition.h"
 #include "../../scenarios/definition.h"
@@ -74,6 +76,9 @@ struct DomainCounts {
     std::size_t rewardInstructions{};
     std::size_t rewardModifiers{};
     std::size_t rewardSockets{};
+    std::size_t objectives{};
+    std::size_t objectiveInstructions{};
+    std::size_t pursuits{};
 };
 
 /** Fixed caller storage used while decoding the cache domains. */
@@ -123,6 +128,9 @@ struct MutableDomains {
     std::span<rewards::Instruction> rewardInstructions;
     std::span<rewards::Modifier> rewardModifiers;
     std::span<rewards::SocketOverride> rewardSockets;
+    std::span<objectives::Row> objectives;
+    std::span<unlocks::Instruction> objectiveInstructions;
+    std::span<pursuits::Definition> pursuits;
 };
 
 /** Read-only complete views used for the checks and for cache encoding. */
@@ -171,6 +179,10 @@ struct Domains {
     std::span<const rewards::Instruction> rewardInstructions;
     std::span<const rewards::Modifier> rewardModifiers;
     std::span<const rewards::SocketOverride> rewardSockets;
+    /** Empty records a build whose pursuit catalog is unsupported. */
+    std::span<const objectives::Row> objectives;
+    std::span<const unlocks::Instruction> objectiveInstructions;
+    std::span<const pursuits::Definition> pursuits;
 };
 
 } // namespace sunrise::state::build_data::cache::records

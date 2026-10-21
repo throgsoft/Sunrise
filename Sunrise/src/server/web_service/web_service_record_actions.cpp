@@ -110,6 +110,29 @@ prepare_record_reward(const middleware::web_service::Message& message,
     return RecordRewardPreparation::prepared;
 }
 
+/** Draws the seed in this layer; State replays the claim rules under its own lock. */
+bool prepare_season_pass_claim(std::uint16_t rewardIndex,
+                               state::PendingSeasonPassReward& claim,
+                               const char*& reason) noexcept {
+    std::uint64_t seed = 0;
+    reason = "random_source";
+    if (!middleware::crypto::random::fill(std::as_writable_bytes(std::span(&seed, 1)))) {
+        return false;
+    }
+    reason = nullptr;
+    if (!state::prepare_season_pass_reward(rewardIndex, seed, claim, &reason)) {
+        reason = reason != nullptr ? reason : "reward_preparation";
+        return false;
+    }
+    // Stage the claim before the reply and account push are encoded from the transaction's banks.
+    reason = "claim_rejected";
+    if (!state::claim_season_pass_reward(rewardIndex)) {
+        return false;
+    }
+    reason = nullptr;
+    return true;
+}
+
 /** Claims one exact reward-array row from the active Season of Arrivals pass. */
 void claim_season_pass_reward(const middleware::web_service::Message& message,
                               Outcome& outcome) noexcept {
@@ -118,15 +141,15 @@ void claim_season_pass_reward(const middleware::web_service::Message& message,
     state::build_data::season_pass::Reward reward{};
     state::build_data::items::Definition item{};
     const std::uint16_t rank = state::seasonal_rank();
-    const auto fail = [&](const char* reason) noexcept {
-        outcome.refusal = reason;
+    const auto fail = [&](std::string_view reason) noexcept {
         std::array<char, core::log::kLineCapacity> line{};
         const int count = std::snprintf(
             line.data(),
             line.size(),
-            "ev=ws2400 stage=claim result=fail reason=%s transaction=%u progression=%u "
+            "ev=ws2400 stage=claim result=fail reason=%.*s transaction=%u progression=%u "
             "reward=%u rank=%u item_hash=0x%08X item_index=%u",
-            reason,
+            static_cast<int>(reason.size()),
+            reason.data(),
             static_cast<unsigned>(message.transactionId),
             static_cast<unsigned>(request.progressionIndex),
             static_cast<unsigned>(request.rewardIndex),
@@ -158,20 +181,10 @@ void claim_season_pass_reward(const middleware::web_service::Message& message,
     if (grant == nullptr) {
         return fail("storage");
     }
-    std::uint64_t seed = 0;
-    if (!middleware::crypto::random::fill(std::as_writable_bytes(std::span(&seed, 1)))) {
-        clear_mutation(outcome);
-        return fail("random_source");
-    }
     const char* reason = nullptr;
-    if (!state::prepare_season_pass_reward(request.rewardIndex, seed, *grant, &reason)) {
+    if (!prepare_season_pass_claim(request.rewardIndex, *grant, reason)) {
         clear_mutation(outcome);
-        return fail(reason != nullptr ? reason : "reward_preparation");
-    }
-    // Stage the claim before encoding the reply and account push from the transaction's banks.
-    if (!state::claim_season_pass_reward(request.rewardIndex)) {
-        clear_mutation(outcome);
-        return fail("claim_rejected");
+        return fail(reason);
     }
 }
 

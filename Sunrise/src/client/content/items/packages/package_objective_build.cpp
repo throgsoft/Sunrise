@@ -1,6 +1,7 @@
 #include "package_objective_build.h"
 
 #include <cstdint>
+#include <new>
 #include <vector>
 
 #include "../../../../core/logging/log.h"
@@ -20,8 +21,6 @@ namespace objectives = state::build_data::objectives;
 
 /** Completion control bytes of one objective row. */
 constexpr std::size_t kOptionalOffset = 0x28;
-constexpr std::size_t kAllowNegativeValueOffset = 0x2A;
-constexpr std::size_t kAllowValueChangeWhenCompletedOffset = 0x2B;
 constexpr std::size_t kCountsDownOffset = 0x2C;
 /** Expression whose value the native evaluator subtracts from the completion value. */
 constexpr std::size_t kTargetAdjustmentField = 0x38;
@@ -38,32 +37,42 @@ struct ObjectiveReport {
 /** A refusal the installed data decides is final; a failed allocation is retried. */
 enum class RowRead : std::uint8_t { read, unsupported, retry };
 
-/** Reads one control byte, refusing any value other than zero or one. */
-[[nodiscard]] bool
-read_control(std::span<const std::byte> blob, std::size_t at, bool& value) noexcept {
-    std::uint8_t raw = 0;
-    if (!tables::read(blob, at, raw) || raw > 1) {
-        return false;
-    }
-    value = raw != 0;
-    return true;
-}
+/** The table being read: dense rows and the one bank all their programs share. */
+struct ObjectiveTable {
+    std::vector<objectives::Row> rows;
+    std::vector<state::unlocks::Instruction> bank;
+    /** Each program is bound here, then appended to the bank. */
+    std::vector<state::unlocks::Instruction> program;
+};
 
 /** Reads the completion controls of one bounded objective row. */
 [[nodiscard]] bool read_completion_controls(std::span<const std::byte> blob,
                                             std::size_t at,
-                                            objectives::Definition& definition) noexcept {
-    return read_control(blob, at + kOptionalOffset, definition.optional)
-           && read_control(blob, at + kAllowNegativeValueOffset, definition.allowNegativeValue)
-           && read_control(blob,
-                           at + kAllowValueChangeWhenCompletedOffset,
-                           definition.allowValueChangeWhenCompleted)
-           && read_control(blob, at + kCountsDownOffset, definition.countsDown);
+                                            objectives::Row& row) noexcept {
+    return tables::read_boolean(blob, at + kOptionalOffset, row.optional)
+           && tables::read_boolean(blob, at + kCountsDownOffset, row.countsDown);
 }
 
 /** A full instruction bank is decided by the data; failed storage is not. */
 [[nodiscard]] RowRead bank_refusal(BankFailure failure) noexcept {
     return failure == BankFailure::full ? RowRead::unsupported : RowRead::retry;
+}
+
+/** Moves the bound program into the shared bank; programs that overflow it are the data. */
+[[nodiscard]] RowRead append_program(ObjectiveTable& table,
+                                     state::build_data::rewards::Range& range) noexcept {
+    if (table.program.size() > objectives::kInstructionCapacity - table.bank.size()) {
+        return RowRead::unsupported;
+    }
+    try {
+        range = {static_cast<std::uint32_t>(table.bank.size()),
+                 static_cast<std::uint32_t>(table.program.size())};
+        table.bank.insert(table.bank.end(), table.program.begin(), table.program.end());
+    } catch (const std::bad_alloc&) {
+        return RowRead::retry;
+    }
+    table.program.clear();
+    return RowRead::read;
 }
 
 /**
@@ -73,56 +82,55 @@ read_control(std::span<const std::byte> blob, std::size_t at, bool& value) noexc
 [[nodiscard]] RowRead read_objective(const RewardConditions& conditions,
                                      std::span<const std::byte> blob,
                                      std::size_t at,
-                                     objectives::Definition& definition,
+                                     ObjectiveTable& table,
+                                     objectives::Row& row,
                                      ObjectiveReport& report) noexcept {
-    if (!tables::read(blob, at, definition.definitionHash)
-        || !tables::read(
-            blob, at + tables::kObjectiveCompletionValueOffset, definition.completionValue)
-        || !read_completion_controls(blob, at, definition)) {
+    if (!tables::read(blob, at, row.definitionHash)
+        || !tables::read(blob, at + tables::kObjectiveCompletionValueOffset, row.completionValue)
+        || !read_completion_controls(blob, at, row)) {
         return RowRead::unsupported;
     }
-    state::build_data::rewards::Range expression{};
+    state::build_data::rewards::Range bound{};
     BankFailure failure{};
-    definition.adjustmentReadable = conditions.read(
-        blob, at + kTargetAdjustmentField, definition.targetAdjustment, expression, failure);
+    table.program.clear();
+    row.adjustmentReadable =
+        conditions.read(blob, at + kTargetAdjustmentField, table.program, bound, failure);
     if (failure != BankFailure::none) {
         return bank_refusal(failure);
     }
-    if (!definition.adjustmentReadable) {
-        definition.targetAdjustment.clear();
-        if (report.unreadableAdjustments++ == 0) {
-            report.firstUnreadableAdjustment = definition.definitionIndex;
-        }
+    if (!row.adjustmentReadable && report.unreadableAdjustments++ == 0) {
+        report.firstUnreadableAdjustment = row.definitionIndex;
     }
-    definition.readable = conditions.read(blob,
-                                          at + tables::kObjectiveSourceExpressionField,
-                                          definition.expression,
-                                          expression,
-                                          failure)
-                          && !definition.expression.empty();
+    const bool externalAdjustment = state::unlocks::reads_external(table.program);
+    if (const RowRead appended = append_program(table, row.targetAdjustment);
+        appended != RowRead::read) {
+        return appended;
+    }
+    row.readable =
+        conditions.read(
+            blob, at + tables::kObjectiveSourceExpressionField, table.program, bound, failure)
+        && !table.program.empty();
     if (failure != BankFailure::none) {
         return bank_refusal(failure);
     }
-    if (!definition.readable) {
-        definition.expression.clear();
+    if (!row.readable) {
+        table.program.clear();
         ++report.unreadable;
         return RowRead::read;
     }
-    if (definition.expression.size() == 1) {
-        const state::unlocks::Instruction& input = definition.expression.front();
-        definition.itemProgress = input.opcode == state::unlocks::Opcode::loadValue
-                                  && input.bank == state::unlocks::Bank::external
-                                  && conditions.item_value(input.operand,
-                                                           definition.itemValueIndex,
-                                                           definition.itemValueMode);
+    if (table.program.size() == 1) {
+        const state::unlocks::Instruction& input = table.program.front();
+        row.itemProgress =
+            input.opcode == state::unlocks::Opcode::loadValue
+            && input.bank == state::unlocks::Bank::external
+            && conditions.item_value(input.operand, row.itemValueIndex, row.itemValueMode);
     }
-    if (definition.itemProgress) {
+    if (row.itemProgress) {
         ++report.itemProgress;
-    } else if (state::unlocks::reads_external(definition.expression)
-               || state::unlocks::reads_external(definition.targetAdjustment)) {
+    } else if (state::unlocks::reads_external(table.program) || externalAdjustment) {
         ++report.externalInputs;
     }
-    return RowRead::read;
+    return append_program(table, row.expression);
 }
 
 } // namespace
@@ -157,14 +165,16 @@ bool build_objectives(const reader::Source& source,
         if (!load_pursuit_conditions(conditions, source, scratch, root, maps)) {
             return false;
         }
-        std::vector<objectives::Definition> definitions(static_cast<std::size_t>(rows.count));
+        ObjectiveTable table;
+        table.rows.resize(static_cast<std::size_t>(rows.count));
         ObjectiveReport report{};
-        for (std::size_t i = 0; i < definitions.size(); ++i) {
-            definitions[i].definitionIndex = static_cast<std::uint16_t>(i);
+        for (std::size_t i = 0; i < table.rows.size(); ++i) {
+            table.rows[i].definitionIndex = static_cast<std::uint16_t>(i);
             const RowRead row = read_objective(conditions,
                                                blob,
                                                rows.dataOffset + i * tables::kObjectiveRowStride,
-                                               definitions[i],
+                                               table,
+                                               table.rows[i],
                                                report);
             if (row == RowRead::retry) {
                 return false;
@@ -178,8 +188,13 @@ bool build_objectives(const reader::Source& source,
                 return false;
             }
         }
-        if (!state::build_data::publish_objective_definitions(definitions)) {
-            settle_pursuits_unsupported("objective_publish");
+        const objectives::View view{table.rows, table.bank};
+        if (!state::build_data::valid_objective_definitions(view)) {
+            settle_pursuits_unsupported("objective_table");
+            return false;
+        }
+        // A cache write can still fail, so this stays retryable.
+        if (!state::build_data::publish_objective_definitions(view)) {
             return false;
         }
         const bool complete = report.unreadable == 0 && report.unreadableAdjustments == 0;
@@ -188,7 +203,7 @@ bool build_objectives(const reader::Source& source,
                           "ev=pkg stage=objectives result=ready rows=%zu unreadable=%zu "
                           "unreadable_adjustments=%zu first_unreadable_adjustment=%u "
                           "item_progress=%zu external_inputs=%zu",
-                          definitions.size(),
+                          table.rows.size(),
                           report.unreadable,
                           report.unreadableAdjustments,
                           static_cast<unsigned>(report.firstUnreadableAdjustment),

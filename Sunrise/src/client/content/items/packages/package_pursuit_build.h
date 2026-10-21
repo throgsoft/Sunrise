@@ -27,7 +27,7 @@ load_pursuit_conditions(RewardConditions& conditions,
                         std::span<const std::byte> root,
                         const SlotMaps& maps) noexcept;
 
-/** Collects pursuit completion contracts during the item walk, including warm-cache startup. */
+/** Collects pursuit completion contracts during the item walk that fills the cache. */
 class PursuitBuild {
 public:
     /** Loads the condition tables and probes the completion operation table. */

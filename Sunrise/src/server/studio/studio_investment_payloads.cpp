@@ -241,6 +241,8 @@ void append_stacks(const state::CharacterState& character,
     switch (refusal) {
     case state::PursuitSnapshotRefusal::catalogUnavailable:
         return "not_ready";
+    case state::PursuitSnapshotRefusal::catalogUnsupported:
+        return "pursuits_unsupported";
     case state::PursuitSnapshotRefusal::accountUnavailable:
         return "account_state";
     case state::PursuitSnapshotRefusal::characterUnavailable:
@@ -298,11 +300,7 @@ pursuit_objective(const state::PursuitObjectiveStatus& objective) noexcept {
     return record;
 }
 
-/**
- * This server saves no per-instance objective values or bounty deadlines, so every lane stays
- * zero and no bounty reads as expired; the completion reason says which objectives that leaves
- * unknown.
- */
+/** @return One held pursuit with its completion reason and declared objectives. */
 [[nodiscard]] wire::HeldPursuit held_pursuit(const state::HeldPursuitStatus& held) noexcept {
     const state::PursuitCompletionStatus& completion = held.completion;
     std::uint32_t flags = 0;
@@ -358,8 +356,6 @@ pursuit_objective(const state::PursuitObjectiveStatus& objective) noexcept {
         return wire::Wait::publicationPeer;
     case bap::InvestmentWait::accountResync:
         return wire::Wait::accountResync;
-    case bap::InvestmentWait::responseCapacity:
-        return wire::Wait::responseCapacity;
     case bap::InvestmentWait::catalog:
         return wire::Wait::catalog;
     case bap::InvestmentWait::none:
@@ -532,10 +528,10 @@ InvestmentAnswer encode_season_pass_snapshot(InvestmentPayload payload) noexcept
                    payload);
 }
 
-/** No investment clock is read, so evaluatedAt stays zero. */
+/** Evaluates the selected character's held pursuits against the installed contracts. */
 InvestmentAnswer encode_pursuit_snapshot(InvestmentPayload payload) noexcept {
     state::PursuitSnapshot pursuits{};
-    const state::PursuitSnapshotRefusal refusal = state::read_pursuit_snapshot(0, pursuits);
+    const state::PursuitSnapshotRefusal refusal = state::read_pursuit_snapshot(pursuits);
     if (refusal != state::PursuitSnapshotRefusal::none) {
         return refused(pursuit_refusal_label(refusal));
     }
@@ -566,7 +562,7 @@ InvestmentAnswer encode_unlock_values(const wire::UnlockValuesRequest& request,
     std::array<state::UnlockRead, wire::kUnlockReadCapacity> reads{};
     state::UnlockReadOrigin origin{};
     const state::PursuitSnapshotRefusal refusal =
-        state::read_unlock_values(0, std::span(sources).first(request.count), reads, origin);
+        state::read_unlock_values(std::span(sources).first(request.count), reads, origin);
     if (refusal != state::PursuitSnapshotRefusal::none) {
         return refused(pursuit_refusal_label(refusal));
     }

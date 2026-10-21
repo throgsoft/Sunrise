@@ -15,7 +15,6 @@
 #include "../../core/logging/log.h"
 #include "../../state/build_data/runtime.h"
 #include "../../state/runtime/runtime.h"
-#include "../../state/runtime/season_pass_snapshot_runtime.h"
 #include "internal.h"
 
 namespace sunrise::server::bap {
@@ -40,16 +39,18 @@ static_assert(std::is_same_v<KindRequest<InvestmentOperationKind::setPursuitObje
 static_assert(std::is_same_v<KindRequest<InvestmentOperationKind::completePursuitObjectives>,
                              ObjectiveCompletionOperation>);
 
-/** One submitted operation and where it stands. */
+/** One submitted operation, the editor process that submitted it, and where it stands. */
 struct RetainedOperation {
     InvestmentOperation operation{};
+    std::uint32_t editorPid{};
     InvestmentReceipt receipt{};
 };
 
 /**
- * Every receipt the editor has not acknowledged, oldest first. Guarded by the session lock.
- * Each entry is one explicit editor action, and the editor acknowledges a receipt once it reads it
- * finished, so the table holds no count of its own; only the allocator refuses an entry.
+ * Every receipt an editor has not acknowledged, oldest first. Guarded by the session lock.
+ * Each entry is one explicit editor action, acknowledged once read finished. A dropped link
+ * refuses what is still pending, and a connecting link forgets the receipts of exited editors,
+ * so the table holds no count of its own; only the allocator refuses an entry.
  */
 std::vector<RetainedOperation> g_operations{};
 
@@ -182,15 +183,12 @@ void report_receipt(const char* stage, const InvestmentReceipt& receipt) noexcep
     return {};
 }
 
-/** An edit names the selected character, an installed item and a quantity State can hold. */
+/** An edit names an installed item and a quantity State can hold. */
 [[nodiscard]] InvestmentTransition
 check_request(const state::account::inventory::QuantityEdit& edit,
-              const InvestmentTarget& target) noexcept {
+              const InvestmentTarget& /*target*/) noexcept {
     if (inventory_catalogs_loading()) {
         return deferred_transition(InvestmentWait::catalog);
-    }
-    if (edit.characterSoid != target.characterSoid) {
-        return refused_transition("character_changed");
     }
     if (edit.quantity < 0) {
         return refused_transition("quantity");
@@ -209,34 +207,45 @@ check_request(const state::account::inventory::QuantityEdit& edit,
                                    : InvestmentTransition{};
 }
 
-/** A claim passes every opcode-2400 rule that needs no draw. */
-[[nodiscard]] InvestmentTransition check_request(const SeasonPassClaimOperation& request,
-                                                 const InvestmentTarget& /*target*/) noexcept {
-    const char* reason = nullptr;
-    if (state::season_pass_reward_claimable(request.rewardIndex, request.itemHash, &reason)) {
-        return {};
-    }
-    return state_refusal_transition(reason);
-}
-
-/** A reset names an installed pass row by its index and the item it grants. */
-[[nodiscard]] InvestmentTransition check_request(const SeasonPassResetOperation& request,
-                                                 const InvestmentTarget& /*target*/) noexcept {
+/** A pass operation names an installed row by its index and the item it grants. */
+[[nodiscard]] InvestmentTransition check_season_pass_row(std::uint16_t rewardIndex,
+                                                         std::uint32_t itemHash) noexcept {
     if (!state::build_data::season_pass_ready()) {
         return deferred_transition(InvestmentWait::catalog);
     }
     state::build_data::season_pass::Reward reward{};
-    if (!state::build_data::find_season_pass_reward(request.rewardIndex, reward)) {
+    if (!state::build_data::find_season_pass_reward(rewardIndex, reward)) {
         return refused_transition("reward_index");
     }
-    if (reward.itemHash != request.itemHash) {
+    if (reward.itemHash != itemHash) {
         return refused_transition("reward_hash");
     }
     return {};
 }
 
+/** A claim resolves its reward too; the opcode-2400 rules run when the claim does. */
+[[nodiscard]] InvestmentTransition check_request(const SeasonPassClaimOperation& request,
+                                                 const InvestmentTarget& /*target*/) noexcept {
+    if (state::build_data::reward_definitions_unsupported()) {
+        return refused_transition("rewards_unsupported");
+    }
+    if (!state::build_data::reward_definitions_ready()) {
+        return deferred_transition(InvestmentWait::catalog);
+    }
+    return check_season_pass_row(request.rewardIndex, request.itemHash);
+}
+
+/** A reset clears the row's claim flag alone. */
+[[nodiscard]] InvestmentTransition check_request(const SeasonPassResetOperation& request,
+                                                 const InvestmentTarget& /*target*/) noexcept {
+    return check_season_pass_row(request.rewardIndex, request.itemHash);
+}
+
 /** A pursuit edit names an installed item; State checks the held copy when the edit runs. */
 [[nodiscard]] InvestmentTransition check_pursuit_item(std::uint32_t itemHash) noexcept {
+    if (state::build_data::pursuit_catalog_unsupported()) {
+        return refused_transition("pursuits_unsupported");
+    }
     if (!state::build_data::item_definitions_ready()
         || !state::build_data::objective_definitions_ready()
         || !state::build_data::pursuit_definitions_ready()) {
@@ -375,6 +384,7 @@ bool investment_context(InvestmentContext& output) noexcept {
 
 /** A duplicate identity never runs again: it answers with the receipt already retained. */
 InvestmentSubmission submit_investment_operation(const InvestmentOperation& operation,
+                                                 std::uint32_t editorPid,
                                                  InvestmentReceipt& receipt) noexcept {
     const std::lock_guard lock(session_lock());
     if (const RetainedOperation* retained = find_operation(operation.id)) {
@@ -384,6 +394,7 @@ InvestmentSubmission submit_investment_operation(const InvestmentOperation& oper
     }
     RetainedOperation entry{};
     entry.operation = operation;
+    entry.editorPid = editorPid;
     entry.receipt.operationId = operation.id;
     entry.receipt.target = operation.target;
     entry.receipt.kind = investment_operation_kind(operation);
@@ -440,6 +451,26 @@ bool withdraw_investment_operation(std::uint64_t operationId, InvestmentReceipt&
     }
     receipt = present(*retained);
     return true;
+}
+
+/** Runs under the lane's lock, so no pending operation is executing while it is refused. */
+void refuse_pending_investment_operations(const char* reason) noexcept {
+    const std::lock_guard lock(session_lock());
+    for (RetainedOperation& entry : g_operations) {
+        if (!finished(entry.receipt.state)) {
+            apply_transition(entry.receipt, refused_transition(reason));
+            report_receipt("disconnect", entry.receipt);
+        }
+    }
+}
+
+/** A live editor keeps its receipts, so an operation it reads as unknown never reached here. */
+void forget_exited_editor_receipts(
+    bool (*editorExited)(std::uint32_t editorPid) noexcept) noexcept {
+    const std::lock_guard lock(session_lock());
+    std::erase_if(g_operations, [editorExited](const RetainedOperation& entry) noexcept {
+        return editorExited(entry.editorPid);
+    });
 }
 
 } // namespace sunrise::server::bap

@@ -9,6 +9,16 @@ bool reward_definitions_ready() noexcept {
     return rewards::ready();
 }
 
+/** @return True once the installed data has settled that no reward graph can be read. */
+bool reward_definitions_unsupported() noexcept {
+    return rewards::unsupported();
+}
+
+/** Records that the installed data supports no reward graph. */
+void settle_reward_definitions_unsupported() noexcept {
+    rewards::settle_unsupported();
+}
+
 /** Publishes the complete reward graph in one step. */
 bool publish_reward_definitions(rewards::View definitions) noexcept {
     runtime::persistence::Transaction transaction;

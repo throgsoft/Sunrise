@@ -428,6 +428,12 @@ publish_progression_definitions(std::span<const progressions::Definition> defini
 /** @return True when the reward pools and item wrappers are in State. */
 [[nodiscard]] bool reward_definitions_ready() noexcept;
 
+/** @return True once the installed data has settled that no reward graph can be read. */
+[[nodiscard]] bool reward_definitions_unsupported() noexcept;
+
+/** Records that the installed data supports no reward graph. */
+void settle_reward_definitions_unsupported() noexcept;
+
 /**
  * Publishes the complete reward graph in one step.
  * @param definitions Pools, entries, item rows, conditions, modifiers and socket overrides.
@@ -458,45 +464,54 @@ publish_progression_definitions(std::span<const progressions::Definition> defini
 /** @return True when the objective table read from the installed packages is in State. */
 [[nodiscard]] bool objective_definitions_ready() noexcept;
 
-/** @return Dense objective row count, read under the lock. */
-[[nodiscard]] std::size_t objective_definition_count() noexcept;
+/** Checks an objective table against the rules publish_objective_definitions applies. */
+[[nodiscard]] bool valid_objective_definitions(objectives::View definitions) noexcept;
 
 /**
- * Publishes the whole objective table for this process; it is never cached.
- * @param rows Dense rows in native objective-index order.
- * @return True when every row passes the checks and the table is stored.
+ * Publishes the whole objective table, which the cache keeps with the pursuit contracts.
+ * @param definitions Dense rows in native objective-index order and their instruction bank.
+ * @return True when the table passes the checks and any needed cache write succeeds.
  */
-[[nodiscard]] bool
-publish_objective_definitions(std::span<const objectives::Definition> rows) noexcept;
+[[nodiscard]] bool publish_objective_definitions(objectives::View definitions) noexcept;
 
 /**
  * Reads one objective row.
  * @param index Native objective-table index.
- * @param output Receives a copy of the row.
+ * @param output Receives a copy of the row and its programs.
  * @return True when the table holds that row.
  */
 [[nodiscard]] bool find_objective_definition(std::uint16_t index,
                                              objectives::Definition& output) noexcept;
 
-/** Withdraws the objective table. */
-void clear_objective_definitions() noexcept;
-
 /** @return True when the pursuit completion contracts are in State. */
 [[nodiscard]] bool pursuit_definitions_ready() noexcept;
 
-/** @return Published pursuit contract count, read under the lock. */
-[[nodiscard]] std::size_t pursuit_definition_count() noexcept;
+/**
+ * @return True once the installed data has settled that neither the objective table nor any
+ *         contract can be read; a cache keeps that settlement as an empty objective table.
+ */
+[[nodiscard]] bool pursuit_catalog_unsupported() noexcept;
 
-/** @return A generation that changes only after a complete publication or clear. */
+/** @return A generation that changes after every publication, settlement or clear. */
 [[nodiscard]] std::uint64_t pursuit_definitions_revision() noexcept;
 
 /**
- * Publishes every pursuit completion contract for this process; they are never cached.
+ * Checks contracts against the published item and objective tables, as
+ * publish_pursuit_definitions does; false while either table is unpublished.
+ */
+[[nodiscard]] bool valid_pursuit_definitions(std::span<const pursuits::Definition> rows) noexcept;
+
+/**
+ * Publishes every pursuit completion contract.
  * Requires the item and objective tables, which every contract edge is checked against.
  * @param rows Contracts in ascending item-index order.
- * @return True when every contract passes the checks and the set is stored.
+ * @return True when every contract passes the checks and any needed cache write succeeds.
  */
 [[nodiscard]] bool publish_pursuit_definitions(std::span<const pursuits::Definition> rows) noexcept;
+
+/** Records that the installed data supports no pursuit catalog and withdraws the objective table.
+ */
+void settle_pursuit_catalog_unsupported() noexcept;
 
 /**
  * Reads one pursuit completion contract.
@@ -506,9 +521,6 @@ void clear_objective_definitions() noexcept;
  */
 [[nodiscard]] bool find_pursuit_definition(std::uint16_t index,
                                            pursuits::Definition& output) noexcept;
-
-/** Withdraws every pursuit completion contract. */
-void clear_pursuit_definitions() noexcept;
 
 /** @return True when the repeatable bounty table is in State. */
 [[nodiscard]] bool repeatable_bounties_ready() noexcept;

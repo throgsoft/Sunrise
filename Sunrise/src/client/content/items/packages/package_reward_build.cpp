@@ -94,9 +94,6 @@ constexpr std::uint32_t kClassRow = 0x808074FAU;
 constexpr std::size_t kUseConditionPointer = 24;
 constexpr std::uint32_t kUseConditionClass = 0x80802980U;
 
-/** Set when the installed data refuses the reward tables or graph; no retry can change that. */
-bool g_rewardsUnsupported = false;
-
 /** Logs one refused reward load, sizing or publication. */
 void report_refusal(const char* reason) noexcept {
     core::log::writef(core::log::Channel::client,
@@ -105,11 +102,11 @@ void report_refusal(const char* reason) noexcept {
                       reason);
 }
 
-/** Logs a refusal the installed data decides and settles the domain once. */
+/** Logs a refusal the installed data decides and settles the domain once; no retry changes it. */
 void settle_unsupported(const char* reason) noexcept {
     report_refusal(reason);
-    if (!g_rewardsUnsupported) {
-        g_rewardsUnsupported = true;
+    if (!state::build_data::reward_definitions_unsupported()) {
+        state::build_data::settle_reward_definitions_unsupported();
         core::log::write(core::log::Channel::client,
                          core::log::Level::warn,
                          "ev=pkg stage=rewards result=unsupported");
@@ -214,7 +211,8 @@ bool read_class_flag(std::span<const std::byte> blob, std::uint16_t& output) noe
 
 /** @return True when the reward graph is published or can never be. */
 bool reward_definitions_settled() noexcept {
-    return state::build_data::reward_definitions_ready() || g_rewardsUnsupported;
+    return state::build_data::reward_definitions_ready()
+           || state::build_data::reward_definitions_unsupported();
 }
 
 bool RewardBuild::entry(std::span<const std::byte> blob,
@@ -524,25 +522,6 @@ bool RewardConditions::read(std::span<const std::byte> blob,
         return false;
     }
     range = {static_cast<std::uint32_t>(first), static_cast<std::uint32_t>(bank.size() - first)};
-    return true;
-}
-
-bool RewardConditions::read_index(std::uint16_t index,
-                                  std::vector<domain::Instruction>& output,
-                                  BankFailure& failure) const noexcept {
-    output.clear();
-    failure = BankFailure::none;
-    domain::Range range{};
-    if (!loaded_ || index >= expressionRows_.count
-        || !read(expressions_,
-                 expressionRows_.dataOffset + index * kExpressionRowStride + kExpressionBodyOffset,
-                 output,
-                 range,
-                 failure)
-        || output.empty()) {
-        output.clear();
-        return false;
-    }
     return true;
 }
 

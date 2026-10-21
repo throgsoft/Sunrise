@@ -1,6 +1,6 @@
 #include "package_pursuit_build.h"
 
-#include <utility>
+#include <algorithm>
 
 #include "../../../../core/logging/log.h"
 #include "../../../../middleware/content/packages/tables/definition_index_table.h"
@@ -21,19 +21,15 @@ constexpr std::uint32_t kCompletionOperationTableClass = 0x808078BBU;
 constexpr std::size_t kCompletionOperationRowStride = 0x120;
 
 static_assert(pursuits::kObjectiveCapacity == tables::items::kObjectiveCapacity);
-static_assert(pursuits::kRewardCapacity == tables::items::kRewardCapacity);
 static_assert(pursuits::kAbsent == tables::items::kAbsentReference);
-
-/** Set once the installed data refuses an objective or pursuit table; no retry changes that. */
-bool g_pursuitsUnsupported = false;
 
 } // namespace
 
 void settle_pursuits_unsupported(const char* reason) noexcept {
-    if (g_pursuitsUnsupported) {
+    if (state::build_data::pursuit_catalog_unsupported()) {
         return;
     }
-    g_pursuitsUnsupported = true;
+    state::build_data::settle_pursuit_catalog_unsupported();
     core::log::writef(core::log::Channel::client,
                       core::log::Level::warn,
                       "ev=pkg stage=pursuits result=unsupported reason=%s",
@@ -42,7 +38,8 @@ void settle_pursuits_unsupported(const char* reason) noexcept {
 
 /** @return True when the pursuit contracts are published or can never be. */
 bool pursuit_catalog_settled() noexcept {
-    return state::build_data::pursuit_definitions_ready() || g_pursuitsUnsupported;
+    return state::build_data::pursuit_definitions_ready()
+           || state::build_data::pursuit_catalog_unsupported();
 }
 
 bool load_pursuit_conditions(RewardConditions& conditions,
@@ -136,32 +133,14 @@ bool PursuitBuild::item(const tables::items::Row& row) noexcept {
             output.requireAllObjectives = row.requireAllObjectives;
             output.requireNonOptionalCompletion = row.requireNonOptionalCompletion;
             output.automaticCompletion = row.automaticCompletion;
-            output.objectives.assign(row.objectiveIndices,
-                                     row.objectiveIndices + row.objectiveCount);
+            std::copy_n(row.objectiveIndices, row.objectiveCount, output.objectives.begin());
+            output.objectiveCount = row.objectiveCount;
             output.completionValue = value(row.completionValueIndex);
             output.completionContextValue = value(row.completionContextValueIndex);
             output.secondaryOperation = operation(row.secondaryOperationIndex);
             output.primaryOperation = operation(row.primaryOperationIndex);
         }
-        output.rewardsReadable = output.readable && row.rewardMetadataValid;
-        if (output.rewardsReadable) {
-            for (std::size_t i = 0; i < row.rewardCount; ++i) {
-                const tables::items::Reward& native = row.rewards[i];
-                pursuits::RewardPreview reward{};
-                reward.itemIndex = native.itemIndex;
-                reward.quantity = native.quantity;
-                reward.conditionIndex = native.conditionIndex;
-                BankFailure failure{};
-                reward.conditionReadable =
-                    native.conditionIndex == pursuits::kAbsent
-                    || conditions_.read_index(native.conditionIndex, reward.condition, failure);
-                if (failure != BankFailure::none) {
-                    return false;
-                }
-                output.rewards.push_back(std::move(reward));
-            }
-        }
-        rows_.push_back(std::move(output));
+        rows_.push_back(output);
         return true;
     } catch (...) {
         return false;
@@ -185,13 +164,18 @@ void PursuitBuild::publish() noexcept {
         unresolved += row.primaryOperation.index != pursuits::kAbsent
                       || row.secondaryOperation.index != pursuits::kAbsent;
     }
-    const bool published = state::build_data::publish_pursuit_definitions(rows_);
+    const bool valid = state::build_data::valid_pursuit_definitions(rows_);
+    // A cache write can still fail, so a refused publish walks again on a later pass.
+    const bool published = valid && state::build_data::publish_pursuit_definitions(rows_);
     const std::size_t rowCount = rows_.size();
     // State keeps its own copy; this pass never walks for pursuits again.
     rows_ = {};
     ready_ = false;
+    if (!valid) {
+        settle_pursuits_unsupported("contracts");
+        return;
+    }
     if (!published) {
-        settle_pursuits_unsupported("publish");
         return;
     }
     core::log::writef(core::log::Channel::client,

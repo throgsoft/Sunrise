@@ -111,6 +111,9 @@
     <ClCompile Include="src\client\content\items\packages\package_objective_build.cpp" />
     <ClCompile Include="src\client\content\items\packages\package_pursuit_build.cpp" />
     <ClCompile Include="src\state\build_data\objectives\objective_build_data_runtime.cpp" />
+    <ClCompile Include="src\state\build_data\objectives\objective_catalog.cpp" />
+    <ClCompile Include="src\state\build_data\pursuits\pursuit_catalog.cpp" />
+    <ClCompile Include="src\state\build_data\cache\records\cache_pursuit_records.cpp" />
     <ClCompile Include="src\state\build_data\pursuits\pursuit_build_data_runtime.cpp" />
     <ClCompile Include="src\state\runtime\pursuit_completion_runtime.cpp" />
     <ClCompile Include="src\state\runtime\pursuit_snapshot_runtime.cpp" />
@@ -1376,6 +1379,8 @@
     <ClInclude Include="src\client\content\items\packages\package_reward_build.h" />
     <ClInclude Include="src\state\rewards\reward_resolver.h" />
     <ClInclude Include="src\state\build_data\rewards\reward_catalog.h" />
+    <ClInclude Include="src\state\build_data\objectives\objective_catalog.h" />
+    <ClInclude Include="src\state\build_data\pursuits\pursuit_catalog.h" />
     <ClInclude Include="src\state\build_data\rewards\definition.h" />
     <ClInclude Include="src\client\content\items\packages\package_objective_build.h" />
     <ClInclude Include="src\client\content\items\packages\package_pursuit_build.h" />

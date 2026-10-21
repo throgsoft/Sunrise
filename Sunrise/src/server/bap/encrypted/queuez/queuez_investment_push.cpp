@@ -2,20 +2,19 @@
 
 #include <Windows.h>
 
-#include <array>
 #include <memory>
 #include <new>
 #include <span>
+#include <utility>
 #include <variant>
 
 #include "../../../../middleware/secure_channel/runtime.h"
-#include "../../../../middleware/web_service/messages/opcode2400.h"
 #include "../../../../state/account/inventory/inventory_edit.h"
 #include "../../../../state/build_data/runtime.h"
 #include "../../../../state/investment/store_internal.h"
-#include "../../../../state/progression/season_pass_reward_catalog.h"
 #include "../../../../state/runtime/pursuit_edit.h"
 #include "../../../../state/runtime/runtime.h"
+#include "../../../web_service/web_service_actions.h"
 #include "../transactions/service_outcome_commit.h"
 #include "queuez_item_grant_push.h"
 #include "queuez_reward_staging.h"
@@ -99,9 +98,6 @@ commit_and_publish(state::investment::store::Transaction& transaction,
                    Scratch& scratch,
                    std::span<std::byte> response,
                    std::size_t& written) noexcept {
-    if (frame.size > response.size()) {
-        return deferred_transition(InvestmentWait::responseCapacity);
-    }
     if (!transaction.commit()) {
         return refused_transition("transaction");
     }
@@ -136,11 +132,11 @@ commit_and_publish(state::investment::store::Transaction& transaction,
     case ItemGrantStage::committed:
         break;
     case ItemGrantStage::waiting:
-        return deferred_transition(InvestmentWait::responseCapacity);
     case ItemGrantStage::deferred:
     case ItemGrantStage::unresolvable:
     case ItemGrantStage::failed:
-        // One explicit grant never waits on a draw or a full inventory; the editor resubmits.
+        // The lane lends a whole frame, so nothing waits for one, and one explicit grant never
+        // waits on a draw or a full inventory; the editor resubmits.
         return state_refusal_transition(reason);
     }
     if (!transaction.commit()) {
@@ -203,9 +199,6 @@ commit_and_publish(state::investment::store::Transaction& transaction,
     }
     middleware::secure_channel::advance_nonce(frame.sendNonce);
     frame.after = dismantle.after;
-    if (frame.size > response.size()) {
-        return deferred_transition(InvestmentWait::responseCapacity);
-    }
     if (!state::commit_item_dismantle(*pending)) {
         return refused_transition("inventory_commit");
     }
@@ -277,7 +270,7 @@ commit_and_publish(state::investment::store::Transaction& transaction,
     return transition;
 }
 
-/** Claims one pass row through the native opcode-2400 handler, as the client's request would. */
+/** Claims one pass row as a client's opcode-2400 request does once it is decoded. */
 [[nodiscard]] InvestmentTransition publish_operation(const SeasonPassClaimOperation& request,
                                                      const InvestmentTarget& target,
                                                      Session& session,
@@ -285,44 +278,30 @@ commit_and_publish(state::investment::store::Transaction& transaction,
                                                      std::span<std::byte> response,
                                                      std::size_t& written,
                                                      bool& touchesScratch) noexcept {
-    namespace codec = middleware::web_service::messages::opcode2400;
-    std::array<std::byte, codec::kRequestSize> body{};
-    std::size_t bodySize = 0;
-    // No client task waits on this request, so its transaction id correlates nothing.
-    if (!codec::encode_request(
-            {state::progression::season_pass::kProgressionDefinitionIndex, request.rewardIndex},
-            0,
-            body,
-            bodySize)) {
-        return refused_transition("reward_index");
+    auto pending = std::unique_ptr<state::PendingSeasonPassReward>(
+        new (std::nothrow) state::PendingSeasonPassReward);
+    if (!pending) {
+        return refused_transition("allocation");
     }
     state::investment::store::Transaction transaction;
     if (!transaction.ready()) {
         return refused_transition("transaction");
     }
-    ServiceRoute route{};
-    route.bodyCodec = BodyCodec::webService;
-    ServiceOutcome outcome{};
-    std::size_t replySize = 0;
-    touchesScratch = true;
-    // The handler draws the seed and stages the claim flag; the reply it encodes is not sent.
-    const bool processed = body::process(route,
-                                         session.queuez,
-                                         session.activity,
-                                         session.activityRosterDecode,
-                                         session.matchmakingContext,
-                                         std::span<const std::byte>(body).first(bodySize),
-                                         scratch.responseBody,
-                                         replySize,
-                                         outcome);
-    const auto* claim = processed ? transaction_if<SeasonPassRewardTransaction>(outcome) : nullptr;
-    if (claim == nullptr || claim->pending == nullptr) {
-        return refused_transition(outcome.refusal != nullptr ? outcome.refusal : "claim_rejected");
+    const char* reason = nullptr;
+    if (!web_service::prepare_season_pass_claim(request.rewardIndex, *pending, reason)) {
+        return state_refusal_transition(reason);
     }
-    if (claim->pending->grant.characterSoid != target.characterSoid) {
+    if (pending->grant.characterSoid != target.characterSoid) {
         return refused_transition("character_changed");
     }
-    const auto changedRows = static_cast<std::uint32_t>(claim->pending->grant.rewardCount);
+    ServiceOutcome outcome{};
+    auto* claim = body::stage_season_pass_reward(session.queuez, *pending, outcome);
+    if (claim == nullptr) {
+        return refused_transition("reward_preflight");
+    }
+    const auto changedRows = static_cast<std::uint32_t>(pending->grant.rewardCount);
+    claim->pending = std::move(pending);
+    touchesScratch = true;
     StagedFrame frame{};
     frame.sendNonce = session.sendNonce;
     if (!queuez::stage_reward_outcome(scratch,
@@ -337,11 +316,7 @@ commit_and_publish(state::investment::store::Transaction& transaction,
         || frame.size == 0) {
         return refused_transition("inventory_encode");
     }
-    if (frame.size > response.size()) {
-        return deferred_transition(InvestmentWait::responseCapacity);
-    }
     transactions::Publication publication{};
-    const char* reason = nullptr;
     if (!transactions::commit(outcome, publication, reason)) {
         return refused_transition(reason != nullptr ? reason : "inventory_commit");
     }

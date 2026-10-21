@@ -119,7 +119,6 @@ enum class InvestmentWait : std::uint8_t {
     none,
     publicationPeer,
     accountResync,
-    responseCapacity,
     catalog,
 };
 
@@ -186,9 +185,11 @@ investment_operation_kind(const InvestmentOperation& operation) noexcept;
  * Validates an operation without drawing or writing, and retains its receipt until acknowledged.
  * An operation refused here is retained too, unless no storage was left for it.
  * @param operation Operation with a nonzero identity.
+ * @param editorPid Process id of the editor that submitted it.
  * @param receipt Receives the new receipt, or the one already retained under that identity.
  */
 [[nodiscard]] InvestmentSubmission submit_investment_operation(const InvestmentOperation& operation,
+                                                               std::uint32_t editorPid,
                                                                InvestmentReceipt& receipt) noexcept;
 
 /** @return False with an empty receipt when no receipt is retained under that identity. */
@@ -210,5 +211,18 @@ investment_operation_kind(const InvestmentOperation& operation) noexcept;
  */
 [[nodiscard]] bool withdraw_investment_operation(std::uint64_t operationId,
                                                  InvestmentReceipt& receipt) noexcept;
+
+/**
+ * Refuses every queued or deferred operation, because the editor that would read how it ended
+ * is gone. Finished receipts stay for that editor to read when it returns.
+ * @param reason Static label each refused receipt carries.
+ */
+void refuse_pending_investment_operations(const char* reason) noexcept;
+
+/**
+ * Forgets the receipts of every editor that has exited; only that editor knew their ids.
+ * @param editorExited True once no process runs under the editor's process id.
+ */
+void forget_exited_editor_receipts(bool (*editorExited)(std::uint32_t editorPid) noexcept) noexcept;
 
 } // namespace sunrise::server::bap

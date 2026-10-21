@@ -36,8 +36,6 @@ struct Outcome {
     state::ArtifactResetResult artifactReset{};
     /** A WS-701 carried the profile-setup completion marker and State refused it. */
     bool profileSetupRefused{};
-    /** Static label of the action this request refused, or null. */
-    const char* refusal{};
     /** A request prepares at most one State mutation and allocates only that exact payload. */
     using Mutation = std::variant<std::monostate,
                                   std::unique_ptr<state::PendingPostmasterClaim>,

@@ -60,7 +60,10 @@ namespace {
            && counts.rewardItems <= output.rewardItems.size()
            && counts.rewardInstructions <= output.rewardInstructions.size()
            && counts.rewardModifiers <= output.rewardModifiers.size()
-           && counts.rewardSockets <= output.rewardSockets.size();
+           && counts.rewardSockets <= output.rewardSockets.size()
+           && counts.objectives <= output.objectives.size()
+           && counts.objectiveInstructions <= output.objectiveInstructions.size()
+           && counts.pursuits <= output.pursuits.size();
 }
 
 /** @return The header's row counts, as platform sizes. */
@@ -108,6 +111,9 @@ namespace {
         header.rewardInstructionCount,
         header.rewardModifierCount,
         header.rewardSocketCount,
+        header.objectiveCount,
+        header.objectiveInstructionCount,
+        header.pursuitCount,
     };
 }
 

@@ -4,10 +4,14 @@
 
 namespace sunrise::state::build_data::rewards {
 
-/** Discards the reward graph and every borrowed bank. */
+/** Discards the reward graph and every borrowed bank, and forgets an unsupported settlement. */
 void clear() noexcept;
 /** True once pool and item banks have been published. */
 [[nodiscard]] bool ready() noexcept;
+/** True once the installed data has settled that no reward graph can be read. */
+[[nodiscard]] bool unsupported() noexcept;
+/** Records that the installed data supports no reward graph. */
+void settle_unsupported() noexcept;
 /** Checks bank ranges, item references and bounded acyclic pool and wrapper traversal. */
 [[nodiscard]] bool valid(View data) noexcept;
 /** Publishes validated banks together under the catalog lock. */

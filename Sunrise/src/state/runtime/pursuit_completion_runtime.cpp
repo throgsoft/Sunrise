@@ -77,11 +77,11 @@ inspect_pursuit_objective(const objectives::Definition& objective,
 void inspect_pursuit_objectives(const pursuits::Definition& definition,
                                 const reward_resolution::Context& context,
                                 PursuitCompletionStatus& status) noexcept {
-    status.objectiveCount = static_cast<std::uint8_t>(definition.objectives.size());
+    status.objectiveCount = static_cast<std::uint8_t>(definition.objectiveCount);
     std::size_t completed = 0;
     std::size_t incomplete = 0;
     std::size_t unknown = 0;
-    for (std::size_t i = 0; i < definition.objectives.size(); ++i) {
+    for (std::size_t i = 0; i < definition.objectiveCount; ++i) {
         PursuitObjectiveStatus& result = status.objectives[i];
         result.index = definition.objectives[i];
         objectives::Definition objective{};
@@ -202,7 +202,7 @@ PursuitCompletionStatus
 inspect_pursuit_completion(const pursuits::Definition& definition,
                            const reward_resolution::Context& context) noexcept {
     PursuitCompletionStatus status{};
-    if (!definition.readable || definition.objectives.size() > status.objectives.size()) {
+    if (!definition.readable || definition.objectiveCount > status.objectives.size()) {
         return status;
     }
     inspect_pursuit_objectives(definition, context, status);

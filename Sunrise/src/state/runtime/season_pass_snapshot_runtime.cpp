@@ -106,7 +106,7 @@ bool read_season_pass_snapshot(SeasonPassSnapshot& output, const char** refusal)
     const char* unused = nullptr;
     auto& reason = refusal != nullptr ? *refusal : unused;
     output = {};
-    reason = "not_ready";
+    reason = build_data::reward_definitions_unsupported() ? "rewards_unsupported" : "not_ready";
     if (!catalogs_ready()) {
         return false;
     }
@@ -122,49 +122,6 @@ bool read_season_pass_snapshot(SeasonPassSnapshot& output, const char** refusal)
     output.rowCount = (std::min)(build_data::season_pass_reward_count(), output.rows.size());
     for (std::size_t index = 0; index < output.rowCount; ++index) {
         output.rows[index] = row_status(static_cast<std::uint16_t>(index), saved);
-    }
-    reason = nullptr;
-    return true;
-}
-
-/** Checks the claim handler's draw-free rules against one coherent saved pass view. */
-bool season_pass_reward_claimable(std::uint16_t rewardIndex,
-                                  std::uint32_t itemHash,
-                                  const char** refusal) noexcept {
-    const char* unused = nullptr;
-    auto& reason = refusal != nullptr ? *refusal : unused;
-    reason = "not_ready";
-    if (!catalogs_ready()) {
-        return false;
-    }
-    SavedPass saved{};
-    if (!read_saved_pass(saved, reason)) {
-        return false;
-    }
-    reason = "selected_character";
-    if (saved.characterSoid == 0) {
-        return false;
-    }
-    const SeasonPassRowStatus row = row_status(rewardIndex, saved);
-    reason = "reward_index";
-    if (!row.available) {
-        return false;
-    }
-    reason = "reward_hash";
-    if (row.itemHash != itemHash) {
-        return false;
-    }
-    reason = "rank";
-    if (!row.rankMet) {
-        return false;
-    }
-    reason = "already_claimed";
-    if (row.claimed) {
-        return false;
-    }
-    reason = "reward_condition";
-    if (!row.conditionMet) {
-        return false;
     }
     reason = nullptr;
     return true;

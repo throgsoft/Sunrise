@@ -19,7 +19,9 @@
 #include "items/socket_plugs/socket_plug_catalog.h"
 #include "material_requirements/material_requirement_catalog.h"
 #include "nodes/node_catalog.h"
+#include "objectives/objective_catalog.h"
 #include "progressions/progression_catalog.h"
+#include "pursuits/pursuit_catalog.h"
 #include "records/record_catalog.h"
 #include "rewards/reward_catalog.h"
 #include "runtime.h"
@@ -60,8 +62,6 @@ bool initialize(void* module, std::uint64_t configuredEquipmentHash) noexcept {
     AcquireSRWLockExclusive(&persistenceState.lock);
     runtime::persistence::clear_locked(persistenceState);
     runtime::clear_catalogs();
-    clear_objective_definitions();
-    clear_pursuit_definitions();
     gameplay::entity_position_profiles::reset();
     gameplay::entity_object_types::reset();
     if (module == nullptr) {
@@ -118,6 +118,14 @@ bool initialize(void* module, std::uint64_t configuredEquipmentHash) noexcept {
     const bool catalystCatalogAvailable = !domains.exoticCatalysts.empty();
     const bool catalystsReplaced =
         !catalystCatalogAvailable || items::catalysts::replace(domains.exoticCatalysts);
+    // A cache with no objective table records a build whose pursuit catalog is unsupported.
+    bool pursuitsReplaced = true;
+    if (domains.objectives.empty()) {
+        pursuits::settle_unsupported();
+    } else {
+        pursuitsReplaced = objectives::replace({domains.objectives, domains.objectiveInstructions})
+                           && pursuits::replace(domains.pursuits, domains.objectives.size());
+    }
     const constants::InvestmentConstants cachedConstants{
         domains.constants.extracted != 0,
         domains.constants.lightStatRow,
@@ -132,7 +140,7 @@ bool initialize(void* module, std::uint64_t configuredEquipmentHash) noexcept {
                               domains.rewardInstructions,
                               domains.rewardModifiers,
                               domains.rewardSockets})
-        || !material_requirements::replace(domains.materialRequirementSets)
+        || !pursuitsReplaced || !material_requirements::replace(domains.materialRequirementSets)
         || !inventory::buckets::replace(domains.inventoryBuckets)
         || !socket_entry_lists::replace(domains.socketEntryLists)
         // The per-entry tables are what the subclass selection reads. Without them a cache hit
@@ -198,8 +206,6 @@ void shutdown() noexcept {
     runtime::persistence::Context& persistenceState = runtime::persistence::context();
     AcquireSRWLockExclusive(&persistenceState.lock);
     runtime::clear_catalogs();
-    clear_objective_definitions();
-    clear_pursuit_definitions();
     gameplay::entity_position_profiles::reset();
     gameplay::entity_object_types::reset();
     runtime::persistence::clear_locked(persistenceState);

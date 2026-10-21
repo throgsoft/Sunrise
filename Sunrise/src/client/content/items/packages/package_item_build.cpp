@@ -178,8 +178,7 @@ bool build() noexcept {
                     continue;
                 }
             }
-            // Objectives are process-local, so a warm cache still reads them; a failure settles
-            // or retries on its own and never holds up the other domains.
+            // A failure settles or retries on its own and never holds up the other domains.
             if (!pursuit_catalog_settled()) {
                 (void)build_objectives(source,
                                        storage.scratch,

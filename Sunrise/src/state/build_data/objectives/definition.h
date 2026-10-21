@@ -2,28 +2,60 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <span>
 #include <vector>
 
 #include "../../unlocks/unlocks_expression.h"
+#include "../rewards/definition.h"
 
 namespace sunrise::state::build_data::objectives {
 
 /** The shipped build declares 8,483 objectives. The domain leaves room above that. */
 inline constexpr std::size_t kDefinitionCapacity = 16384;
+/**
+ * The shipped build's programs expand to at most 117,168 instructions: 52,204 progress and
+ * 64,964 target adjustment. The bank leaves room above that.
+ */
+inline constexpr std::size_t kInstructionCapacity = 131072;
 /** All bits set mark an objective whose progress is not a per-item value. */
 inline constexpr std::uint16_t kNoItemValue = 0xFFFF;
 
 /** Whether an item value uses the inspected instance or the maximum over held instances. */
 enum class ItemValueMode : std::uint8_t { context, maximum };
 
-/** One row of the dense installed objective table. */
+/** One stored objective row; both programs are ranges of the instruction bank. */
+struct Row {
+    std::uint32_t definitionHash{};
+    std::int32_t completionValue{};
+    std::uint16_t definitionIndex{};
+    bool optional{};
+    bool countsDown{};
+    /** False when the optional target adjustment could not be bound; empty is valid. */
+    bool adjustmentReadable{};
+    /** The native evaluator subtracts this program's value from completionValue. */
+    rewards::Range targetAdjustment{};
+    /** The progress source is a per-item value that each instance carries. */
+    bool itemProgress{};
+    ItemValueMode itemValueMode{};
+    /** Native value-table index of the per-item source, or kNoItemValue. */
+    std::uint16_t itemValueIndex{kNoItemValue};
+    /** False when the installed progress expression could not be bound. */
+    bool readable{};
+    rewards::Range expression{};
+};
+
+/** The dense objective table and the instruction bank its rows name. */
+struct View {
+    std::span<const Row> rows;
+    std::span<const unlocks::Instruction> instructions;
+};
+
+/** One objective row with its programs copied out of the bank. */
 struct Definition {
     std::uint32_t definitionHash{};
     std::int32_t completionValue{};
     std::uint16_t definitionIndex{};
     bool optional{};
-    bool allowNegativeValue{};
-    bool allowValueChangeWhenCompleted{};
     bool countsDown{};
     /** False when the optional target adjustment could not be bound; empty is valid. */
     bool adjustmentReadable{};

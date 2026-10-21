@@ -90,18 +90,7 @@ constexpr std::size_t kRequireNonOptionalCompletionOffset = 0x18;
 constexpr std::size_t kAutomaticCompletionOffset = 0x19;
 constexpr std::size_t kCompletionValueOffset = 0x1A;
 /** A bounty declares its lifetime as a one-row expression array at this field. */
-constexpr std::size_t kLifetimeExpressionField = 192;
-/** Item +0x98 holds the reward-preview block offset relative to that field; zero means absent. */
-constexpr std::size_t kRewardPreviewBlockOffset = 0x98;
-constexpr std::uint32_t kRewardPreviewBlockClass = 0x80807875U;
-/** The block's 32-bit declared count precedes every fixed slot, declared or not. */
-constexpr std::size_t kRewardPreviewSlotsOffset = sizeof(std::uint32_t);
-/** One slot is a 32-bit item index, a signed quantity, then a 32-bit condition index. */
-constexpr std::size_t kRewardPreviewSlotStride = 12;
-constexpr std::size_t kRewardPreviewQuantityOffset = 4;
-constexpr std::size_t kRewardPreviewConditionOffset = 8;
-/** The class ID of a serialized block sits immediately before its payload. */
-constexpr std::size_t kBlockClassPrefixSize = sizeof(std::uint32_t);
+constexpr std::size_t kLifetimeExpressionField = 0xC0;
 
 /**
  * Reads the socket entry list index a definition declares.
@@ -344,93 +333,6 @@ void read_stats(std::span<const std::byte> definition, Row& row) noexcept {
     row.statCount = static_cast<std::uint8_t>(count);
 }
 
-/**
- * Locates an optional class-tagged block through its self-relative field.
- * @param present Receives whether the field names a block; false with success means absent.
- * @return False when the field is unreadable or names an out-of-bounds or wrong-class block.
- */
-[[nodiscard]] bool optional_block(std::span<const std::byte> definition,
-                                  std::size_t field,
-                                  std::uint32_t expectedClass,
-                                  std::size_t& block,
-                                  bool& present) noexcept {
-    present = false;
-    std::int64_t delta = 0;
-    if (!read(definition, field, delta)) {
-        return false;
-    }
-    if (delta == 0) {
-        return true;
-    }
-    std::uint32_t actualClass = 0;
-    if (!relative(definition, field, block) || block < kBlockClassPrefixSize
-        || !read(definition, block - kBlockClassPrefixSize, actualClass)
-        || actualClass != expectedClass) {
-        return false;
-    }
-    present = true;
-    return true;
-}
-
-/** Reads one serialized boolean, refusing any byte other than zero or one. */
-[[nodiscard]] bool
-read_boolean(std::span<const std::byte> definition, std::size_t offset, bool& value) noexcept {
-    std::uint8_t raw = 0;
-    if (!read(definition, offset, raw) || raw > 1) {
-        return false;
-    }
-    value = raw != 0;
-    return true;
-}
-
-/** A declared slot names an item; every slot past the count carries the empty pattern. */
-[[nodiscard]] bool valid_reward_slot(bool declared,
-                                     std::uint32_t item,
-                                     std::int32_t quantity,
-                                     std::uint32_t condition) noexcept {
-    if (item > kAbsentReference || condition > kAbsentReference || quantity < 0) {
-        return false;
-    }
-    return declared ? item != kAbsentReference
-                    : item == kAbsentReference && condition == kAbsentReference && quantity == 0;
-}
-
-/** Reads every reward-preview slot; one malformed slot refuses the whole preview. */
-[[nodiscard]] bool read_reward_metadata(std::span<const std::byte> definition, Row& row) noexcept {
-    row.rewardCount = 0;
-    std::size_t block = 0;
-    bool present = false;
-    if (!optional_block(
-            definition, kRewardPreviewBlockOffset, kRewardPreviewBlockClass, block, present)) {
-        return false;
-    }
-    if (!present) {
-        return true;
-    }
-    std::uint32_t count = 0;
-    if (!read(definition, block, count) || count > kRewardCapacity) {
-        return false;
-    }
-    for (std::size_t slot = 0; slot < kRewardCapacity; ++slot) {
-        const std::size_t at = block + kRewardPreviewSlotsOffset + slot * kRewardPreviewSlotStride;
-        std::uint32_t item = 0;
-        std::uint32_t condition = 0;
-        std::int32_t quantity = 0;
-        if (!read(definition, at, item)
-            || !read(definition, at + kRewardPreviewQuantityOffset, quantity)
-            || !read(definition, at + kRewardPreviewConditionOffset, condition)
-            || !valid_reward_slot(slot < count, item, quantity, condition)) {
-            return false;
-        }
-        if (slot < count) {
-            row.rewards[slot] = {
-                static_cast<std::uint16_t>(item), static_cast<std::uint16_t>(condition), quantity};
-        }
-    }
-    row.rewardCount = static_cast<std::uint8_t>(count);
-    return true;
-}
-
 /** Reads the completion controls and native value references of one objective block. */
 [[nodiscard]] bool read_completion_metadata(std::span<const std::byte> definition,
                                             std::size_t block,
@@ -472,7 +374,7 @@ read_boolean(std::span<const std::byte> definition, std::size_t offset, bool& va
     }
     std::size_t block = 0;
     bool present = false;
-    if (!optional_block(
+    if (!class_block(
             definition, kItemObjectiveBlockOffset, kItemObjectiveBlockClass, block, present)) {
         return false;
     }
@@ -551,8 +453,6 @@ bool read_definition(std::span<const std::byte> definition, Row& row) noexcept {
     read_socket_entry_list(definition, row);
     read_equipment_slot(definition, row.equipmentSlot, row.rawEquipmentSlot);
     row.objectiveMetadataValid = read_pursuit_metadata(definition, row);
-    row.rewardMetadataValid = row.objectiveMetadataValid && row.objectiveCount != 0
-                              && read_reward_metadata(definition, row);
     read_sockets(definition, row);
     return true;
 }

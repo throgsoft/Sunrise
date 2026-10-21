@@ -30,8 +30,6 @@ inline constexpr std::uint16_t kUnavailableSocketType = 0xFFFF;
 inline constexpr std::int8_t kEmptyOverrideKey = -1;
 /** The installed pursuit objective block supports seven displayed objectives. */
 inline constexpr std::size_t kObjectiveCapacity = 7;
-/** The serialized reward-preview block has six fixed slots. */
-inline constexpr std::size_t kRewardCapacity = 6;
 /** All bits set marks an absent 16-bit item, objective, value or operation reference. */
 inline constexpr std::uint16_t kAbsentReference = 0xFFFFU;
 
@@ -40,13 +38,6 @@ struct RenderOverride {
     std::uint8_t stage{};
     std::int8_t key{kEmptyOverrideKey};
     std::uint16_t value{};
-};
-
-/** One displayed reward-preview slot: an item, its quantity and an optional shared condition. */
-struct Reward {
-    std::uint16_t itemIndex{kAbsentReference};
-    std::uint16_t conditionIndex{kAbsentReference};
-    std::int32_t quantity{};
 };
 
 /** One item row read from its own definition blob. */
@@ -99,8 +90,6 @@ struct Row {
     RenderOverride renderOverrides[kRenderOverrideCapacity]{};
     /** Pursuit metadata is optional: an unreadable block leaves the identity row usable. */
     bool objectiveMetadataValid{true};
-    /** Set only when an objective-bearing pursuit's reward preview was read. */
-    bool rewardMetadataValid{};
     /** A present objective block declares these completion controls, even without objectives. */
     bool hasCompletionMetadata{};
     /** Completion operation rows; native completion invokes the secondary before the primary. */
@@ -117,8 +106,6 @@ struct Row {
     std::uint16_t objectiveIndices[kObjectiveCapacity]{};
     /** Positive for a bounty, which expires this many seconds after it is acquired. */
     std::int32_t lifetimeSeconds{};
-    std::uint8_t rewardCount{};
-    Reward rewards[kRewardCapacity]{};
 };
 
 /**

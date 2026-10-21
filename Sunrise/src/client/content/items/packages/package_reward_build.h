@@ -50,10 +50,6 @@ public:
                             std::vector<state::build_data::rewards::Instruction>& bank,
                             state::build_data::rewards::Range& range,
                             BankFailure& failure) const noexcept;
-    /** Expands one shared expression row by native index; the output is empty on refusal. */
-    [[nodiscard]] bool read_index(std::uint16_t index,
-                                  std::vector<state::build_data::rewards::Instruction>& output,
-                                  BankFailure& failure) const noexcept;
     /** Expands a list of expressions into one program where every expression must hold. */
     [[nodiscard]] bool read_list(std::span<const std::byte> blob,
                                  std::size_t at,

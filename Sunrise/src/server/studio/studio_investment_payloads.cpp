@@ -167,7 +167,10 @@ void append_profile(const state::AccountState& account,
     record.mutationSerial = item.mutationSerial;
     record.level = item.level;
     record.itemFlags = item.flags;
-    record.bucketId = bucket_of(item.definitionHash);
+    // A Lost Items resident is reported in the bucket it occupies, not its authored one.
+    record.bucketId = item.placement == state::account::inventory::ItemPlacement::lostItems
+                          ? state::build_data::inventory::buckets::kLostItemsBucketId
+                          : bucket_of(item.definitionHash);
     record.equipmentSlot = equipmentSlot;
     record.socketPolicy = static_cast<std::uint8_t>(item.sockets.policy);
     const std::size_t plugCount = (std::min)(item.sockets.plugCount, record.plugs.size());

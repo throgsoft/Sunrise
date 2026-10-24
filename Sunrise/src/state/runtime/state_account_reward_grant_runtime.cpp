@@ -2,10 +2,12 @@
  * Grants that no purchase pays for: season pass rewards, record rewards, and the
  * default emote collection.
  */
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
 #include <limits>
+#include <span>
 
 #include "../../middleware/datagen/family4/account/layout.h"
 #include "../../middleware/datagen/family4/character/layout.h"
@@ -28,108 +30,6 @@ namespace item_details = build_data::items::details;
 namespace inventory_buckets = build_data::inventory::buckets;
 namespace family4_loadout = middleware::datagen::family4::loadout;
 
-/** Checks whether a reward's mutation identity survives the completed batch. */
-[[nodiscard]] static bool
-reward_retained(const PreparedRecordReward& reward,
-                const CharacterState& character,
-                std::span<const authored_inventory::ProfileItem> profile) noexcept {
-    switch (reward.kind) {
-    case RecordRewardKind::characterInstance:
-        return reward.stateIndex < character.inventory.count
-               && character.inventory.values[reward.stateIndex].instanceSoid == reward.instanceSoid;
-    case RecordRewardKind::characterStack:
-        return reward.stateIndex < character.stacks.count
-               && character.stacks.values[reward.stateIndex].mutationSerial
-                      == reward.mutationSerial;
-    case RecordRewardKind::profileStack:
-        return reward.stateIndex < profile.size()
-               && profile[reward.stateIndex].mutationSerial == reward.mutationSerial;
-    case RecordRewardKind::accountUnlock:
-        return true;
-    }
-    return false;
-}
-
-/** Recomputes positions after FIFO compaction may have moved an earlier grant. */
-[[nodiscard]] static bool
-refresh_reward_position(PreparedRecordReward& reward,
-                        const CharacterState& character,
-                        const family4_loadout::ResolvedLoadout& loadout) noexcept {
-    if (reward.kind == RecordRewardKind::characterInstance) {
-        reward.stateIndex = character.inventory.count;
-        for (std::size_t row = 0; row < character.inventory.count; ++row) {
-            if (character.inventory.values[row].instanceSoid == reward.instanceSoid) {
-                reward.stateIndex = row;
-                std::uint8_t slot = 0;
-                if (!find_unequipped_row(loadout, reward.instanceSoid, reward.inventoryRow, slot)) {
-                    return false;
-                }
-                break;
-            }
-        }
-    } else if (reward.kind == RecordRewardKind::characterStack) {
-        reward.stateIndex = character.stacks.count;
-        for (std::size_t row = 0; row < character.stacks.count; ++row) {
-            if (character.stacks.values[row].mutationSerial == reward.mutationSerial) {
-                reward.stateIndex = row;
-                break;
-            }
-        }
-    }
-    return true;
-}
-
-/** Merges a stack with headroom or admits a new row under the installed bucket policy. */
-[[nodiscard]] static bool stage_character_stack(AccountState& working,
-                                                std::size_t characterIndex,
-                                                std::uint32_t definitionHash,
-                                                const item_details::Definition& detail,
-                                                const inventory_buckets::Descriptor& bucket,
-                                                std::int32_t quantity,
-                                                PreparedRecordReward& prepared) noexcept {
-    CharacterState& character = working.characters[characterIndex];
-    if (quantity > detail.maxStackSize
-        || character.nextInventorySerial
-               >= static_cast<std::uint32_t>((std::numeric_limits<std::int32_t>::max)())) {
-        return false;
-    }
-    BucketAdmission occupancy;
-    std::size_t stackIndex = character.stacks.count;
-    for (std::size_t candidate = 0; candidate < character.stacks.count; ++candidate) {
-        const auto& heldStack = character.stacks.values[candidate];
-        if (heldStack.definitionHash == definitionHash
-            && heldStack.quantity <= detail.maxStackSize - quantity
-            && stackIndex == character.stacks.count) {
-            stackIndex = candidate;
-        }
-    }
-    const bool newStack = stackIndex == character.stacks.count;
-    if (newStack) {
-        if (!character_bucket_admission(character, bucket, occupancy)) {
-            return false;
-        }
-        std::size_t selected = kCharacterAdmissionCapacity;
-        if (!occupancy.select(bucket, kCharacterAdmissionCapacity, selected)
-            || (selected != kCharacterAdmissionCapacity
-                && !erase_character_bucket_row(character, selected))) {
-            return false;
-        }
-        if (character.stacks.count >= character.stacks.values.size()) {
-            return false;
-        }
-        stackIndex = character.stacks.count++;
-        character.stacks.values[stackIndex] = {definitionHash};
-    }
-    auto& stack = character.stacks.values[stackIndex];
-    stack.quantity += quantity;
-    stack.mutationSerial = static_cast<std::int32_t>(character.nextInventorySerial++);
-    prepared.stateIndex = stackIndex;
-    prepared.afterQuantity = stack.quantity;
-    prepared.mutationSerial = stack.mutationSerial;
-    prepared.kind = RecordRewardKind::characterStack;
-    return true;
-}
-
 namespace {
 
 /** Prepares inventory rows and consumed-wrapper flags against the same account view. */
@@ -144,38 +44,15 @@ prepare_reward_grant(std::span<const DirectRecordReward> rewards,
                                              const PendingRecordRewardGrant& mutation,
                                              AccountState& after) noexcept;
 
-/**
- * Each native change list must fit independently. Unlock flags and rewards a later FIFO arrival
- * discarded publish no change record, so they consume neither list.
- */
-[[nodiscard]] const char*
-reward_change_refusal(std::span<const PreparedRecordReward> rewards) noexcept {
-    std::size_t characterChanges = 0;
-    std::size_t profileChanges = 0;
-    for (const auto& reward : rewards) {
-        switch (reward.kind) {
-        case RecordRewardKind::characterInstance:
-        case RecordRewardKind::characterStack:
-            if (reward.retained
-                && ++characterChanges > middleware::datagen::family4::character::layout::
-                           kInventoryChangeRecordCapacity) {
-                return "character_change_capacity";
-            }
-            break;
-        case RecordRewardKind::profileStack:
-            if (reward.retained
-                && ++profileChanges > middleware::datagen::family4::account::layout::
-                           kProfileInventoryChangeRecordCapacity) {
-                return "profile_change_capacity";
-            }
-            break;
-        case RecordRewardKind::accountUnlock:
-            break;
-        default:
-            return "reward_kind";
-        }
+/** @return The kind of item a reward grants; overflow can still land a stack in Lost Items. */
+[[nodiscard]] RecordRewardKind reward_kind(const item_details::Definition& detail,
+                                           const inventory_buckets::Descriptor& bucket) noexcept {
+    if (detail.instancedDefinitionState == item_details::InstancedDefinitionState::instanced) {
+        return RecordRewardKind::characterInstance;
     }
-    return nullptr;
+    return bucket.arraySelector == inventory_buckets::ArraySelector::profile
+               ? RecordRewardKind::profileStack
+               : RecordRewardKind::characterStack;
 }
 
 /** A reward overrides socket types, so adding an ordinary lane cannot shift a fixed roll. */
@@ -274,46 +151,6 @@ apply_reward_sockets(const item_details::Definition& detail,
                                 refusal);
 }
 
-/** Finds the kept unsocketed grant of this item, or null. */
-[[nodiscard]] reward_resolution::Grant* kept_stack(reward_resolution::Result& resolved,
-                                                   std::size_t kept,
-                                                   std::uint16_t itemIndex) noexcept {
-    for (std::size_t prior = 0; prior < kept; ++prior) {
-        auto& grant = resolved.grants[prior];
-        if (grant.itemIndex == itemIndex && grant.socketCount == 0) {
-            return &grant;
-        }
-    }
-    return nullptr;
-}
-
-/** Folds repeat draws of a stackable item into its first draw; false when one stack overflows. */
-[[nodiscard]] bool consolidate_stacks(reward_resolution::Result& resolved) noexcept {
-    std::size_t kept = 0;
-    for (std::size_t index = 0; index < resolved.count; ++index) {
-        const reward_resolution::Grant grant = resolved.grants[index];
-        build_data::items::Definition item{};
-        item_details::Definition detail{};
-        // A perk grants its account flag, never an inventory stack.
-        const bool inventoryStack =
-            grant.socketCount == 0 && build_data::find_item_definition_index(grant.itemIndex, item)
-            && item.bucketId != inventory_buckets::kPerkBucketId
-            && build_data::find_configured_item_detail(grant.itemIndex, detail)
-            && detail.instancedDefinitionState == item_details::InstancedDefinitionState::stackable;
-        auto* const merged = inventoryStack ? kept_stack(resolved, kept, grant.itemIndex) : nullptr;
-        if (merged == nullptr) {
-            resolved.grants[kept++] = grant;
-            continue;
-        }
-        if (static_cast<std::int64_t>(merged->quantity) + grant.quantity > detail.maxStackSize) {
-            return false;
-        }
-        merged->quantity += grant.quantity;
-    }
-    resolved.count = kept;
-    return true;
-}
-
 /** Classifies a catalog refusal: a verdict unless a catalog was cleared meanwhile. */
 [[nodiscard]] RewardPreparation catalog_refusal(const char*& reason) noexcept {
     if (build_data::item_definitions_ready() && build_data::reward_definitions_ready()) {
@@ -374,12 +211,6 @@ enum class PassResolution { claim, replay };
         != reward_resolution::Resolution::resolved) {
         return false;
     }
-    if (!consolidate_stacks(result)) {
-        if (reason != nullptr) {
-            *reason = "stack_capacity";
-        }
-        return false;
-    }
     if (reward.socketCount != 0) {
         if (result.count != 1 || result.grants[0].itemIndex != reward.itemIndex) {
             if (reason != nullptr) {
@@ -421,20 +252,23 @@ enum class PassResolution { claim, replay };
             || prepared.acquiredFlag != source.acquiredFlag) {
             return false;
         }
-        if (planned.socketCount != 0 && prepared.retained) {
+        // A dropped or later discarded instance leaves no sockets to compare.
+        const auto held = std::span(grant->afterCharacter.inventory.values)
+                              .first(grant->afterCharacter.inventory.count);
+        const auto installed =
+            std::find_if(held.begin(), held.end(), [&](const auto& item) noexcept {
+                return prepared.instanceSoid != 0 && item.instanceSoid == prepared.instanceSoid;
+            });
+        if (planned.socketCount != 0 && installed != held.end()) {
             item_details::Definition detail{};
             authored_inventory::Sockets sockets{};
             if (prepared.kind != RecordRewardKind::characterInstance
-                || prepared.stateIndex >= grant->afterCharacter.inventory.count
                 || !build_data::find_configured_item_detail(planned.itemIndex, detail)
                 || !apply_reward_sockets(
-                    detail, std::span(planned.sockets).first(planned.socketCount), sockets)) {
-                return false;
-            }
-            const auto& installed =
-                grant->afterCharacter.inventory.values[prepared.stateIndex].sockets;
-            if (installed.policy != sockets.policy || installed.plugCount != sockets.plugCount
-                || installed.plugs != sockets.plugs) {
+                    detail, std::span(planned.sockets).first(planned.socketCount), sockets)
+                || installed->sockets.policy != sockets.policy
+                || installed->sockets.plugCount != sockets.plugCount
+                || installed->sockets.plugs != sockets.plugs) {
                 return false;
             }
         }
@@ -491,20 +325,16 @@ ItemGrantRoute item_grant_route(std::uint16_t itemIndex) noexcept {
     if (uses_reward_definition(item)) {
         return ItemGrantRoute::reward;
     }
-    if (item.questInitialization.scope != build_data::items::QuestInitialization::Scope::none) {
-        return ItemGrantRoute::quest;
-    }
     item_details::Definition detail{};
     inventory_buckets::Descriptor bucket{};
     if (!build_data::find_configured_item_detail(itemIndex, detail)
         || !build_data::find_inventory_bucket_descriptor(item.bucketId, bucket)) {
         return ItemGrantRoute::unavailable;
     }
-    if (bucket.arraySelector == inventory_buckets::ArraySelector::profile
-        && detail.instancedDefinitionState == item_details::InstancedDefinitionState::stackable) {
-        return ItemGrantRoute::profile;
-    }
-    return bucket.arraySelector == inventory_buckets::ArraySelector::character
+    const bool profileStack =
+        bucket.arraySelector == inventory_buckets::ArraySelector::profile
+        && detail.instancedDefinitionState == item_details::InstancedDefinitionState::stackable;
+    return profileStack || bucket.arraySelector == inventory_buckets::ArraySelector::character
                ? ItemGrantRoute::reward
                : ItemGrantRoute::unavailable;
 }
@@ -550,10 +380,6 @@ RewardPreparation prepare_item_reward(std::uint16_t itemIndex,
     if (resolution != reward_resolution::Resolution::resolved) {
         return catalog_refusal(reason);
     }
-    reason = "stack_capacity";
-    if (!consolidate_stacks(resolved)) {
-        return RewardPreparation::deferred;
-    }
     reason = "reward_placement";
     return prepare_resolved_reward(resolved, mutation, &reason);
 }
@@ -591,6 +417,23 @@ bool preview_reward_unlocks(const PendingRecordRewardGrant& mutation,
             after.accountFlags[flag] = unlocks::kFlagSet;
         }
     }
+    // A placed quest item sets its first step only while the saved value it observed still holds.
+    for (std::size_t i = 0; i < mutation.rewardCount; ++i) {
+        const auto& reward = mutation.rewards[i];
+        const auto& quest = reward.questInitialization;
+        if (quest.scope == build_data::items::QuestInitialization::Scope::none) {
+            continue;
+        }
+        const std::span<std::int32_t> values =
+            quest.scope == build_data::items::QuestInitialization::Scope::account
+                ? std::span<std::int32_t>(after.objectiveValues)
+                : std::span<std::int32_t>(after.characterObjectValues);
+        if (!build_data::items::valid(quest) || quest.row >= values.size()
+            || values[quest.row] != reward.previousQuestValue) {
+            return false;
+        }
+        values[quest.row] = build_data::items::initialized_value(quest, reward.previousQuestValue);
+    }
     return true;
 }
 
@@ -627,9 +470,11 @@ namespace {
 [[nodiscard]] bool materialize_record_reward(const AccountState& current,
                                              const PendingRecordRewardGrant& mutation,
                                              AccountState& after) noexcept {
-    if (!mutation.prepared || (mutation.rewardCount == 0 && mutation.wrapperFlags.empty())
+    if (!mutation.prepared
+        || (mutation.rewardCount == 0 && mutation.wrapperFlags.empty() && mutation.rowCount == 0)
         || mutation.rewardCount > mutation.rewards.size()
-        || reward_change_refusal(std::span(mutation.rewards).first(mutation.rewardCount)) != nullptr
+        || mutation.rowCount > mutation.rows.size()
+        || change_ring_refusal(std::span(mutation.rows).first(mutation.rowCount)) != nullptr
         || mutation.accountSoid == 0 || mutation.characterSoid == 0
         || mutation.characterIndex >= current.characterCount
         || current.primarySoid != mutation.accountSoid
@@ -657,13 +502,12 @@ namespace {
         item_details::Definition detail{};
         inventory_buckets::Descriptor bucket{};
         if (reward.definitionHash == authored_inventory::kNoDefinitionHash || reward.quantity <= 0
-            || reward.afterQuantity < reward.quantity || reward.mutationSerial < 0
             || !build_data::find_item_definition_hash(reward.definitionHash, item)) {
             return false;
         }
         if (reward.kind == RecordRewardKind::accountUnlock) {
             build_data::rewards::Item source{};
-            if (reward.quantity != 1 || reward.afterQuantity != 1 || reward.instanceSoid != 0
+            if (reward.quantity != 1 || reward.instanceSoid != 0
                 || item.bucketId != build_data::inventory::buckets::kPerkBucketId
                 || !build_data::find_reward_item(item.definitionIndex, source)
                 || source.acquiredFlag == build_data::rewards::kAbsent
@@ -675,87 +519,24 @@ namespace {
         if (!build_data::find_configured_item_detail(item.definitionIndex, detail)
             || detail.definitionIndex != item.definitionIndex
             || detail.definitionHash != item.definitionHash || detail.bucketId != item.bucketId
-            || !build_data::find_inventory_bucket_descriptor(item.bucketId, bucket)) {
+            || !build_data::find_inventory_bucket_descriptor(item.bucketId, bucket)
+            || reward.kind != reward_kind(detail, bucket)
+            || (reward.kind != RecordRewardKind::characterInstance && reward.instanceSoid != 0)
+            || (reward.kind == RecordRewardKind::characterInstance && reward.quantity != 1)) {
             return false;
         }
-        const bool remains = reward_retained(
-            reward,
-            mutation.afterCharacter,
-            std::span(mutation.afterProfileItems).first(mutation.afterProfileItemCount));
-        if (remains != reward.retained) {
+    }
+    // Every announced row is in the after-image exactly once.
+    for (std::size_t index = 0; index < mutation.rowCount; ++index) {
+        const GrantedRow& row = mutation.rows[index];
+        for (std::size_t prior = 0; prior < index; ++prior) {
+            if (mutation.rows[prior].array == row.array
+                && mutation.rows[prior].mutationSerial == row.mutationSerial) {
+                return false;
+            }
+        }
+        if (!row_present(after, mutation.characterIndex, row)) {
             return false;
-        }
-        if (!remains) {
-            if (reward.kind == RecordRewardKind::characterInstance
-                && (reward.inventoryRow < bucket.firstSlot
-                    || reward.inventoryRow >= bucket.firstSlot + bucket.slotCount)) {
-                if (!family4_loadout::resolve_lost_items_bucket(bucket)
-                    || reward.inventoryRow < bucket.firstSlot
-                    || reward.inventoryRow >= bucket.firstSlot + bucket.slotCount) {
-                    return false;
-                }
-            }
-            if ((bucket.policyFlags & inventory_buckets::kFifo) == 0) {
-                return false;
-            }
-            continue;
-        }
-        if (reward.kind == RecordRewardKind::characterInstance) {
-            if (reward.quantity != 1 || reward.afterQuantity != 1 || reward.instanceSoid == 0
-                || reward.appendedProfileResident
-                || detail.instancedDefinitionState
-                       != item_details::InstancedDefinitionState::instanced
-                || bucket.arraySelector != inventory_buckets::ArraySelector::character
-                || reward.stateIndex >= mutation.afterCharacter.inventory.count) {
-                return false;
-            }
-            const auto& granted = mutation.afterCharacter.inventory.values[reward.stateIndex];
-            std::uint16_t row = 0;
-            std::uint8_t slot = 0;
-            if (granted.instanceSoid != reward.instanceSoid
-                || granted.definitionHash != reward.definitionHash || granted.quantity != 1
-                || granted.mutationSerial != reward.mutationSerial
-                || !find_unequipped_row(loadout, reward.instanceSoid, row, slot)
-                || row != reward.inventoryRow) {
-                return false;
-            }
-        } else if (reward.kind == RecordRewardKind::characterStack) {
-            if (reward.instanceSoid != 0 || reward.appendedProfileResident
-                || detail.equipmentSlot.has_value()
-                || detail.instancedDefinitionState
-                       != item_details::InstancedDefinitionState::stackable
-                || bucket.arraySelector != inventory_buckets::ArraySelector::character
-                || reward.afterQuantity > detail.maxStackSize
-                || reward.stateIndex >= mutation.afterCharacter.stacks.count) {
-                return false;
-            }
-            const auto& granted = mutation.afterCharacter.stacks.values[reward.stateIndex];
-            if (granted.definitionHash != reward.definitionHash
-                || granted.quantity != reward.afterQuantity
-                || granted.mutationSerial != reward.mutationSerial) {
-                return false;
-            }
-        } else {
-            if (reward.kind != RecordRewardKind::profileStack
-                || detail.instancedDefinitionState
-                       != item_details::InstancedDefinitionState::stackable
-                || bucket.arraySelector != inventory_buckets::ArraySelector::profile
-                || reward.afterQuantity > detail.maxStackSize
-                || reward.stateIndex >= mutation.afterProfileItemCount) {
-                return false;
-            }
-            const auto& granted = mutation.afterProfileItems[reward.stateIndex];
-            const bool actionSource =
-                build_data::is_profile_action_source(item.definitionIndex, item.bucketId);
-            if (granted.instanceSoid != reward.instanceSoid
-                || granted.definitionHash != reward.definitionHash
-                || granted.quantity != reward.afterQuantity
-                || granted.mutationSerial != reward.mutationSerial
-                || actionSource != (reward.instanceSoid != 0)
-                || reward.appendedProfileResident
-                       != (actionSource && reward.stateIndex >= mutation.beforeProfileItemCount)) {
-                return false;
-            }
         }
     }
     return true;
@@ -826,7 +607,13 @@ prepare_reward_grant(std::span<const DirectRecordReward> rewards,
         return RewardPreparation::deferred;
     }
     AccountState working = account;
-    std::uint64_t nextBatchInstanceSoid = 0;
+    // Identities stay above the pre-eviction inventory, so a discarded resident is never reused.
+    std::uint64_t nextInstanceSoid = 0;
+    PlacedRows placed;
+    reason = "instance_capacity";
+    if (!next_item_instance_soid(account, nextInstanceSoid)) {
+        return RewardPreparation::deferred;
+    }
     for (std::size_t index = 0; index < rewards.size(); ++index) {
         reason = "item_identity";
         const DirectRecordReward& requested = rewards[index];
@@ -834,9 +621,7 @@ prepare_reward_grant(std::span<const DirectRecordReward> rewards,
         item_details::Definition detail{};
         inventory_buckets::Descriptor bucket{};
         if (requested.quantity <= 0
-            || !build_data::find_item_definition_index(requested.itemDefinitionIndex, item)
-            || item.questInitialization.scope
-                   != build_data::items::QuestInitialization::Scope::none) {
+            || !build_data::find_item_definition_index(requested.itemDefinitionIndex, item)) {
             return RewardPreparation::unresolvable;
         }
         PreparedRecordReward prepared{};
@@ -869,7 +654,7 @@ prepare_reward_grant(std::span<const DirectRecordReward> rewards,
                 return RewardPreparation::unresolvable;
             }
             prepared.kind = RecordRewardKind::accountUnlock;
-            prepared.afterQuantity = 1;
+            prepared.placedQuantity = 1;
             mutation.rewards[index] = prepared;
             continue;
         }
@@ -880,108 +665,47 @@ prepare_reward_grant(std::span<const DirectRecordReward> rewards,
             || !build_data::find_inventory_bucket_descriptor(item.bucketId, bucket)) {
             return RewardPreparation::unresolvable;
         }
-        reason = "duplicate_stack";
-        if (detail.instancedDefinitionState == item_details::InstancedDefinitionState::stackable) {
-            for (std::size_t prior = 0; prior < index; ++prior) {
-                if (mutation.rewards[prior].definitionHash == item.definitionHash) {
-                    return RewardPreparation::unresolvable;
-                }
-            }
-        }
-
-        reason = "socket_owner";
-        if (!requested.sockets.empty()
-            && (bucket.arraySelector != inventory_buckets::ArraySelector::character
-                || detail.instancedDefinitionState
-                       != item_details::InstancedDefinitionState::instanced)) {
-            return RewardPreparation::unresolvable;
-        }
         reason = "inventory_destination";
-        if (bucket.arraySelector == inventory_buckets::ArraySelector::profile) {
-            reason = "profile_capacity";
-            if (detail.instancedDefinitionState != item_details::InstancedDefinitionState::stackable
-                || requested.quantity > detail.maxStackSize) {
-                return RewardPreparation::unresolvable;
-            }
-            PendingProfileItemAcquisition staged{};
-            const bool actionSource =
-                build_data::is_profile_action_source(item.definitionIndex, item.bucketId);
-            if (!finalize_profile_item_acquisition(working,
-                                                   working,
-                                                   item.definitionHash,
-                                                   detail,
-                                                   actionSource,
-                                                   requested.quantity,
-                                                   {.direct = true},
-                                                   staged)) {
-                return RewardPreparation::deferred;
-            }
-            working.profileItems = staged.afterItems;
-            working.profileItemCount = staged.afterItemCount;
-            prepared.instanceSoid = staged.acquiredInstanceSoid;
-            prepared.stateIndex = staged.profileIndex;
-            prepared.afterQuantity = staged.acquiredQuantity;
-            prepared.mutationSerial = staged.acquiredMutationSerial;
-            prepared.kind = RecordRewardKind::profileStack;
-            prepared.appendedProfileResident = staged.appended && staged.actionSource;
-        } else if (bucket.arraySelector == inventory_buckets::ArraySelector::character
-                   && detail.instancedDefinitionState
-                          == item_details::InstancedDefinitionState::instanced) {
-            reason = "instance_quantity";
-            if (requested.quantity != 1) {
-                return RewardPreparation::unresolvable;
-            }
-            reason = "instance_capacity";
-            if (nextBatchInstanceSoid == 0
-                && !next_item_instance_soid(account, nextBatchInstanceSoid)) {
-                return RewardPreparation::deferred;
-            }
-            PendingItemAcquisition staged{};
-            if (!finalize_item_acquisition(
-                    working,
-                    working,
-                    item.definitionHash,
-                    false,
-                    {.direct = true, .minimumInstanceSoid = nextBatchInstanceSoid},
-                    staged)
-                || staged.acquiredInstanceSoid == (std::numeric_limits<std::uint64_t>::max)()) {
-                return RewardPreparation::deferred;
-            }
-            nextBatchInstanceSoid = staged.acquiredInstanceSoid + 1;
-            if (!apply_reward_sockets(
-                    detail,
-                    requested.sockets,
-                    staged.afterCharacter.inventory.values[staged.inventoryIndex].sockets,
-                    &reason)) {
-                return RewardPreparation::unresolvable;
-            }
-            working.characters[characterIndex] = staged.afterCharacter;
-            prepared.instanceSoid = staged.acquiredInstanceSoid;
-            prepared.stateIndex = staged.inventoryIndex;
-            prepared.afterQuantity = 1;
-            prepared.mutationSerial =
-                staged.afterCharacter.inventory.values[staged.inventoryIndex].mutationSerial;
-            prepared.inventoryRow = staged.inventoryRow;
-            prepared.kind = RecordRewardKind::characterInstance;
-        } else if (bucket.arraySelector == inventory_buckets::ArraySelector::character
-                   && detail.instancedDefinitionState
-                          == item_details::InstancedDefinitionState::stackable
-                   && !detail.equipmentSlot.has_value()) {
-            reason = "character_stack_capacity";
-            if (requested.quantity > detail.maxStackSize) {
-                return RewardPreparation::unresolvable;
-            }
-            if (!stage_character_stack(working,
-                                       characterIndex,
-                                       item.definitionHash,
-                                       detail,
-                                       bucket,
-                                       requested.quantity,
-                                       prepared)) {
-                return RewardPreparation::deferred;
-            }
-        } else {
+        prepared.kind = reward_kind(detail, bucket);
+        const bool instance = prepared.kind == RecordRewardKind::characterInstance;
+        if ((bucket.arraySelector != inventory_buckets::ArraySelector::character
+             && bucket.arraySelector != inventory_buckets::ArraySelector::profile)
+            || (instance
+                && (bucket.arraySelector != inventory_buckets::ArraySelector::character
+                    || requested.quantity != 1))
+            || (!instance && (detail.equipmentSlot.has_value() || !requested.sockets.empty()))) {
             return RewardPreparation::unresolvable;
+        }
+        Arrival arrival{item, detail, requested.quantity};
+        if (instance) {
+            arrival.instance.level = acquisition_level(working.characters[characterIndex]);
+            arrival.instance.sockets.policy = authored_inventory::SocketPolicy::nativeDefaults;
+            if (!apply_reward_sockets(
+                    detail, requested.sockets, arrival.instance.sockets, &reason)) {
+                return RewardPreparation::unresolvable;
+            }
+        }
+        ArrivalOutcome outcome{};
+        if (!place_arrival(
+                working, characterIndex, arrival, nextInstanceSoid, placed, outcome, reason)) {
+            return RewardPreparation::deferred;
+        }
+        prepared.placedQuantity = outcome.placed;
+        if (instance && outcome.placed != 0) {
+            prepared.instanceSoid = nextInstanceSoid - 1;
+        }
+        // Only an item that found a row runs its acquisition side effects.
+        if (outcome.placed != 0
+            && item.questInitialization.scope
+                   != build_data::items::QuestInitialization::Scope::none) {
+            reason = "quest_state";
+            prepared.questInitialization = item.questInitialization;
+            if (!build_data::items::valid(item.questInitialization)
+                || !investment::store::read_unlock(quest_bank(item.questInitialization),
+                                                   item.questInitialization.row,
+                                                   prepared.previousQuestValue)) {
+                return RewardPreparation::deferred;
+            }
         }
         mutation.rewards[index] = prepared;
     }
@@ -993,38 +717,54 @@ prepare_reward_grant(std::span<const DirectRecordReward> rewards,
         || !family4_loadout::resolve(working, characterIndex, loadout)) {
         return RewardPreparation::deferred;
     }
-    mutation.beforeCharacter = account.characters[characterIndex];
-    mutation.afterCharacter = working.characters[characterIndex];
-    mutation.beforeProfileItems = account.profileItems;
-    mutation.afterProfileItems = working.profileItems;
-    mutation.claimedRecordIndex = claimedRecordIndex;
-    mutation.accountSoid = account.primarySoid;
-    mutation.characterSoid = account.characters[characterIndex].soid;
-    mutation.characterIndex = characterIndex;
-    mutation.beforeProfileItemCount = account.profileItemCount;
-    mutation.afterProfileItemCount = working.profileItemCount;
-    for (std::size_t index = 0; index < rewards.size(); ++index) {
-        auto& reward = mutation.rewards[index];
-        if (!refresh_reward_position(reward, mutation.afterCharacter, loadout)) {
-            return RewardPreparation::deferred;
-        }
-        reward.retained = reward_retained(
-            reward,
-            mutation.afterCharacter,
-            std::span(mutation.afterProfileItems).first(mutation.afterProfileItemCount));
-    }
-    reason = reward_change_refusal(std::span(mutation.rewards).first(rewards.size()));
-    if (reason != nullptr) {
-        // Only a wrapper draw can exceed a list, and its next draw may fit.
+    // Only a wrapper draw can overflow a change list, and its next draw may fit.
+    if (!record_grant_images(account, working, characterIndex, placed, mutation, reason)) {
         return RewardPreparation::deferred;
     }
+    mutation.claimedRecordIndex = claimedRecordIndex;
     mutation.rewardCount = rewards.size();
-    reason = nullptr;
-    mutation.prepared = true;
     return RewardPreparation::prepared;
 }
 
 } // namespace
+
+/** Diffs the grant's images by instance identity, new character instances first. */
+bool granted_residents(const PendingRecordRewardGrant& mutation,
+                       GrantedResidents& output) noexcept {
+    output = {};
+    const auto append = [&](std::uint64_t soid) noexcept {
+        if (output.count == output.soids.size()) {
+            return false;
+        }
+        output.soids[output.count++] = soid;
+        return true;
+    };
+    const auto& before = mutation.beforeCharacter.inventory;
+    const auto& after = mutation.afterCharacter.inventory;
+    for (std::size_t index = 0; index < after.count; ++index) {
+        const std::uint64_t soid = after.values[index].instanceSoid;
+        const auto held = std::span(before.values).first(before.count);
+        if (std::none_of(held.begin(),
+                         held.end(),
+                         [&](const auto& item) noexcept { return item.instanceSoid == soid; })
+            && !append(soid)) {
+            return false;
+        }
+    }
+    const auto priorProfile =
+        std::span(mutation.beforeProfileItems).first(mutation.beforeProfileItemCount);
+    for (std::size_t index = 0; index < mutation.afterProfileItemCount; ++index) {
+        const std::uint64_t soid = mutation.afterProfileItems[index].instanceSoid;
+        if (soid != 0
+            && std::none_of(priorProfile.begin(),
+                            priorProfile.end(),
+                            [&](const auto& item) noexcept { return item.instanceSoid == soid; })
+            && !append(soid)) {
+            return false;
+        }
+    }
+    return true;
+}
 
 /** Prepares every direct reward over one cumulative account view. */
 RewardPreparation prepare_record_reward_grant(std::span<const DirectRecordReward> rewards,
@@ -1068,6 +808,14 @@ bool commit_record_reward(PendingRecordRewardGrant& mutation) noexcept {
             }
             ready = investment::store::write_unlock(
                 investment::store::Bank::accountFlags, flag.index, unlocks::kFlagSet);
+        }
+        for (std::size_t i = 0; ready && i < mutation.rewardCount; ++i) {
+            const auto& reward = mutation.rewards[i];
+            const auto& quest = reward.questInitialization;
+            if (quest.scope != build_data::items::QuestInitialization::Scope::none
+                && reward.previousQuestValue == build_data::items::kUnsetQuestValue) {
+                ready = investment::store::write_unlock(quest_bank(quest), quest.row, quest.value);
+            }
         }
         ready = ready && transaction.commit();
     }

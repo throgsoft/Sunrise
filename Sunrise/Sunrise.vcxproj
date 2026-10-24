@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup Label="ProjectConfigurations">
     <ProjectConfiguration Include="Debug|x64">
@@ -1359,7 +1359,6 @@
   <ItemGroup>
     <ClInclude Include="src\state\runtime\bucket_admission.h" />
     <ClInclude Include="src\middleware\web_service\messages\opcode405.h" />
-    <ClInclude Include="src\state\account\inventory\postmaster_policy.h" />
     <ClInclude Include="src\middleware\content\packages\tables\field_reader.h" />
     <ClInclude Include="src\client\content\items\packages\package_reward_build.h" />
     <ClInclude Include="src\state\rewards\reward_resolver.h" />

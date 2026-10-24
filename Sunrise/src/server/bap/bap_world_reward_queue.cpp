@@ -24,51 +24,29 @@ WorldRewardSettlement commit_world_reward(const WorldRewardRequest& request) noe
     if (!transaction.ready()) {
         return WorldRewardSettlement::kept;
     }
-    bool committed = false;
-    bool unresolvable = false;
-    const char* reason = nullptr;
-    if (request.kind == WorldRewardKind::item) {
-        if (state::item_grant_route(request.itemDefinitionIndex) == state::ItemGrantRoute::quest) {
-            if (request.quantity != 1) {
-                unresolvable = true;
-                reason = "instance_quantity";
-            } else {
-                state::PendingItemAcquisition acquisition;
-                committed = state::prepare_item_acquisition_for_item(request.itemDefinitionIndex,
-                                                                     acquisition)
-                            && state::commit_item_acquisition(acquisition);
-            }
-        } else {
-            const std::unique_ptr<state::PendingRecordRewardGrant> grant(
-                new (std::nothrow) state::PendingRecordRewardGrant);
-            std::uint64_t seed = 0;
-            const bool seeded =
-                middleware::crypto::random::fill(std::as_writable_bytes(std::span(&seed, 1)));
-            reason = seeded ? "reward_allocation" : "random_source";
-            auto preparation = state::RewardPreparation::deferred;
-            if (seeded && grant) {
-                preparation =
-                    state::prepare_item_reward(request.itemDefinitionIndex,
-                                               static_cast<std::uint32_t>(request.quantity),
-                                               seed,
-                                               *grant,
-                                               &reason);
-            }
-            unresolvable = preparation == state::RewardPreparation::unresolvable;
-            committed = preparation == state::RewardPreparation::prepared;
-            if (committed) {
-                reason = "inventory_commit";
-                committed = state::commit_record_reward(*grant);
-            }
-            if (!committed && !unresolvable) {
-                report_reward_refusal("world_settle", request.itemDefinitionIndex, reason);
-            }
-        }
-    } else {
-        state::PendingProfileItemAcquisition acquisition;
-        committed = state::prepare_profile_item_acquisition_for_item(
-                        request.itemDefinitionIndex, request.quantity, acquisition)
-                    && state::commit_profile_item_acquisition(acquisition);
+    // Every saved kind is placed by the same grant path, overflow included.
+    const std::unique_ptr<state::PendingRecordRewardGrant> grant(
+        new (std::nothrow) state::PendingRecordRewardGrant);
+    std::uint64_t seed = 0;
+    const bool seeded =
+        middleware::crypto::random::fill(std::as_writable_bytes(std::span(&seed, 1)));
+    const char* reason = seeded ? "reward_allocation" : "random_source";
+    auto preparation = state::RewardPreparation::deferred;
+    if (seeded && grant) {
+        preparation = state::prepare_item_reward(request.itemDefinitionIndex,
+                                                 static_cast<std::uint32_t>(request.quantity),
+                                                 seed,
+                                                 *grant,
+                                                 &reason);
+    }
+    const bool unresolvable = preparation == state::RewardPreparation::unresolvable;
+    bool committed = preparation == state::RewardPreparation::prepared;
+    if (committed) {
+        reason = "inventory_commit";
+        committed = state::commit_record_reward(*grant);
+    }
+    if (!committed && !unresolvable) {
+        report_reward_refusal("world_settle", request.itemDefinitionIndex, reason);
     }
     if (unresolvable) {
         return retire_world_reward(transaction, request, reason) ? WorldRewardSettlement::retired

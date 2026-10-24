@@ -1,7 +1,9 @@
 #include <Windows.h>
 
 #include <array>
+#include <cstring>
 #include <span>
+#include <vector>
 
 #include "../../../../core/filesystem/path.h"
 #include "../../../../core/logging/log.h"
@@ -42,6 +44,38 @@ namespace {
            && state::build_data::sobject_definitions_ready()
            && state::build_data::investment_constants_ready()
            && state::build_data::starter_sets_ready() && exotic_catalysts_settled();
+}
+
+/**
+ * Reads the items the client's grant refuses: one row per item, its item-table index first.
+ * @return False when the installed list cannot be read; a later pass retries it.
+ */
+[[nodiscard]] bool read_restricted_grants(const reader::Source& source, Storage& storage) noexcept {
+    std::uint32_t tag = 0;
+    std::vector<std::byte> blob{};
+    tables::Array rows{};
+    if (!tables::slot_tag(
+            std::span<const std::byte>{storage.root}, tables::kRestrictedGrantTableSlot, tag)
+        || tag == 0 || !reader::read_tag(source, storage.scratch, tag, blob)
+        || !tables::find_array_at(
+            std::span<const std::byte>{blob}, tables::kTableArrayDescriptor, rows)
+        || rows.elementClass != tables::kRestrictedGrantElementClass
+        || rows.dataOffset > blob.size()
+        || rows.count > (blob.size() - rows.dataOffset) / tables::kRestrictedGrantStride) {
+        return false;
+    }
+    storage.restrictedGrants.assign(state::build_data::items::kDefinitionCapacity, false);
+    for (std::size_t row = 0; row < rows.count; ++row) {
+        std::uint16_t itemIndex = 0;
+        std::memcpy(&itemIndex,
+                    blob.data() + rows.dataOffset + row * tables::kRestrictedGrantStride,
+                    sizeof itemIndex);
+        if (itemIndex >= storage.restrictedGrants.size()) {
+            return false;
+        }
+        storage.restrictedGrants[itemIndex] = true;
+    }
+    return true;
 }
 
 } // namespace
@@ -234,6 +268,10 @@ bool build() noexcept {
                                          storage.scratch,
                                          std::span<const std::byte>{storage.root},
                                          storage.child);
+            }
+            reason = "restricted_grants";
+            if (!read_restricted_grants(source, storage)) {
+                continue;
             }
             reason = "slot";
             if (!tables::slot_tag(

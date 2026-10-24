@@ -155,13 +155,21 @@ bool stage_service_outcome(Scratch& scratch,
         after = changeCharacter->after;
     } else if (postmasterClaim != nullptr) {
         const auto& update = postmasterClaim->update;
+        // A claim moves existing rows, so it carries no acquisition presentation of its own.
         if (!postmasterClaim->pending || !valid(update.after)
-            || update.characterSoid != postmasterClaim->pending->characterSoid
+            || update.characterSoid != postmasterClaim->pending->grant.characterSoid
             || update.after.family4RootSoid != before.family4RootSoid
             || before.family4Version == (std::numeric_limits<std::int32_t>::max)()
             || update.after.family4Version != before.family4Version + 1
-            || !push::append_postmaster_claim_notification(
-                scratch, update, *postmasterClaim->pending, key, nonce, response, written)) {
+            || !push::append_record_reward_notification(scratch,
+                                                        before,
+                                                        update,
+                                                        postmasterClaim->pending->grant,
+                                                        {},
+                                                        key,
+                                                        nonce,
+                                                        response,
+                                                        written)) {
             core::log::write(core::log::Channel::server,
                              core::log::Level::warn,
                              "ev=queuez stage=postmaster_claim result=fail");

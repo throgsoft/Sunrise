@@ -26,12 +26,8 @@ namespace runtime::detail {
 
 using Quest = build_data::items::QuestInitialization;
 
-/**
- * The plan must already be valid and nonempty before selecting a save bank.
- * @param quest First-step plan with account or character scope.
- * @return The persistent value bank for that scope.
- */
-[[nodiscard]] investment::store::Bank quest_bank(const Quest& quest) noexcept {
+/** Account-scoped plans save to the account bank, the rest to the selected character's. */
+investment::store::Bank quest_bank(const Quest& quest) noexcept {
     return quest.scope == Quest::Scope::account ? investment::store::Bank::objectiveValues
                                                 : investment::store::Bank::characterObjectValues;
 }
@@ -97,7 +93,7 @@ using Quest = build_data::items::QuestInitialization;
     }
 
     std::uint64_t instanceSoid = 0;
-    if (!next_item_instance_soid(account, instanceSoid, source.minimumInstanceSoid)) {
+    if (!next_item_instance_soid(account, instanceSoid)) {
         return false;
     }
 
@@ -109,11 +105,6 @@ using Quest = build_data::items::QuestInitialization;
     acquired.quantity = 1;
     acquired.mutationSerial = static_cast<std::int32_t>(after.nextInventorySerial++);
     acquired.sockets.policy = authored_inventory::SocketPolicy::nativeDefaults;
-    std::uint64_t evictedInstanceSoid = 0;
-    if (source.direct
-        && !place_instanced_reward(account, characterIndex, acquired, after, evictedInstanceSoid)) {
-        return false;
-    }
     if (after.inventory.count >= after.inventory.values.size()) {
         return false;
     }
@@ -145,13 +136,11 @@ using Quest = build_data::items::QuestInitialization;
     mutation.expectedProfileItemCount = account.profileItemCount;
     mutation.afterProfileItemCount = chargedAccount.profileItemCount;
     mutation.inventoryIndex = inventoryIndex;
-    mutation.evictedInstanceSoid = evictedInstanceSoid;
     mutation.collectibleIndex = source.collectibleIndex;
     mutation.inventoryRow = inventoryRow;
     mutation.equipmentSlot = equipmentSlot;
     mutation.materialRequirementCount = source.materialRequirementCount;
     mutation.profileChanged = profileChanged;
-    mutation.directGrant = source.direct;
     build_data::items::Definition definition{};
     if (!build_data::find_item_definition_hash(definitionHash, definition)
         || !build_data::items::valid(definition.questInitialization)) {
@@ -249,28 +238,6 @@ bool prepare_item_acquisition(std::uint16_t collectibleIndex,
 }
 
 /**
- * Direct grants share quest-state checks but do not charge Collections materials.
- * @param itemDefinitionIndex Item-table row to grant to the selected character.
- * @param mutation Receives a pending grant; prepared is set only on success.
- * @return False when the item, inventory, mapping, or saved quest state is invalid.
- */
-bool prepare_item_acquisition_for_item(std::uint16_t itemDefinitionIndex,
-                                       PendingItemAcquisition& mutation) noexcept {
-    const std::lock_guard lock(investment::store::g_mutex);
-    mutation = {};
-    const AccountState account = account_snapshot();
-    build_data::items::Definition grantedDefinition{};
-    if (!account::valid(account) || !valid_profile_inventory(account)
-        || !build_data::find_item_definition_index(itemDefinitionIndex, grantedDefinition)
-        || grantedDefinition.definitionHash == authored_inventory::kNoDefinitionHash) {
-        return false;
-    }
-
-    return finalize_item_acquisition(
-        account, account, grantedDefinition.definitionHash, false, {.direct = true}, mutation);
-}
-
-/**
  * Takes the selected character's next inventory mutation serial under the State lock.
  * @param mutationSerial Receives the reserved serial; zero when nothing was reserved.
  * @return False when no character is selected or its serial space is exhausted.
@@ -299,20 +266,14 @@ bool reserve_selected_character_inventory_serial(std::int32_t& mutationSerial) n
 
 namespace runtime::detail {
 
-/** An acquisition appends a row or replaces exactly the resident selected for FIFO eviction. */
+/** An acquisition appends exactly one row. */
 [[nodiscard]] static bool
 valid_acquisition_placement(const PendingItemAcquisition& mutation) noexcept {
     const auto& before = mutation.beforeCharacter.inventory;
     const auto& after = mutation.afterCharacter.inventory;
-    if (before.count != mutation.expectedInventoryCount || before.count > before.values.size()
-        || mutation.inventoryIndex >= after.count || after.count > after.values.size()) {
-        return false;
-    }
-    if (mutation.inventoryIndex + 1 != after.count) {
-        return false;
-    }
-    return mutation.evictedInstanceSoid == 0 ? after.count == before.count + 1
-                                             : mutation.directGrant && after.count == before.count;
+    return before.count == mutation.expectedInventoryCount && before.count <= before.values.size()
+           && after.count <= after.values.size() && mutation.inventoryIndex + 1 == after.count
+           && after.count == before.count + 1;
 }
 
 /**
@@ -333,18 +294,6 @@ valid_item_acquisition_source(const PendingItemAcquisition& mutation) noexcept {
         || mutation.afterProfileItemCount > authored_inventory::kProfileItemCapacity) {
         return false;
     }
-    if (mutation.directGrant) {
-        build_data::items::Definition definition{};
-        return mutation.collectibleIndex == 0 && mutation.materialRequirementSetHash == 0
-               && mutation.materialRequirementCount == 0
-               && same_profile_views(mutation.beforeProfileItems,
-                                     mutation.expectedProfileItemCount,
-                                     mutation.afterProfileItems,
-                                     mutation.afterProfileItemCount)
-               && build_data::find_item_definition_hash(mutation.acquiredDefinitionHash,
-                                                        definition);
-    }
-
     if (mutation.collectibleIndex == build_data::collectibles::kNoCollectibleIndex) {
         // The guard is that prepare and commit agree. Without a collectible they agree on there
         // being none, which means both cost fields must still be clear.
@@ -392,11 +341,7 @@ valid_item_acquisition_source(const PendingItemAcquisition& mutation) noexcept {
     auto placed = mutation.afterCharacter.inventory.values[mutation.inventoryIndex];
     placed.placement = authored_inventory::ItemPlacement::inventory;
     CharacterState canonical = current.characters[mutation.characterIndex];
-    std::uint64_t evicted = 0;
-    if ((mutation.directGrant
-         && !place_instanced_reward(current, mutation.characterIndex, placed, canonical, evicted))
-        || evicted != mutation.evictedInstanceSoid
-        || canonical.inventory.count != mutation.inventoryIndex
+    if (canonical.inventory.count != mutation.inventoryIndex
         || canonical.nextInventorySerial != static_cast<std::uint32_t>(placed.mutationSerial)) {
         return false;
     }
@@ -539,27 +484,17 @@ finalize_profile_item_acquisition(const AccountState& account,
         return false;
     }
 
-    bool replaced = false;
+    // A purchase or Collections pull is not a grant the client overflows; a full bucket refuses it.
     if (appended) {
         inventory_buckets::Descriptor bucket{};
         BucketAdmission occupancy;
-        if (!build_data::find_inventory_bucket_descriptor(detail.bucketId, bucket)) {
-            return false;
-        }
-        if (!profile_bucket_admission(
+        if (!build_data::find_inventory_bucket_descriptor(detail.bucketId, bucket)
+            || !profile_bucket_admission(
                 std::span(chargedAccount.profileItems).first(chargedAccount.profileItemCount),
                 bucket.bucketId,
-                occupancy)) {
-            return false;
-        }
-        if (!occupancy.select(bucket, chargedAccount.profileItemCount, profileIndex)
+                occupancy)
+            || occupancy.count >= bucket.slotCount
             || profileIndex >= chargedAccount.profileItems.size()) {
-            return false;
-        }
-        replaced = profileIndex < chargedAccount.profileItemCount;
-        if (replaced
-            && (!source.direct || actionSource
-                || chargedAccount.profileItems[profileIndex].instanceSoid != 0)) {
             return false;
         }
     }
@@ -579,7 +514,7 @@ finalize_profile_item_acquisition(const AccountState& account,
     if (appended) {
         after.profileItems[profileIndex] = {
             acquiredInstanceSoid, definitionHash, quantity, acquiredMutationSerial};
-        after.profileItemCount += !replaced;
+        ++after.profileItemCount;
     } else {
         after.profileItems[profileIndex].quantity += quantity;
         after.profileItems[profileIndex].mutationSerial = acquiredMutationSerial;
@@ -608,9 +543,7 @@ finalize_profile_item_acquisition(const AccountState& account,
     mutation.bucketId = detail.bucketId;
     mutation.materialRequirementCount = source.materialRequirementCount;
     mutation.actionSource = actionSource;
-    mutation.appended = appended && !replaced;
-    mutation.replaced = replaced;
-    mutation.directGrant = source.direct;
+    mutation.appended = appended;
     mutation.prepared = true;
     if (valid_profile_mutation_shape(mutation)) {
         return true;
@@ -674,31 +607,6 @@ bool prepare_profile_item_acquisition(
          .collectibleIndex = collectibleIndex,
          .materialRequirementCount = collectible.materialRequirementCount},
         mutation);
-}
-
-/** Prepares one direct profile-stack grant, with no Collections row or material charge. */
-bool prepare_profile_item_acquisition_for_item(std::uint16_t itemDefinitionIndex,
-                                               std::int32_t quantity,
-                                               PendingProfileItemAcquisition& mutation) noexcept {
-    mutation = {};
-    const AccountState account = account_snapshot();
-    build_data::items::Definition item{};
-    item_details::Definition detail{};
-    if (quantity <= 0 || !account::valid(account) || !valid_profile_inventory(account)
-        || !resolve_profile_item(itemDefinitionIndex, item, detail)) {
-        return false;
-    }
-    const bool actionSource =
-        build_data::is_profile_action_source(item.definitionIndex, item.bucketId);
-
-    return finalize_profile_item_acquisition(account,
-                                             account,
-                                             item.definitionHash,
-                                             detail,
-                                             actionSource,
-                                             quantity,
-                                             {.direct = true},
-                                             mutation);
 }
 
 /** Produces the exact account after-image while the captured profile view is still current. */

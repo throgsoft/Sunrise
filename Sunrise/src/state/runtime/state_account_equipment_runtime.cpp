@@ -365,7 +365,8 @@ void report_item_state(std::string_view stage,
         const auto& rightStack = right.stacks.values[index];
         if (leftStack.definitionHash != rightStack.definitionHash
             || leftStack.quantity != rightStack.quantity
-            || leftStack.mutationSerial != rightStack.mutationSerial) {
+            || leftStack.mutationSerial != rightStack.mutationSerial
+            || leftStack.placement != rightStack.placement) {
             return false;
         }
     }

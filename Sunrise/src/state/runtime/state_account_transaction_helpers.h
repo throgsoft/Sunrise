@@ -10,6 +10,7 @@
 
 #include "../../middleware/datagen/family4/loadout/loadout_resolver.h"
 #include "../build_data/runtime.h"
+#include "../investment/store_internal.h"
 #include "runtime.h"
 
 namespace sunrise::state::runtime::detail {
@@ -120,13 +121,17 @@ struct GrantSource {
     std::uint32_t materialRequirementSetHash{};
     std::uint16_t collectibleIndex{};
     std::uint8_t materialRequirementCount{};
-    bool direct{};
-    /** A batch keeps identities above its pre-eviction inventory and earlier grants. */
-    std::uint64_t minimumInstanceSoid{};
 };
 
 /** @return The selected character's index, or the character count when none is selected. */
 [[nodiscard]] std::size_t selected_character_index(const AccountState& account) noexcept;
+/**
+ * The plan must already be valid and nonempty before selecting a save bank.
+ * @param quest First-step plan with account or character scope.
+ * @return The persistent value bank for that scope.
+ */
+[[nodiscard]] investment::store::Bank
+quest_bank(const build_data::items::QuestInitialization& quest) noexcept;
 /**
  * Hold investment::store::g_mutex while capturing inventory and quest state together.
  * @param account State before any acquisition charge.

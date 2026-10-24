@@ -339,6 +339,12 @@ inline constexpr std::size_t kItemTableSlot = 48;
 inline constexpr std::size_t kStarterSetTableSlot = 15;
 /** The investment root holds the shared reusable/randomized plug-set table at this slot. */
 inline constexpr std::size_t kPlugSetTableSlot = 51;
+/** The investment root holds the items ordinary grants refuse at this slot. */
+inline constexpr std::size_t kRestrictedGrantTableSlot = 59;
+/** Element class of the restricted-grant rows. */
+inline constexpr std::uint32_t kRestrictedGrantElementClass = 0x8080787CU;
+/** Each row holds the item-table index first; nothing the client reads follows it. */
+inline constexpr std::size_t kRestrictedGrantStride = 8;
 /** The investment root holds the dense ordinary socket-type table at this slot. */
 inline constexpr std::size_t kSocketTypeTableSlot = 94;
 /** Element class and row size of the installed ordinary socket-type table. */

@@ -24,6 +24,34 @@ static_assert(state::kRecordRewardGrantCapacity
               == family4_datagen::character::layout::kInventoryChangeRecordCapacity
                      + family4_datagen::account::layout::kProfileInventoryChangeRecordCapacity);
 
+/** Resolves the item one granted row holds in the grant's after-image. */
+[[nodiscard]] static bool
+granted_row_definition(const state::AccountState& account,
+                       std::size_t characterIndex,
+                       const state::GrantedRow& row,
+                       state::build_data::items::Definition& definition) noexcept {
+    const auto serial = [&](const auto& held) noexcept {
+        return held.mutationSerial == row.mutationSerial;
+    };
+    std::uint32_t definitionHash = 0;
+    if (row.array == state::GrantedRowArray::profile) {
+        const auto held = std::span(account.profileItems).first(account.profileItemCount);
+        const auto found = std::find_if(held.begin(), held.end(), serial);
+        definitionHash = found != held.end() ? found->definitionHash : 0;
+    } else if (row.array == state::GrantedRowArray::characterItem) {
+        const auto& items = account.characters[characterIndex].inventory;
+        const auto held = std::span(items.values).first(items.count);
+        const auto found = std::find_if(held.begin(), held.end(), serial);
+        definitionHash = found != held.end() ? found->definitionHash : 0;
+    } else {
+        const auto& stacks = account.characters[characterIndex].stacks;
+        const auto held = std::span(stacks.values).first(stacks.count);
+        const auto found = std::find_if(held.begin(), held.end(), serial);
+        definitionHash = found != held.end() ? found->definitionHash : 0;
+    }
+    return definitionHash != 0
+           && state::build_data::find_item_definition_hash(definitionHash, definition);
+}
 /** Builds all record rewards and the pending claim into one Family-4 revision. */
 bool prepare_record_reward_grant(
     Scratch& scratch,
@@ -34,7 +62,8 @@ bool prepare_record_reward_grant(
     Prepared& prepared) noexcept {
     namespace account_layout = family4_datagen::account::layout;
     namespace character_layout = family4_datagen::character::layout;
-    if (!mutation.prepared || (mutation.rewardCount == 0 && mutation.wrapperFlags.empty())
+    if (!mutation.prepared
+        || (mutation.rewardCount == 0 && mutation.wrapperFlags.empty() && mutation.rowCount == 0)
         || mutation.rewardCount > mutation.rewards.size() || !queuez::valid(before)
         || !queuez::valid(update.after) || !before.family4Active || before.family4ResidentCount == 0
         || before.family4Version == (std::numeric_limits<std::int32_t>::max)()
@@ -42,7 +71,7 @@ bool prepare_record_reward_grant(
         || update.characterSoid != mutation.characterSoid
         || update.accountSoid != before.family4RootSoid
         || update.after.family4Version != before.family4Version + 1
-        || update.appendedResidentCount > mutation.rewardCount
+        || update.appendedResidentCount > state::kRecordRewardGrantCapacity
         || update.releasedResidentCount > update.releasedResidents.size()
         || update.releasedResidentCount > before.family4ResidentCount
         || update.after.family4ResidentCount
@@ -65,52 +94,45 @@ bool prepare_record_reward_grant(
         return report_failure("record_reward_account");
     }
 
+    // A claim moves existing items, which the client presents without counting an acquisition.
+    const std::uint8_t changeKind =
+        mutation.vendorTransfer ? kVendorTransferChangeKind : kChangeKind;
+    state::GrantedResidents grantedResidents{};
     family4_datagen::loadout::ResolvedInstances residents{};
-    for (std::size_t rewardIndex = 0; rewardIndex < mutation.rewardCount; ++rewardIndex) {
-        const state::PreparedRecordReward& reward = mutation.rewards[rewardIndex];
-        if (!reward.retained) {
-            continue;
+    if (!state::granted_residents(mutation, grantedResidents)) {
+        return report_failure("record_reward_residents");
+    }
+    // State lists new character instances first, then new profile action sources.
+    for (std::size_t index = 0; index < grantedResidents.count; ++index) {
+        const std::uint64_t soid = grantedResidents.soids[index];
+        if (residents.itemCount >= residents.items.size()) {
+            return report_failure("record_reward_resident_capacity");
         }
-        if (reward.kind == state::RecordRewardKind::characterInstance) {
-            std::size_t matches = 0;
-            for (std::size_t itemIndex = 0; itemIndex < selected.loadout.itemCount; ++itemIndex) {
-                const auto& item = selected.loadout.items[itemIndex];
-                if (item.instance.instanceSoid != reward.instanceSoid) {
-                    continue;
-                }
-                if (item.equipped || item.inventoryRow != reward.inventoryRow
-                    || item.mutationSerial != reward.mutationSerial) {
+        std::size_t matches = 0;
+        for (std::size_t itemIndex = 0; itemIndex < selected.loadout.itemCount; ++itemIndex) {
+            const auto& item = selected.loadout.items[itemIndex];
+            if (item.instance.instanceSoid == soid) {
+                if (item.equipped) {
                     return report_failure("record_reward_character_item");
                 }
-                residents.items[residents.itemCount++] = {item.equipmentSlot, item.instance};
+                residents.items[residents.itemCount] = {item.equipmentSlot, item.instance};
                 ++matches;
             }
-            if (matches != 1) {
-                return report_failure("record_reward_character_instance");
-            }
-        } else if (reward.kind == state::RecordRewardKind::profileStack
-                   && reward.appendedProfileResident) {
-            if (reward.stateIndex >= account.profileItemCount
-                || residents.itemCount >= residents.items.size()
-                || !resolve_profile_item_instance(account.profileItems[reward.stateIndex],
-                                                  residents.items[residents.itemCount].instance)) {
-                return report_failure("record_reward_profile_instance");
-            }
-            ++residents.itemCount;
-        } else if (reward.kind == state::RecordRewardKind::profileStack
-                   && reward.instanceSoid != 0) {
-            std::size_t matches = 0;
-            for (std::size_t residentIndex = 0; residentIndex < before.family4ResidentCount;
-                 ++residentIndex) {
-                const auto& resident = before.family4Residents[residentIndex];
-                matches += static_cast<std::size_t>(resident.objectSoid == reward.instanceSoid
-                                                    && resident.definitionId
-                                                           == update.itemInstanceDefinitionId);
-            }
-            if (matches != 1) {
-                return report_failure("record_reward_profile_resident");
+        }
+        for (std::size_t profileIndex = 0; matches == 0 && profileIndex < account.profileItemCount;
+             ++profileIndex) {
+            if (account.profileItems[profileIndex].instanceSoid == soid) {
+                if (!resolve_profile_item_instance(account.profileItems[profileIndex],
+                                                   residents.items[residents.itemCount].instance)) {
+                    return report_failure("record_reward_profile_instance");
+                }
+                ++matches;
             }
         }
+        if (matches != 1) {
+            return report_failure("record_reward_resident_identity");
+        }
+        ++residents.itemCount;
     }
     if (residents.itemCount != update.appendedResidentCount) {
         return report_failure("record_reward_resident_count");
@@ -169,48 +191,33 @@ bool prepare_record_reward_grant(
         return report_failure("record_reward_character_changes");
     }
     std::size_t characterChanges = 0;
-    for (std::size_t rewardIndex = 0; rewardIndex < mutation.rewardCount; ++rewardIndex) {
-        const state::PreparedRecordReward& reward = mutation.rewards[rewardIndex];
-        if (!reward.retained) {
-            continue;
-        }
-        if (reward.kind == state::RecordRewardKind::profileStack
-            || reward.kind == state::RecordRewardKind::accountUnlock) {
+    for (std::size_t rowIndex = 0; rowIndex < mutation.rowCount; ++rowIndex) {
+        const state::GrantedRow& granted = mutation.rows[rowIndex];
+        if (granted.array == state::GrantedRowArray::profile) {
             continue;
         }
         state::build_data::items::Definition definition{};
         if (characterChanges >= characterObject.inventoryChanges.records.size()
-            || !state::build_data::find_item_definition_hash(reward.definitionHash, definition)) {
+            || !granted_row_definition(account, mutation.characterIndex, granted, definition)) {
             clear_after(scratch, reservation);
             return report_failure("record_reward_character_definition");
         }
-        std::size_t found = characterObject.inventoryItems.size();
-        for (std::size_t row = 0; row < characterObject.inventoryItems.size(); ++row) {
-            const auto& item = characterObject.inventoryItems[row];
-            const bool matches = reward.kind == state::RecordRewardKind::characterInstance
-                                     ? item.instanceSoid == reward.instanceSoid
-                                     : item.instanceSoid == 0
-                                           && item.definitionIndex == definition.definitionIndex
-                                           && item.mutationSerial == reward.mutationSerial;
-            if (!matches) {
-                continue;
-            }
-            if (found != characterObject.inventoryItems.size()
-                || item.quantity != reward.afterQuantity) {
-                clear_after(scratch, reservation);
-                return report_failure("record_reward_character_row");
-            }
-            found = row;
-        }
-        if (found == characterObject.inventoryItems.size()) {
+        const auto matches =
+            std::count_if(characterObject.inventoryItems.cbegin(),
+                          characterObject.inventoryItems.cend(),
+                          [&](const auto& item) noexcept {
+                              return item.definitionIndex == definition.definitionIndex
+                                     && item.mutationSerial == granted.mutationSerial;
+                          });
+        if (matches != 1) {
             clear_after(scratch, reservation);
-            return report_failure("record_reward_character_row_missing");
+            return report_failure("record_reward_character_row");
         }
         auto& change = characterObject.inventoryChanges.records[characterChanges];
         change.sequence = static_cast<std::uint16_t>(characterChanges);
-        change.mutationSerial = reward.mutationSerial;
-        change.kind = kChangeKind;
-        change.flags = kChangeFlags;
+        change.mutationSerial = granted.mutationSerial;
+        change.kind = changeKind;
+        change.flags = change_flags(definition);
         ++characterChanges;
     }
     characterObject.inventoryChanges.writeSlot = static_cast<std::uint16_t>(characterChanges);
@@ -247,43 +254,33 @@ bool prepare_record_reward_grant(
         return report_failure("record_reward_profile_changes");
     }
     std::size_t profileChanges = 0;
-    for (std::size_t rewardIndex = 0; rewardIndex < mutation.rewardCount; ++rewardIndex) {
-        const state::PreparedRecordReward& reward = mutation.rewards[rewardIndex];
-        if (!reward.retained) {
-            continue;
-        }
-        if (reward.kind != state::RecordRewardKind::profileStack) {
+    for (std::size_t rowIndex = 0; rowIndex < mutation.rowCount; ++rowIndex) {
+        const state::GrantedRow& granted = mutation.rows[rowIndex];
+        if (granted.array != state::GrantedRowArray::profile) {
             continue;
         }
         state::build_data::items::Definition definition{};
         if (profileChanges >= accountObject.profileInventoryChanges.records.size()
-            || !state::build_data::find_item_definition_hash(reward.definitionHash, definition)) {
+            || !granted_row_definition(account, mutation.characterIndex, granted, definition)) {
             clear_after(scratch, reservation);
             return report_failure("record_reward_profile_definition");
         }
-        std::size_t found = accountObject.profileItems.size();
-        for (std::size_t row = 0; row < accountObject.profileItems.size(); ++row) {
-            const auto& item = accountObject.profileItems[row];
-            if (item.definitionIndex != definition.definitionIndex
-                || item.mutationSerial != reward.mutationSerial) {
-                continue;
-            }
-            if (found != accountObject.profileItems.size()
-                || item.quantity != reward.afterQuantity) {
-                clear_after(scratch, reservation);
-                return report_failure("record_reward_profile_row");
-            }
-            found = row;
-        }
-        if (found == accountObject.profileItems.size()) {
+        const auto matches =
+            std::count_if(accountObject.profileItems.cbegin(),
+                          accountObject.profileItems.cend(),
+                          [&](const auto& item) noexcept {
+                              return item.definitionIndex == definition.definitionIndex
+                                     && item.mutationSerial == granted.mutationSerial;
+                          });
+        if (matches != 1) {
             clear_after(scratch, reservation);
-            return report_failure("record_reward_profile_row_missing");
+            return report_failure("record_reward_profile_row");
         }
         auto& change = accountObject.profileInventoryChanges.records[profileChanges];
         change.sequence = static_cast<std::uint16_t>(profileChanges);
-        change.mutationSerial = reward.mutationSerial;
-        change.kind = kChangeKind;
-        change.flags = kChangeFlags;
+        change.mutationSerial = granted.mutationSerial;
+        change.kind = changeKind;
+        change.flags = change_flags(definition);
         ++profileChanges;
     }
     accountObject.profileInventoryChanges.writeSlot = static_cast<std::uint16_t>(profileChanges);

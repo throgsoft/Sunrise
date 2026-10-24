@@ -26,9 +26,9 @@ struct SettingsDelta;
 
 namespace sunrise::state {
 
-/** Which prepare path grants one installed item. */
-enum class ItemGrantRoute : std::uint8_t { unavailable, quest, profile, reward };
-/** Chooses the prepare path from the item's wrapper, quest setup and bucket. */
+/** Whether the reward grant path can place one installed item. */
+enum class ItemGrantRoute : std::uint8_t { unavailable, reward };
+/** Accepts wrappers, perks, and items whose bucket is a character or profile stack array. */
 [[nodiscard]] ItemGrantRoute item_grant_route(std::uint16_t itemIndex) noexcept;
 /**
  * Assigns runtime SOIDs only to installed profile mod/shader rows which are socket action sources.
@@ -120,25 +120,6 @@ struct PendingEquipmentSwap {
     bool prepared{};
 };
 
-/** A whole-instance Lost Items claim, kept private until its response and Family-4 update fit. */
-struct PendingPostmasterClaim {
-    CharacterState beforeCharacter{};
-    CharacterState afterCharacter{};
-    std::uint64_t accountSoid{};
-    std::uint64_t characterSoid{};
-    std::uint64_t instanceSoid{};
-    std::size_t characterIndex{};
-    std::size_t inventoryIndex{};
-    std::uint32_t expectedNextInventorySerial{};
-    std::int32_t quantity{};
-    std::uint16_t vendorIndex{};
-    std::uint16_t definitionIndex{};
-    std::uint16_t beforeInventoryRow{};
-    std::uint16_t afterInventoryRow{};
-    std::uint8_t sourceBucket{};
-    bool prepared{};
-};
-
 /** Prepared selected-character inventory insertion kept private until its reply and push fit. */
 struct PendingItemAcquisition {
     CharacterState beforeCharacter{};
@@ -158,15 +139,11 @@ struct PendingItemAcquisition {
     std::size_t expectedProfileItemCount{};
     std::size_t afterProfileItemCount{};
     std::size_t inventoryIndex{};
-    /** Resident replaced by FIFO eviction, or zero. */
-    std::uint64_t evictedInstanceSoid{};
     std::uint16_t collectibleIndex{};
     std::uint16_t inventoryRow{};
     std::uint8_t equipmentSlot{};
     std::uint8_t materialRequirementCount{};
     bool profileChanged{};
-    /** Skips Collections revalidation for direct rewards. */
-    bool directGrant{};
     build_data::items::QuestInitialization questInitialization{};
     std::int32_t previousQuestValue{};
     bool prepared{};
@@ -225,11 +202,7 @@ struct PendingProfileItemAcquisition {
     /** True only for installed profile mod/shader rows materialized as Family-4 residents. */
     bool actionSource{};
     bool appended{};
-    /** Skips Collections revalidation for direct rewards. */
-    bool directGrant{};
     bool prepared{};
-    /** A new non-resident FIFO stack replaces an older row; appended remains false. */
-    bool replaced{};
 };
 
 /** Shared batch capacity bounds one reward transaction. */
@@ -251,21 +224,32 @@ enum class RecordRewardKind : std::uint8_t {
     accountUnlock,
 };
 
-/** Native row identity of one item inside a prepared record-reward batch. */
+/** One requested item inside a prepared record-reward batch; its rows are the batch's rows. */
 struct PreparedRecordReward {
+    /** The new instance's identity, or zero for a stack or an instance that found no row. */
     std::uint64_t instanceSoid{};
     std::uint32_t definitionHash{};
-    std::size_t stateIndex{};
     std::int32_t quantity{};
-    std::int32_t afterQuantity{};
-    std::int32_t mutationSerial{};
-    std::uint16_t inventoryRow{};
+    /** Quantity that found a row; the client drops the rest. */
+    std::int32_t placedQuantity{};
     RecordRewardKind kind{};
-    bool appendedProfileResident{};
     std::uint16_t acquiredFlag{build_data::rewards::kAbsent};
     std::uint8_t previousFlag{};
-    /** Later arrivals in this batch can evict an earlier FIFO reward. */
-    bool retained{true};
+    /** First-step value a placed quest item initializes, and the saved value it observed. */
+    build_data::items::QuestInitialization questInitialization{};
+    std::int32_t previousQuestValue{};
+};
+
+/** The saved array a granted row belongs to. */
+enum class GrantedRowArray : std::uint8_t { profile, characterItem, characterStack };
+
+/**
+ * One row a grant created or grew, or a row its FIFO eviction moved. Each such change takes a new
+ * mutation serial, so the serial names the row in the grant's after-images.
+ */
+struct GrantedRow {
+    GrantedRowArray array{};
+    std::int32_t mutationSerial{};
 };
 
 /** One consumed wrapper's acquisition flag and the value its preparation observed. */
@@ -286,6 +270,9 @@ struct PendingRecordRewardGrant {
     std::array<account::inventory::ProfileItem, account::inventory::kProfileItemCapacity>
         afterProfileItems{};
     std::array<PreparedRecordReward, kRecordRewardGrantCapacity> rewards{};
+    /** Rows still present after the whole batch, each announced once in its change ring. */
+    std::array<GrantedRow, kRecordRewardGrantCapacity> rows{};
+    std::size_t rowCount{};
     /** Sorted acquisition flags from wrappers which opened without remaining in inventory. */
     std::vector<PreparedRewardFlag> wrapperFlags;
     /** Record claimed with this grant, already written to the banks, or the unclaimed row. */
@@ -296,8 +283,36 @@ struct PendingRecordRewardGrant {
     std::size_t beforeProfileItemCount{};
     std::size_t afterProfileItemCount{};
     std::size_t rewardCount{};
+    /** The rows are existing items a vendor moved, not acquisitions. */
+    bool vendorTransfer{};
     bool prepared{};
 };
+
+/** A Lost Items claim: the rows it debits and returns, kept private until its update fits. */
+struct PendingPostmasterClaim {
+    PendingRecordRewardGrant grant{};
+    /** The claimed instance, or zero for a stack. */
+    std::uint64_t instanceSoid{};
+    std::int32_t quantity{};
+    std::uint16_t vendorIndex{};
+    std::uint16_t definitionIndex{};
+    std::uint8_t sourceBucket{};
+    bool prepared{};
+};
+
+/** Item-instance residents one grant adds, in the order its publication appends them. */
+struct GrantedResidents {
+    std::array<std::uint64_t, kRecordRewardGrantCapacity> soids{};
+    std::size_t count{};
+};
+
+/**
+ * Lists the new character instances, then the new profile action-source rows, each in after-image
+ * order. A row an eviction moved keeps its identity and is not new.
+ * @return False when the grant adds more residents than one batch can carry.
+ */
+[[nodiscard]] bool granted_residents(const PendingRecordRewardGrant& mutation,
+                                     GrantedResidents& output) noexcept;
 
 /** How one reward preparation ended. */
 enum class RewardPreparation : std::uint8_t { prepared, deferred, unresolvable };
@@ -611,10 +626,6 @@ prepare_item_acquisition(std::uint16_t collectibleIndex,
                          std::optional<std::span<const build_data::vendors::SaleCost>> price,
                          PendingItemAcquisition& mutation) noexcept;
 
-/** Prepares a direct character-item grant without a Collections charge. */
-[[nodiscard]] bool prepare_item_acquisition_for_item(std::uint16_t itemDefinitionIndex,
-                                                     PendingItemAcquisition& mutation) noexcept;
-
 /** Atomically commits one prepared reward grant and its durable Season claim. */
 [[nodiscard]] bool commit_season_pass_reward(PendingSeasonPassReward& mutation) noexcept;
 /**
@@ -700,12 +711,6 @@ reserve_selected_character_inventory_serial(std::int32_t& mutationSerial) noexce
     std::uint32_t definitionHash,
     std::optional<std::span<const build_data::vendors::SaleCost>> price,
     PendingProfileItemAcquisition& mutation) noexcept;
-
-/** Prepares a direct profile-stack grant without a Collections charge. */
-[[nodiscard]] bool
-prepare_profile_item_acquisition_for_item(std::uint16_t itemDefinitionIndex,
-                                          std::int32_t quantity,
-                                          PendingProfileItemAcquisition& mutation) noexcept;
 
 /**
  * Materializes a prepared profile acquisition over the current account only while its complete

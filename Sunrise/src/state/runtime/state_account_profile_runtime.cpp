@@ -442,23 +442,10 @@ apply_action_materials(const AccountState& before,
         changed);
 }
 
-/** Distinguishes a merge, an appended stack, and a FIFO replacement without changing other rows. */
+/** Distinguishes a merge from an appended stack. */
 [[nodiscard]] static bool
 valid_profile_row_change(const PendingProfileItemAcquisition& mutation) noexcept {
-    if (mutation.replaced) {
-        return mutation.directGrant && !mutation.appended && !mutation.actionSource
-               && mutation.previousQuantity == 0
-               && mutation.profileIndex < mutation.expectedItemCount
-               && mutation.afterItemCount == mutation.expectedItemCount;
-    }
-    if (mutation.appended) {
-        return mutation.previousQuantity == 0
-               && (!mutation.directGrant
-                   || (mutation.afterItemCount == mutation.expectedItemCount + 1
-                       && mutation.profileIndex == mutation.expectedItemCount));
-    }
-    return mutation.previousQuantity > 0
-           && (!mutation.directGrant || mutation.afterItemCount == mutation.expectedItemCount);
+    return mutation.appended ? mutation.previousQuantity == 0 : mutation.previousQuantity > 0;
 }
 
 /** @return True when a pending profile acquisition carries canonical dense before/after images. */
@@ -468,7 +455,7 @@ valid_profile_mutation_shape(const PendingProfileItemAcquisition& mutation) noex
     // more than one, so it has its own shape.
     if (mutation.changeCount != 0) {
         if (!mutation.prepared || mutation.accountSoid == 0 || mutation.actionSource
-            || mutation.appended || mutation.replaced || mutation.acquiredInstanceSoid != 0
+            || mutation.appended || mutation.acquiredInstanceSoid != 0
             || mutation.acquiredDefinitionHash == authored_inventory::kNoDefinitionHash
             || mutation.changeCount > mutation.changes.size()
             || mutation.expectedItemCount > authored_inventory::kProfileItemCapacity
@@ -528,19 +515,15 @@ valid_profile_mutation_shape(const PendingProfileItemAcquisition& mutation) noex
         || mutation.profileIndex >= mutation.afterItemCount || mutation.previousQuantity < 0
         || !valid_profile_row_change(mutation)
         || mutation.acquiredQuantity <= mutation.previousQuantity
-        || (!mutation.directGrant && mutation.acquiredQuantity - mutation.previousQuantity != 1)
+        || mutation.acquiredQuantity - mutation.previousQuantity != 1
         || mutation.previousMutationSerial < 0
         || mutation.acquiredMutationSerial <= mutation.previousMutationSerial) {
         return false;
     }
-    bool foundBeforeTarget = mutation.appended || mutation.replaced;
+    bool foundBeforeTarget = mutation.appended;
     for (std::size_t index = 0; index < mutation.beforeItems.size(); ++index) {
         const authored_inventory::ProfileItem& before = mutation.beforeItems[index];
         const authored_inventory::ProfileItem& after = mutation.afterItems[index];
-        if (mutation.directGrant && index != mutation.profileIndex
-            && !same_profile_item(before, after)) {
-            return false;
-        }
         if (index < mutation.expectedItemCount
             && before.mutationSerial >= mutation.acquiredMutationSerial) {
             return false;
@@ -555,7 +538,7 @@ valid_profile_mutation_shape(const PendingProfileItemAcquisition& mutation) noex
                 || after.mutationSerial != 0)) {
             return false;
         }
-        if (!mutation.appended && !mutation.replaced && index < mutation.expectedItemCount
+        if (!mutation.appended && index < mutation.expectedItemCount
             && before.instanceSoid == mutation.acquiredInstanceSoid
             && before.definitionHash == mutation.acquiredDefinitionHash
             && before.quantity == mutation.previousQuantity
@@ -595,13 +578,7 @@ valid_profile_mutation_shape(const PendingProfileItemAcquisition& mutation) noex
     if (!build_data::find_item_definition_hash(mutation.acquiredDefinitionHash, item)) {
         return false;
     }
-    if (mutation.directGrant) {
-        // Direct rewards have no collectible or material source.
-        if (mutation.collectibleIndex != 0 || mutation.materialRequirementSetHash != 0
-            || mutation.materialRequirementCount != 0) {
-            return false;
-        }
-    } else if (mutation.collectibleIndex == build_data::collectibles::kNoCollectibleIndex) {
+    if (mutation.collectibleIndex == build_data::collectibles::kNoCollectibleIndex) {
         // A vendor purchase names an item, never a collectible, and arrives with the sentinel.
         // With no collectible to hold them, both cost fields must still be clear.
         if (mutation.materialRequirementSetHash != 0 || mutation.materialRequirementCount != 0) {
@@ -629,21 +606,6 @@ valid_profile_mutation_shape(const PendingProfileItemAcquisition& mutation) noex
         || build_data::is_profile_action_source(item.definitionIndex, item.bucketId)
                != mutation.actionSource) {
         return false;
-    }
-    if (mutation.replaced) {
-        BucketAdmission occupancy;
-        if (!profile_bucket_admission(
-                std::span(current.profileItems).first(current.profileItemCount),
-                bucket.bucketId,
-                occupancy)) {
-            return false;
-        }
-        std::size_t replacement = current.profileItemCount;
-        if (!occupancy.select(bucket, current.profileItemCount, replacement)
-            || replacement != mutation.profileIndex
-            || current.profileItems[replacement].instanceSoid != 0) {
-            return false;
-        }
     }
     after = current;
     after.profileItems = mutation.afterItems;

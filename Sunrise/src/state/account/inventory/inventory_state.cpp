@@ -134,13 +134,16 @@ bool valid(const CharacterStacks& items) noexcept {
     for (std::size_t index = 0; index < items.values.size(); ++index) {
         const CharacterStack& item = items.values[index];
         if (index >= items.count) {
-            if (item.definitionHash != 0 || item.quantity != 0 || item.mutationSerial != 0) {
+            if (item.definitionHash != 0 || item.quantity != 0 || item.mutationSerial != 0
+                || item.placement != ItemPlacement::inventory) {
                 return false;
             }
             continue;
         }
         if (item.definitionHash == kNoDefinitionHash || item.quantity <= 0
-            || item.mutationSerial < 0) {
+            || item.mutationSerial < 0
+            || (item.placement != ItemPlacement::inventory
+                && item.placement != ItemPlacement::lostItems)) {
             return false;
         }
         for (std::size_t prior = 0; prior < index; ++prior) {

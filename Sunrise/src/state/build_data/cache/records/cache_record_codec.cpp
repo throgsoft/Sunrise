@@ -68,8 +68,17 @@ bool encode(const items::Definition& value, ItemRecord& record) noexcept {
         value.questInitialization.value,
         value.questInitialization.row,
         static_cast<std::uint8_t>(value.questInitialization.scope),
+        value.recoveryBucketId,
+        static_cast<std::uint8_t>(value.quietAcquisition),
+        static_cast<std::uint8_t>(value.toastlessAcquisition),
+        value.stackUniqueLabel,
+        value.questline.questlineIndex,
+        value.questline.step,
+        value.questline.stepCount,
+        static_cast<std::uint8_t>(value.questline.ordered),
+        static_cast<std::uint8_t>(value.grantRestricted),
     };
-    return items::valid(value.questInitialization);
+    return items::valid(value.questInitialization) && items::valid(value.questline);
 }
 
 /**
@@ -90,8 +99,19 @@ bool decode(const ItemRecord& record, items::Definition& value) noexcept {
              record.linkedPlugIndex,
              {record.questInitialValue,
               record.questValueRow,
-              static_cast<items::QuestInitialization::Scope>(record.questValueScope)}};
-    return items::valid(value.questInitialization);
+              static_cast<items::QuestInitialization::Scope>(record.questValueScope)},
+             record.recoveryBucketId,
+             record.quietAcquisition != 0,
+             record.toastlessAcquisition != 0,
+             record.stackUniqueLabel,
+             {record.questlineIndex,
+              record.questlineStep,
+              record.questlineStepCount,
+              record.questlineOrdered != 0},
+             record.grantRestricted != 0};
+    return items::valid(value.questInitialization) && items::valid(value.questline)
+           && record.quietAcquisition <= 1 && record.toastlessAcquisition <= 1
+           && record.questlineOrdered <= 1 && record.grantRestricted <= 1;
 }
 
 /** Encodes one collectible ordinal and its optional item link. */

@@ -82,7 +82,7 @@ bool Statement::text(int column, std::string_view& value) const noexcept {
 static_assert(account::inventory::kCharacterItemCapacity == 333);
 static_assert(account::inventory::kCharacterStackCapacity == 333);
 
-/** Widens saved row bounds to the character ABI and adds item placement, keeping socket rows. */
+/** Widens saved row bounds to the character ABI and adds item and stack placement. */
 static bool migrate_lost_items_storage() noexcept {
     // SQLite cannot change foreign_keys inside a savepoint. The open-time mutex is held and
     // no account readers exist yet; restore enforcement after the savepoint ends on either path.
@@ -125,9 +125,10 @@ CREATE TABLE character_stacks_v4 (
     definition_hash INTEGER NOT NULL,
     quantity INTEGER NOT NULL CHECK (quantity > 0),
     mutation_serial INTEGER NOT NULL CHECK (mutation_serial >= 0),
+    placement INTEGER NOT NULL CHECK (placement IN (0, 1)),
     PRIMARY KEY (character_slot, position)
 ) STRICT;
-INSERT INTO character_stacks_v4 SELECT * FROM character_stacks;
+INSERT INTO character_stacks_v4 SELECT character_stacks.*, 0 FROM character_stacks;
 DROP TABLE character_stacks;
 ALTER TABLE character_stacks_v4 RENAME TO character_stacks;
 PRAGMA user_version=4;

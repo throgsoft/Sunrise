@@ -331,8 +331,8 @@ bool process(const ServiceRoute& route,
         if (postmasterClaim != nullptr) {
             auto* transaction = emplace_transaction<PostmasterClaimTransaction>(outcome);
             if (transaction == nullptr
-                || !queuez::stage_equipment_swap(
-                    queuezState, postmasterClaim->characterSoid, transaction->update)) {
+                || !queuez::stage_record_reward_grant(
+                    queuezState, postmasterClaim->grant, transaction->update)) {
                 core::log::write(core::log::Channel::server,
                                  core::log::Level::warn,
                                  "ev=ws405 stage=queuez_preflight result=fail");
@@ -486,7 +486,6 @@ bool process(const ServiceRoute& route,
                                                    itemAcquisition->characterSoid,
                                                    itemAcquisition->acquiredInstanceSoid,
                                                    itemAcquisition->updates_account(),
-                                                   itemAcquisition->evictedInstanceSoid,
                                                    transaction->update)) {
                 core::log::write(core::log::Channel::server,
                                  core::log::Level::warn,

@@ -141,7 +141,6 @@ struct ItemAcquisition {
     std::uint64_t acquiredInstanceSoid{};
     /** True when the same revision also publishes the charged profile-material balances. */
     bool updatesAccount{};
-    std::uint64_t evictedInstanceSoid{};
 };
 
 /** Validated socket-action after-image for one item upsert and optional material balances. */

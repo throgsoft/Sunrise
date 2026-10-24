@@ -17,6 +17,19 @@ constexpr std::size_t kInstancedOffset = 187;
  * legendary weapon and armor row and the currency rows.
  */
 constexpr std::size_t kTierOffset = 186;
+/** The manifest's stack-unique label, as the FNV-1 hash of its string. */
+constexpr std::size_t kStackUniqueLabelOffset = 0xB0;
+/**
+ * Definition byte 185 is the manifest's recovery bucket as a runtime bucket id, or all bits set
+ * when the item has none.
+ */
+constexpr std::size_t kRecoveryBucketOffset = 185;
+/**
+ * Bytes 0xBD and 0xBE hold 0 or 1. The client's change-record writer turns them into the policy
+ * bits that skip the acquisition toast and count, or only the toast.
+ */
+constexpr std::size_t kQuietAcquisitionOffset = 0xBD;
+constexpr std::size_t kToastlessAcquisitionOffset = 0xBE;
 /** The equipment block is self-relative from this offset, zero when absent. */
 constexpr std::size_t kEquipmentBlockOffset = 16;
 /** The equipment block stores its signed slot id here. */
@@ -30,8 +43,8 @@ constexpr std::int32_t kEquipmentSlotCount = 20;
 /** A socket entry stores its type index first and its initial plug next. */
 constexpr std::size_t kSocketTypeOffset = 0;
 constexpr std::size_t kSocketPlugOffset = 2;
-/** Fixed fields end after the instanced predicate. */
-constexpr std::size_t kFixedFieldEnd = kInstancedOffset + 1;
+/** Fixed fields end after the acquisition presentation bytes; every installed item reaches it. */
+constexpr std::size_t kFixedFieldEnd = kToastlessAcquisitionOffset + 1;
 /** Optional plug category used to expand three native reusable plug families. */
 constexpr std::size_t kPlugCategoryOffset = 392;
 /**
@@ -325,13 +338,22 @@ bool read_definition(std::span<const std::byte> definition, Row& row) noexcept {
         return false;
     }
     std::uint8_t instanced = 0;
+    std::uint8_t quietAcquisition = 0;
+    std::uint8_t toastlessAcquisition = 0;
     if (!read(definition, kBucketIdOffset, row.bucketId)
         || !read(definition, kMaxStackSizeOffset, row.maxStackSize)
         || !read(definition, kTierOffset, row.tier)
-        || !read(definition, kInstancedOffset, instanced)) {
+        || !read(definition, kInstancedOffset, instanced)
+        || !read(definition, kRecoveryBucketOffset, row.recoveryBucketId)
+        || !read(definition, kStackUniqueLabelOffset, row.stackUniqueLabel)
+        || !read(definition, kQuietAcquisitionOffset, quietAcquisition)
+        || !read(definition, kToastlessAcquisitionOffset, toastlessAcquisition)
+        || quietAcquisition > 1 || toastlessAcquisition > 1) {
         return false;
     }
     row.instanced = instanced != 0;
+    row.quietAcquisition = quietAcquisition != 0;
+    row.toastlessAcquisition = toastlessAcquisition != 0;
     // Short legacy definitions simply do not declare a plug category.
     (void)read(definition, kPlugCategoryOffset, row.plugCategoryHash);
     read_plug_block(definition, row);

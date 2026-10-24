@@ -72,6 +72,7 @@ CREATE TABLE character_stacks (
     definition_hash INTEGER NOT NULL,
     quantity INTEGER NOT NULL CHECK (quantity > 0),
     mutation_serial INTEGER NOT NULL CHECK (mutation_serial >= 0),
+    placement INTEGER NOT NULL CHECK (placement IN (0, 1)),
     PRIMARY KEY (character_slot, position)
 ) STRICT;
 

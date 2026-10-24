@@ -45,6 +45,14 @@ struct Row {
     std::uint8_t tier{};
     std::int32_t maxStackSize{};
     bool instanced{};
+    /** Bucket that receives what the item's own bucket cannot hold; all bits set for none. */
+    std::uint8_t recoveryBucketId{};
+    /** Acquisition records carry the policy bit that skips the toast and the acquired count. */
+    bool quietAcquisition{};
+    /** Acquisition records carry the policy bit that skips only the toast. */
+    bool toastlessAcquisition{};
+    /** FNV-1 hash of the stack-unique label string; the empty string's hash means none. */
+    std::uint32_t stackUniqueLabel{};
     std::optional<std::int8_t> equipmentSlot{};
     std::int32_t rawEquipmentSlot{};
     bool hasSocketEntryList{};

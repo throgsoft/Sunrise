@@ -10,7 +10,7 @@ void claim_postmaster_item(const middleware::web_service::Message& message,
     middleware::web_service::messages::opcode405::Request request{};
     if (!middleware::web_service::messages::opcode405::parse_request(message, request)
         || request.vendorIndex < 0 || request.sourceBucket < 0 || request.definitionIndex < 0
-        || request.quantity <= 0 || request.instanceSoid == 0) {
+        || request.quantity <= 0) {
         core::log::write(core::log::Channel::server,
                          core::log::Level::warn,
                          "ev=ws405 stage=request result=refused");

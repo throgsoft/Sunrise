@@ -123,6 +123,8 @@ struct Storage {
     std::vector<std::byte> questValueMap{};
     /** Shared reusable/randomized plug-set table read from investment-root slot 51. */
     std::vector<std::byte> plugSetTable{};
+    /** Item rows the installed restricted-grant list names, by item-table index. */
+    std::vector<bool> restrictedGrants{};
     /** Dense item-indexed catalyst completion expressions for this package pass. */
     std::vector<state::build_data::items::catalysts::CompletionCondition>
         catalystCompletionConditions{};

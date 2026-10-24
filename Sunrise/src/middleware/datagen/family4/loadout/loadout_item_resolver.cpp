@@ -5,7 +5,6 @@
 #include <cstdint>
 #include <optional>
 
-#include "../../../../state/account/inventory/postmaster_policy.h"
 #include "../../../../state/build_data/runtime.h"
 #include "subclass_socket_selection.h"
 
@@ -158,8 +157,10 @@ bool resolve_item(const authored_inventory::Item& authored,
         return false;
     }
 
+    // Lost Items holds whole instances whose recovery bucket names it; it never holds equipment.
     if (authored.placement == authored_inventory::ItemPlacement::lostItems
-        && (requireEquipmentSlot || !authored_inventory::lost_items_supported(authored, itemDetail)
+        && (requireEquipmentSlot || authored.quantity != 1
+            || itemDefinition.recoveryBucketId != build_buckets::kLostItemsBucketId
             || !resolve_lost_items_bucket(bucket))) {
         return false;
     }

@@ -148,6 +148,8 @@ struct CharacterStack {
     std::uint32_t definitionHash{};
     std::int32_t quantity{};
     std::int32_t mutationSerial{};
+    /** Lost Items also holds overflow of profile-bucket items as character stacks. */
+    ItemPlacement placement{ItemPlacement::inventory};
 };
 
 struct CharacterStacks {

@@ -1,12 +1,15 @@
 #pragma once
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <limits>
+#include <span>
 
 #include "../account/account_state.h"
 #include "../build_data/inventory/buckets/definition.h"
 #include "../build_data/runtime.h"
+#include "runtime.h"
 
 namespace sunrise::state::runtime::detail {
 
@@ -24,23 +27,6 @@ struct BucketAdmission {
             serial = mutationSerial;
         }
     }
-
-    /** Chooses an append or FIFO replacement; a full ordinary bucket refuses the insertion. */
-    [[nodiscard]] bool select(const build_data::inventory::buckets::Descriptor& bucket,
-                              std::size_t appendIndex,
-                              std::size_t& index) const noexcept {
-        index = appendIndex;
-        if (count < bucket.slotCount) {
-            return true;
-        }
-        if (count != bucket.slotCount
-            || (bucket.policyFlags & build_data::inventory::buckets::kFifo) == 0
-            || oldest >= appendIndex) {
-            return false;
-        }
-        index = oldest;
-        return true;
-    }
 };
 
 /** Character rows share one FIFO order across instances and stacks. */
@@ -56,24 +42,86 @@ character_bucket_admission(const CharacterState& character,
                            BucketAdmission& occupancy) noexcept;
 /** Removes a selected combined-array row while keeping both saved arrays dense. */
 [[nodiscard]] bool erase_character_bucket_row(CharacterState& character, std::size_t row) noexcept;
-/** Resolves an instance Lost Items may hold, and the authored character bucket it returns to. */
-[[nodiscard]] bool
-lost_items_candidate(const account::inventory::Item& item,
-                     build_data::items::Definition& definition,
-                     build_data::inventory::buckets::Descriptor& bucket) noexcept;
+
+/** Rows one batch touched; both change rings together bound how many it can announce. */
+struct PlacedRows {
+    std::array<GrantedRow, kRecordRewardGrantCapacity> values{};
+    std::size_t count{};
+};
+
+/** One item to place, and the instance it becomes when its definition is instanced. */
+struct Arrival {
+    build_data::items::Definition item{};
+    build_data::items::details::Definition detail{};
+    std::int32_t quantity{};
+    /** Level and sockets of a new instance; placement assigns its identity and serial. */
+    account::inventory::Item instance{};
+};
+
+/** How much of one arrival found a row; the client drops the rest without a record. */
+struct ArrivalOutcome {
+    std::int32_t placed{};
+    std::int32_t dropped{};
+};
+
 /**
- * Applies installed FIFO policy, or redirects an eligible instance into Lost Items when its
- * authored bucket is full. Eviction updates the character copy before the caller appends the item.
- * @param before Account the capacity decision reads.
- * @param characterIndex Character receiving the reward.
- * @param item Reward whose placement is decided.
- * @param after Character copy receiving any eviction.
- * @param evictedInstanceSoid Receives the removed QueueZ resident, or zero for a stack.
+ * Places one arrival the way the client's grant does: what fits in the item's own bucket, then the
+ * remainder in its recovery bucket, then nothing for the rest. A full FIFO bucket evicts its oldest
+ * row, which moves to its own recovery bucket when the bucket allows a transfer.
+ * @param working Account the arrival lands in; the selected character receives character rows.
+ * @param characterIndex Selected character.
+ * @param nextInstanceSoid Lowest identity a new instance may take; advanced past each one used.
+ * @param rows Receives every row the arrival created, grew or moved.
+ * @param outcome Receives the placed and dropped quantities.
+ * @param reason Receives a static label when placement cannot proceed.
+ * @return False when the arrival or the account cannot be placed; a dropped remainder is not one.
  */
-[[nodiscard]] bool place_instanced_reward(const AccountState& before,
-                                          std::size_t characterIndex,
-                                          account::inventory::Item& item,
-                                          CharacterState& after,
-                                          std::uint64_t& evictedInstanceSoid) noexcept;
+[[nodiscard]] bool place_arrival(AccountState& working,
+                                 std::size_t characterIndex,
+                                 const Arrival& arrival,
+                                 std::uint64_t& nextInstanceSoid,
+                                 PlacedRows& rows,
+                                 ArrivalOutcome& outcome,
+                                 const char*& reason) noexcept;
+
+/**
+ * Moves one Lost Items claim back to the item's own bucket the way the client's transfer does:
+ * presence is the quantity all its Lost Items rows hold, Lost Items is debited from its last row,
+ * and the destination merges, fills empty rows and evicts under its own policy.
+ * @param instanceSoid The claimed instance, or zero for a stack.
+ * @param reason Receives the static refusal label.
+ * @return False when the client's transfer validation would refuse the claim.
+ */
+[[nodiscard]] bool place_claim(AccountState& working,
+                               std::size_t characterIndex,
+                               const build_data::items::Definition& item,
+                               const build_data::items::details::Definition& detail,
+                               std::uint64_t instanceSoid,
+                               std::int32_t quantity,
+                               PlacedRows& rows,
+                               const char*& reason) noexcept;
+
+/**
+ * Each native change list must fit independently. Only rows still present are announced; unlock
+ * flags and dropped quantity publish no change record.
+ * @return Null when both lists fit, else the static label of the one that does not.
+ */
+[[nodiscard]] const char* change_ring_refusal(std::span<const GrantedRow> rows) noexcept;
+
+/** @return True when a row with this serial is still in the after-image of its array. */
+[[nodiscard]] bool row_present(const AccountState& account,
+                               std::size_t characterIndex,
+                               const GrantedRow& row) noexcept;
+
+/**
+ * Stores a placed batch's before and after images and the rows still present after it.
+ * @return False with a reason when the rows overflow a change list; the grant stays unprepared.
+ */
+[[nodiscard]] bool record_grant_images(const AccountState& before,
+                                       const AccountState& after,
+                                       std::size_t characterIndex,
+                                       const PlacedRows& placed,
+                                       PendingRecordRewardGrant& mutation,
+                                       const char*& reason) noexcept;
 
 } // namespace sunrise::state::runtime::detail

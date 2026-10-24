@@ -114,7 +114,12 @@ bool read_stacks(AccountState& output) noexcept {
         std::size_t owner = 0;
         std::size_t position = 0;
         account::inventory::CharacterStack item;
-        if (!rows.columns(owner, position, item.definitionHash, item.quantity, item.mutationSerial)
+        if (!rows.columns(owner,
+                          position,
+                          item.definitionHash,
+                          item.quantity,
+                          item.mutationSerial,
+                          item.placement)
             || owner >= output.characterCount) {
             return false;
         }
@@ -176,7 +181,7 @@ bool read_inventory(AccountState& output) noexcept {
 bool write_inventory(const AccountState& value) noexcept {
     Statement items("INSERT INTO items VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)");
     Statement sockets("INSERT INTO sockets VALUES (?,?,?)");
-    Statement stacks("INSERT INTO character_stacks VALUES (?,?,?,?,?)");
+    Statement stacks("INSERT INTO character_stacks VALUES (?,?,?,?,?,?)");
     for (std::size_t owner = 0; owner < value.characterCount; ++owner) {
         const auto& character = value.characters[owner];
         for (std::size_t position = 0; position < character.equipment.slots.size(); ++position) {
@@ -197,8 +202,12 @@ bool write_inventory(const AccountState& value) noexcept {
         }
         for (std::size_t position = 0; position < character.stacks.count; ++position) {
             const auto& item = character.stacks.values[position];
-            if (!stacks.write(
-                    owner, position, item.definitionHash, item.quantity, item.mutationSerial)) {
+            if (!stacks.write(owner,
+                              position,
+                              item.definitionHash,
+                              item.quantity,
+                              item.mutationSerial,
+                              item.placement)) {
                 return false;
             }
         }

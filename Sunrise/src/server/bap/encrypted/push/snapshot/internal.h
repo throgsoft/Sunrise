@@ -14,12 +14,6 @@
 
 namespace sunrise::server::bap::encrypted::push::snapshot {
 
-/** Builds the character revision moving a saved Lost Items resident. */
-[[nodiscard]] bool prepare_postmaster_claim(Scratch& scratch,
-                                            const queuez::EquipmentSwap& update,
-                                            const state::PendingPostmasterClaim& mutation,
-                                            Prepared& prepared) noexcept;
-
 /** Initial family snapshots start at version zero. */
 inline constexpr std::int32_t kInitialFamilyVersion = 0;
 /** Family three carries the account roster selected by Web Service subscription. */
@@ -65,6 +59,28 @@ inline constexpr std::uint8_t kChangeKind = 1;
 inline constexpr std::uint8_t kVendorTransferChangeKind = 0xD;
 /** Clear policy bits leave the record enabled; the observer skips any other pair. */
 inline constexpr std::uint16_t kChangeFlags = 0;
+/** The client's record writer marks the first step of an item's questline with this bit. */
+inline constexpr std::uint16_t kFirstQuestStepChangeFlag = 0x1;
+/** The client's record writer marks the last step of an item's questline with this bit. */
+inline constexpr std::uint16_t kLastQuestStepChangeFlag = 0x4;
+/** The client's record writer sets this for a quiet item; observers skip its toast and count. */
+inline constexpr std::uint16_t kQuietChangeFlag = 0x8;
+/** The client's record writer sets this for a toastless item; only the toast is skipped. */
+inline constexpr std::uint16_t kToastlessChangeFlag = 0x100;
+
+/** @return The policy bits the client's record writer derives from one item's definition. */
+[[nodiscard]] inline std::uint16_t
+change_flags(const state::build_data::items::Definition& item) noexcept {
+    const auto& line = item.questline;
+    const bool stepped = line.questlineIndex != state::build_data::items::kUnavailableQuestlineIndex
+                         && line.step != state::build_data::items::kUnavailableQuestlineStep;
+    const unsigned flags =
+        kChangeFlags | (stepped && line.step == 0 ? kFirstQuestStepChangeFlag : 0U)
+        | (stepped && line.step + 1U == line.stepCount ? kLastQuestStepChangeFlag : 0U)
+        | (item.quietAcquisition ? kQuietChangeFlag : 0U)
+        | (item.toastlessAcquisition ? kToastlessChangeFlag : 0U);
+    return static_cast<std::uint16_t>(flags);
+}
 
 /** Pins feed-referenced item identities to their published character rows. */
 [[nodiscard]] bool apply_acquisition_presentation(

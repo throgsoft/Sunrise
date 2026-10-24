@@ -4,6 +4,7 @@
 #include "web_service_actions.h"
 
 namespace sunrise::server::web_service {
+/** Parses and prepares one opcode-405 Postmaster claim. */
 void claim_postmaster_item(const middleware::web_service::Message& message,
                            Outcome& outcome) noexcept {
     middleware::web_service::messages::opcode405::Request request{};

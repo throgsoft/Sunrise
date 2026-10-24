@@ -143,6 +143,7 @@ struct ClaimScratch {
     return true;
 }
 
+/** Stages one claim against the saved account without writing it. */
 bool prepare_postmaster_claim(std::uint16_t vendorIndex,
                               std::uint8_t sourceBucket,
                               std::uint64_t instanceSoid,
@@ -160,6 +161,7 @@ bool prepare_postmaster_claim(std::uint16_t vendorIndex,
                *before, vendorIndex, sourceBucket, instanceSoid, definitionIndex, mutation);
 }
 
+/** Rebuilds the claimed account for publication without writing it. */
 bool preview_postmaster_claim(const PendingPostmasterClaim& mutation,
                               AccountState& after) noexcept {
     std::destroy_at(&after);
@@ -169,6 +171,7 @@ bool preview_postmaster_claim(const PendingPostmasterClaim& mutation,
            && materialize_claim(*before, mutation, after);
 }
 
+/** Writes the claim after rebuilding it against the saved account in one transaction. */
 bool commit_postmaster_claim(PendingPostmasterClaim& mutation) noexcept {
     const runtime::detail::PendingConsumption consume{mutation};
     investment::store::Transaction transaction;

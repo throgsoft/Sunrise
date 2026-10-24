@@ -209,6 +209,7 @@ bool resolve_item(const authored_inventory::Item& authored,
     return true;
 }
 
+/** Resolves Lost Items only while its installed row keeps the plain FIFO policy. */
 bool resolve_lost_items_bucket(build_buckets::Descriptor& output) noexcept {
     build_buckets::Descriptor bucket{};
     if (!state::build_data::find_inventory_bucket_descriptor(build_buckets::kLostItemsBucketId,

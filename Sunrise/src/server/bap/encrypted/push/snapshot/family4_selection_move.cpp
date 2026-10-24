@@ -626,6 +626,7 @@ record_vendor_transfer(std::span<std::byte> characterBytes,
     return true;
 }
 
+/** Encodes the claimed character with the transfer named in its change ring. */
 bool prepare_postmaster_claim(Scratch& scratch,
                               const queuez::EquipmentSwap& update,
                               const state::PendingPostmasterClaim& mutation,

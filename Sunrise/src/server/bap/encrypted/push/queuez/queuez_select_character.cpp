@@ -9,6 +9,7 @@
 
 namespace sunrise::server::bap::encrypted::push {
 
+/** Appends the Family-4 character update that moves a claimed item out of Lost Items. */
 bool append_postmaster_claim_notification(Scratch& scratch,
                                           const queuez::EquipmentSwap& update,
                                           const state::PendingPostmasterClaim& mutation,

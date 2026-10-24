@@ -27,6 +27,7 @@ in_bucket(const authored_inventory::Item& item, std::uint8_t bucketId, bool& mat
     return true;
 }
 
+/** Counts one bucket's rows; equipped rows hold capacity but are never offered for eviction. */
 bool character_bucket_admission(const CharacterState& character,
                                 const inventory_buckets::Descriptor& bucket,
                                 BucketAdmission& occupancy) noexcept {
@@ -66,6 +67,7 @@ bool character_bucket_admission(const CharacterState& character,
     return true;
 }
 
+/** Removes one held instance or stack named by its combined admission index. */
 bool erase_character_bucket_row(CharacterState& character, std::size_t row) noexcept {
     if (row < kCharacterStackAdmissionBase) {
         auto& held = character.inventory;
@@ -89,6 +91,8 @@ bool erase_character_bucket_row(CharacterState& character, std::size_t row) noex
     }
     return true;
 }
+
+/** Accepts only an instance whose authored character bucket a claim can return it to. */
 bool lost_items_candidate(const authored_inventory::Item& item,
                           build_data::items::Definition& definition,
                           inventory_buckets::Descriptor& bucket) noexcept {
@@ -107,6 +111,7 @@ bool lost_items_candidate(const authored_inventory::Item& item,
            && bucket.bucketId != inventory_buckets::kPerkBucketId && bucket.slotCount != 0;
 }
 
+/** Admits under the home bucket's policy, else sends a full bucket's instance to Lost Items. */
 bool place_instanced_reward(const AccountState& before,
                             std::size_t characterIndex,
                             authored_inventory::Item& item,
@@ -144,8 +149,7 @@ bool place_instanced_reward(const AccountState& before,
         }
         return erase_character_bucket_row(after, insertion);
     }
-    if (home.count != bucket.slotCount
-        || (bucket.policyFlags & inventory_buckets::kNoTransferOnEviction) != 0) {
+    if (home.count != bucket.slotCount) {
         return false;
     }
     build_data::items::Definition definition{};

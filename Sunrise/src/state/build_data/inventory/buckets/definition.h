@@ -44,11 +44,11 @@ inline constexpr std::uint8_t kLostItemsBucketId = 34;
  * packages and unnamed wrappers that are opened the same way.
  */
 inline constexpr std::uint8_t kEngramBucketId = 31;
-/** A full bucket with this policy discards its oldest row to admit a new one. */
+/** A full bucket with this policy evicts its oldest row to admit a new one. */
 inline constexpr std::uint8_t kFifo = 1;
 /**
- * A full bucket with this policy never hands its overflow to Lost Items. The shipped build sets
- * it only on the FIFO perk bucket.
+ * A FIFO bucket with this policy discards an evicted row instead of moving it to the item's
+ * recovery bucket. The shipped build sets it only on the perk bucket.
  */
 inline constexpr std::uint8_t kNoTransferOnEviction = 2;
 /** Every policy bit the extractor accepts. */

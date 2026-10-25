@@ -9,6 +9,7 @@
 #include <limits>
 #include <span>
 
+#include "../../core/logging/log.h"
 #include "../../middleware/datagen/family4/account/layout.h"
 #include "../../middleware/datagen/family4/character/layout.h"
 #include "../../middleware/datagen/family4/loadout/loadout_item_resolver.h"
@@ -780,6 +781,26 @@ bool preview_record_reward_grant(const PendingRecordRewardGrant& mutation,
     return materialize_record_reward(account_snapshot(), mutation, after);
 }
 
+namespace {
+
+/** Logs each reward the client's overflow rules discarded, in whole or in part. */
+void report_dropped_rewards(const PendingRecordRewardGrant& mutation) noexcept {
+    for (std::size_t i = 0; i < mutation.rewardCount; ++i) {
+        const auto& reward = mutation.rewards[i];
+        if (reward.placedQuantity < reward.quantity) {
+            core::log::writef(core::log::Channel::state,
+                              core::log::Level::warn,
+                              "ev=reward_grant stage=commit result=dropped item=%u requested=%d "
+                              "placed=%d",
+                              static_cast<unsigned>(reward.definitionHash),
+                              static_cast<int>(reward.quantity),
+                              static_cast<int>(reward.placedQuantity));
+        }
+    }
+}
+
+} // namespace
+
 /** Commits the shared reward after-image and claim together. */
 bool commit_record_reward(PendingRecordRewardGrant& mutation) noexcept {
     if (!mutation.prepared) {
@@ -822,6 +843,9 @@ bool commit_record_reward(PendingRecordRewardGrant& mutation) noexcept {
     if (!ready && mutation.claimedRecordIndex != kUnclaimedRecordIndex) {
         // The claim was written when the reward was prepared, so a refused install undoes it.
         unlocks::records::revoke(mutation.claimedRecordIndex);
+    }
+    if (ready) {
+        report_dropped_rewards(mutation);
     }
     return ready;
 }

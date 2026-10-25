@@ -59,13 +59,10 @@ WorldRewardSettlement commit_world_reward(const WorldRewardRequest& request) noe
 }
 
 /** Saves the reward under its stable definition hash and earning character. */
-bool enqueue_world_reward(std::uint16_t definitionIndex,
-                          std::int32_t quantity,
-                          WorldRewardKind kind) noexcept {
+bool enqueue_world_reward(std::uint16_t definitionIndex, std::int32_t quantity) noexcept {
     state::build_data::items::Definition definition;
     if (!state::build_data::find_item_definition_index(definitionIndex, definition)
-        || !state::investment::store::enqueue_reward(
-            definition.definitionHash, quantity, static_cast<std::uint8_t>(kind))) {
+        || !state::investment::store::enqueue_reward(definition.definitionHash, quantity)) {
         return false;
     }
     if (!has_active_family4_peer()) {
@@ -88,14 +85,13 @@ void report_reward_refusal(const char* stage, std::uint16_t index, const char* r
 
 /** Saves one item reward before its pickup presentation is queued. */
 bool arm_world_item_acquisition(std::uint16_t itemDefinitionIndex) noexcept {
-    return enqueue_world_reward(itemDefinitionIndex, 1, WorldRewardKind::item);
+    return enqueue_world_reward(itemDefinitionIndex, 1);
 }
 
 /** Saves a profile material reward before its pickup presentation is queued. */
 bool arm_world_profile_item_acquisition(std::uint16_t itemDefinitionIndex,
                                         std::int32_t quantity) noexcept {
-    return quantity > 0
-           && enqueue_world_reward(itemDefinitionIndex, quantity, WorldRewardKind::profileItem);
+    return quantity > 0 && enqueue_world_reward(itemDefinitionIndex, quantity);
 }
 
 /** Restores the selected character's oldest reward, retiring rows that can never be granted. */
@@ -106,7 +102,6 @@ bool current_world_reward(WorldRewardRequest& request) noexcept {
         request.id = saved.id;
         request.definitionHash = saved.definitionHash;
         request.quantity = saved.quantity;
-        request.kind = static_cast<WorldRewardKind>(saved.kind);
         const bool itemsPublished = state::build_data::item_definitions_ready();
         state::build_data::items::Definition definition;
         const char* verdict = "reward_quantity";
@@ -144,12 +139,11 @@ bool retire_world_reward(state::investment::store::Transaction& transaction,
     core::log::writef(core::log::Channel::server,
                       core::log::Level::warn,
                       "ev=reward stage=world_retire id=%llu hash=0x%08X index=%u quantity=%d "
-                      "kind=%u result=%s reason=%s",
+                      "result=%s reason=%s",
                       static_cast<unsigned long long>(request.id),
                       static_cast<unsigned>(request.definitionHash),
                       static_cast<unsigned>(request.itemDefinitionIndex),
                       static_cast<int>(request.quantity),
-                      static_cast<unsigned>(request.kind),
                       retired ? "retired" : "kept",
                       reason != nullptr ? reason : "unknown");
     return retired;

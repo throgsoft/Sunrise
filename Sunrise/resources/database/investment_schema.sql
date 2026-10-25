@@ -119,7 +119,6 @@ CREATE TABLE bootstrap (
 CREATE TABLE pending_rewards (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     character_slot INTEGER NOT NULL CHECK (character_slot BETWEEN 0 AND 2),
-    kind INTEGER NOT NULL CHECK (kind IN (0, 1)),
     definition_hash INTEGER NOT NULL CHECK (definition_hash BETWEEN 1 AND 4294967295),
     quantity INTEGER NOT NULL CHECK (quantity > 0)
 ) STRICT;

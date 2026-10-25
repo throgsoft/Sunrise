@@ -86,10 +86,8 @@ struct PendingReward {
     std::uint64_t id{};
     std::uint32_t definitionHash{};
     std::int32_t quantity{};
-    std::uint8_t kind{};
 };
-[[nodiscard]] bool
-enqueue_reward(std::uint32_t definitionHash, std::int32_t quantity, std::uint8_t kind) noexcept;
+[[nodiscard]] bool enqueue_reward(std::uint32_t definitionHash, std::int32_t quantity) noexcept;
 [[nodiscard]] bool next_reward(PendingReward& output) noexcept;
 [[nodiscard]] bool complete_reward(std::uint64_t id) noexcept;
 

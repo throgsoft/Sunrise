@@ -82,7 +82,10 @@ bool Statement::text(int column, std::string_view& value) const noexcept {
 static_assert(account::inventory::kCharacterItemCapacity == 333);
 static_assert(account::inventory::kCharacterStackCapacity == 333);
 
-/** Widens saved row bounds to the character ABI and adds item and stack placement. */
+/**
+ * Widens saved row bounds to the character ABI, adds item and stack placement, and drops the world
+ * reward kind, which every reward now ignores because one path places them all.
+ */
 static bool migrate_placement_storage() noexcept {
     // SQLite cannot change foreign_keys inside a savepoint. The open-time mutex is held and
     // no account readers exist yet; restore enforcement after the savepoint ends on either path.
@@ -131,6 +134,16 @@ CREATE TABLE character_stacks_v4 (
 INSERT INTO character_stacks_v4 SELECT character_stacks.*, 0 FROM character_stacks;
 DROP TABLE character_stacks;
 ALTER TABLE character_stacks_v4 RENAME TO character_stacks;
+CREATE TABLE pending_rewards_v4 (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    character_slot INTEGER NOT NULL CHECK (character_slot BETWEEN 0 AND 2),
+    definition_hash INTEGER NOT NULL CHECK (definition_hash BETWEEN 1 AND 4294967295),
+    quantity INTEGER NOT NULL CHECK (quantity > 0)
+) STRICT;
+INSERT INTO pending_rewards_v4 (id, character_slot, definition_hash, quantity)
+    SELECT id, character_slot, definition_hash, quantity FROM pending_rewards;
+DROP TABLE pending_rewards;
+ALTER TABLE pending_rewards_v4 RENAME TO pending_rewards;
 PRAGMA user_version=4;
 )sql")) {
             return false;
@@ -199,8 +212,9 @@ bool open(std::string_view path,
                 && !characterStarter.empty() && execute(starterText.c_str())
                 && transaction.commit();
     } else if (ready) {
-        // Version 4 adds saved item placement and room for recovered rows. Version 3 added the
-        // appearance header and the starter tables; version 2 account preferences and seen state.
+        // Version 4 adds saved item placement and room for recovered rows, and drops the world
+        // reward kind. Version 3 added the appearance header and the starter tables; version 2
+        // account preferences and seen state.
         constexpr int kSchemaVersion = 4;
         constexpr int kApplicationId = 1397902921;
         int application = 0;

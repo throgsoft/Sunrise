@@ -330,19 +330,12 @@ struct ReplicationEpochPublication {
 /** Logs one refused reward stage with its native index and a specific reason. */
 void report_reward_refusal(const char* stage, std::uint16_t index, const char* reason) noexcept;
 
-/** Which inventory one world reward lands in. */
-enum class WorldRewardKind : std::uint8_t {
-    item,
-    profileItem,
-};
-
 /** One reward earned in world, held until a Family-4 peer can publish it. */
 struct WorldRewardRequest {
     std::uint64_t id{};
     std::uint32_t definitionHash{};
     std::int32_t quantity{};
     std::uint16_t itemDefinitionIndex{};
-    WorldRewardKind kind{};
 };
 /** The changed character projections still owed after their source state commits. */
 enum class CharacterRefreshScope : std::uint8_t { none, records, recordsAndRoster };

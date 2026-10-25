@@ -247,7 +247,9 @@ struct HeldRow {
 };
 
 /**
- * Visits every row of the array a bucket belongs to, equipped rows first, in saved order.
+ * Visits every row of the array a bucket belongs to, equipped rows first, in saved order. The
+ * client walks its slots in order instead; that order only picks among rows sharing one label, and
+ * the label rule never lets a second such row form.
  * @param visit Returns false to stop the walk.
  * @return False when a saved row names no installed item.
  */

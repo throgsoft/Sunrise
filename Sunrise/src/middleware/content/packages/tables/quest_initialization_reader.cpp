@@ -144,52 +144,6 @@ std::uint16_t quest_parent(std::span<const std::byte> definition) noexcept {
     return parent;
 }
 
-/** The objective block names its questline whether or not the item is a pursuit. */
-std::uint16_t questline_owner(std::span<const std::byte> definition) noexcept {
-    std::size_t objective = 0;
-    std::uint16_t owner = kUnavailableQuestParent;
-    if (definition.size() < kMinimumQuestDefinitionSize
-        || !block(definition, kItemObjectiveBlockOffset, kItemObjectiveBlockClass, objective)
-        || !read(definition, objective + kObjectiveParentItemOffset, owner)) {
-        return kUnavailableQuestParent;
-    }
-    return owner;
-}
-
-/** The set's mode byte is 1 for a questline that admits steps only in list order, else 0. */
-state::build_data::items::QuestlineStep read_questline_step(std::span<const std::byte> owner,
-                                                            std::uint16_t ownerIndex,
-                                                            std::uint16_t itemIndex,
-                                                            std::size_t itemCount) noexcept {
-    std::size_t set = 0;
-    std::uint8_t mode = 0;
-    Array members{};
-    if (ownerIndex >= itemCount || owner.size() < kMinimumQuestDefinitionSize
-        || !block(owner, kItemQuestSetBlockOffset, kQuestSetBlockClass, set)
-        || !read(owner, set + kQuestSetModeOffset, mode) || mode > kSupportedQuestSetMode
-        || !array(owner, set, kQuestSetMemberClass, kQuestSetMemberStride, members)
-        || members.count >= state::build_data::items::kUnavailableQuestlineStep) {
-        return {};
-    }
-    state::build_data::items::QuestlineStep step{};
-    step.questlineIndex = ownerIndex;
-    step.stepCount = static_cast<std::uint16_t>(members.count);
-    step.ordered = mode == kSupportedQuestSetMode;
-    for (std::size_t i = 0; i < members.count; ++i) {
-        std::uint16_t member = 0;
-        if (!read(owner,
-                  members.dataOffset + i * kQuestSetMemberStride + kQuestSetMemberItemOffset,
-                  member)) {
-            return {};
-        }
-        if (member == itemIndex
-            && step.step == state::build_data::items::kUnavailableQuestlineStep) {
-            step.step = static_cast<std::uint16_t>(i);
-        }
-    }
-    return step;
-}
-
 /**
  * Only a unique first member with one supported save-bank mapping may start a quest.
  * @param definition Pursuit item being acquired.

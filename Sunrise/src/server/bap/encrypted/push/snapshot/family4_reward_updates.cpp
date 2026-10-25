@@ -217,7 +217,10 @@ bool prepare_record_reward_grant(
         change.sequence = static_cast<std::uint16_t>(characterChanges);
         change.mutationSerial = granted.mutationSerial;
         change.kind = changeKind;
-        change.flags = change_flags(definition);
+        change.flags = static_cast<std::uint16_t>(
+            change_flags(definition)
+            | (state::newly_collected(mutation, granted, definition) ? kNewCollectibleChangeFlag
+                                                                     : 0U));
         ++characterChanges;
     }
     characterObject.inventoryChanges.writeSlot = static_cast<std::uint16_t>(characterChanges);
@@ -280,7 +283,10 @@ bool prepare_record_reward_grant(
         change.sequence = static_cast<std::uint16_t>(profileChanges);
         change.mutationSerial = granted.mutationSerial;
         change.kind = changeKind;
-        change.flags = change_flags(definition);
+        change.flags = static_cast<std::uint16_t>(
+            change_flags(definition)
+            | (state::newly_collected(mutation, granted, definition) ? kNewCollectibleChangeFlag
+                                                                     : 0U));
         ++profileChanges;
     }
     accountObject.profileInventoryChanges.writeSlot = static_cast<std::uint16_t>(profileChanges);

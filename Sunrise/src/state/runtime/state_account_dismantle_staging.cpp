@@ -466,7 +466,6 @@ apply_dismantle_rewards(const AccountState& before,
             break;
         }
     }
-    // The client dismantles a Lost Items row from the Postmaster with this same request.
     if (inventoryIndex >= before.inventory.count
         || (before.inventory.values[inventoryIndex].flags & authored_inventory::kLockedItemFlag)
                != 0) {

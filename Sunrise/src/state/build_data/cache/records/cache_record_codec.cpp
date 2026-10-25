@@ -72,13 +72,9 @@ bool encode(const items::Definition& value, ItemRecord& record) noexcept {
         static_cast<std::uint8_t>(value.quietAcquisition),
         static_cast<std::uint8_t>(value.toastlessAcquisition),
         value.stackUniqueLabel,
-        value.questline.questlineIndex,
-        value.questline.step,
-        value.questline.stepCount,
-        static_cast<std::uint8_t>(value.questline.ordered),
         static_cast<std::uint8_t>(value.grantRestricted),
     };
-    return items::valid(value.questInitialization) && items::valid(value.questline);
+    return items::valid(value.questInitialization);
 }
 
 /**
@@ -104,14 +100,9 @@ bool decode(const ItemRecord& record, items::Definition& value) noexcept {
              record.quietAcquisition != 0,
              record.toastlessAcquisition != 0,
              record.stackUniqueLabel,
-             {record.questlineIndex,
-              record.questlineStep,
-              record.questlineStepCount,
-              record.questlineOrdered != 0},
              record.grantRestricted != 0};
-    return items::valid(value.questInitialization) && items::valid(value.questline)
-           && record.quietAcquisition <= 1 && record.toastlessAcquisition <= 1
-           && record.questlineOrdered <= 1 && record.grantRestricted <= 1;
+    return items::valid(value.questInitialization) && record.quietAcquisition <= 1
+           && record.toastlessAcquisition <= 1 && record.grantRestricted <= 1;
 }
 
 /** Encodes one collectible ordinal and its optional item link. */

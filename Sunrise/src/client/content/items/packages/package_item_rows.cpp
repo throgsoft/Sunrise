@@ -130,35 +130,29 @@ bool build_item_rows(const reader::Source& source,
         const std::uint32_t plugCategoryHash =
             corrected_plug_category(item.definitionHash, item.plugCategoryHash);
         build_items::QuestInitialization quest{};
-        build_items::QuestlineStep questline{};
-        // Any item may name a questline; only a pursuit's questline can also start a quest.
-        const auto ownerIndex = tables::items::questline_owner(storage.definition);
+        const auto parentIndex = tables::items::quest_parent(storage.definition);
         if (needDefinitions && itemClass == tables::kItemDefinitionClass
-            && ownerIndex < table.count) {
-            std::span<const std::byte> owner = storage.definition;
-            tables::IndexRow ownerRow{};
-            std::uint32_t ownerClass = itemClass;
-            const bool ownerReady = ownerIndex == item.definitionIndex
-                                    || (tables::index_row(container, table, ownerIndex, ownerRow)
-                                        && reader::read_tag(source,
-                                                            storage.scratch,
-                                                            ownerRow.targetTag,
-                                                            storage.questParentDefinition,
-                                                            ownerClass));
-            if (ownerIndex != item.definitionIndex) {
-                owner = storage.questParentDefinition;
+            && parentIndex < table.count) {
+            std::span<const std::byte> parent = storage.definition;
+            tables::IndexRow parentRow{};
+            std::uint32_t parentClass = itemClass;
+            const bool parentReady = parentIndex == item.definitionIndex
+                                     || (tables::index_row(container, table, parentIndex, parentRow)
+                                         && reader::read_tag(source,
+                                                             storage.scratch,
+                                                             parentRow.targetTag,
+                                                             storage.questParentDefinition,
+                                                             parentClass));
+            if (parentIndex != item.definitionIndex) {
+                parent = storage.questParentDefinition;
             }
-            if (ownerReady && ownerClass == tables::kItemDefinitionClass) {
-                questline = tables::items::read_questline_step(
-                    owner, ownerIndex, item.definitionIndex, static_cast<std::size_t>(table.count));
-                if (tables::items::quest_parent(storage.definition) == ownerIndex) {
-                    quest = tables::items::read_quest_initialization(
-                        storage.definition,
-                        item.definitionIndex,
-                        owner,
-                        static_cast<std::size_t>(table.count),
-                        storage.questValueMap);
-                }
+            if (parentReady && parentClass == tables::kItemDefinitionClass) {
+                quest =
+                    tables::items::read_quest_initialization(storage.definition,
+                                                             item.definitionIndex,
+                                                             parent,
+                                                             static_cast<std::size_t>(table.count),
+                                                             storage.questValueMap);
             }
         }
         storage.rows[rowCount++] = state::build_data::items::Definition{
@@ -176,7 +170,6 @@ bool build_item_rows(const reader::Source& source,
             item.quietAcquisition,
             item.toastlessAcquisition,
             item.stackUniqueLabel,
-            questline,
             item.definitionIndex < storage.restrictedGrants.size()
                 && storage.restrictedGrants[item.definitionIndex]};
         if (needSocketRows) {

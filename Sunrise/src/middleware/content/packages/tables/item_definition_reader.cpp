@@ -18,18 +18,18 @@ constexpr std::size_t kInstancedOffset = 187;
  */
 constexpr std::size_t kTierOffset = 186;
 /** The manifest's stack-unique label, as the FNV-1 hash of its string. */
-constexpr std::size_t kStackUniqueLabelOffset = 0xB0;
+constexpr std::size_t kStackUniqueLabelOffset = 176;
 /**
  * Definition byte 185 is the manifest's recovery bucket as a runtime bucket id, or all bits set
  * when the item has none.
  */
 constexpr std::size_t kRecoveryBucketOffset = 185;
 /**
- * Bytes 0xBD and 0xBE hold 0 or 1. The client's change-record writer turns them into the policy
+ * Bytes 189 and 190 hold 0 or 1. The client's change-record writer turns them into the policy
  * bits that skip the acquisition toast and count, or only the toast.
  */
-constexpr std::size_t kQuietAcquisitionOffset = 0xBD;
-constexpr std::size_t kToastlessAcquisitionOffset = 0xBE;
+constexpr std::size_t kQuietAcquisitionOffset = 189;
+constexpr std::size_t kToastlessAcquisitionOffset = 190;
 /** The equipment block is self-relative from this offset, zero when absent. */
 constexpr std::size_t kEquipmentBlockOffset = 16;
 /** The equipment block stores its signed slot id here. */

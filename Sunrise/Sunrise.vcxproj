@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="utf-8"?>
+﻿<?xml version="1.0" encoding="utf-8"?>
 <Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup Label="ProjectConfigurations">
     <ProjectConfiguration Include="Debug|x64">
@@ -1604,6 +1604,7 @@
     <ClInclude Include="src\state\account\pursuit_hold.h" />
     <ClInclude Include="src\state\account\account_state.h" />
     <ClInclude Include="src\state\account\inventory\inventory_state.h" />
+    <ClInclude Include="src\state\account\inventory\occupied_bucket.h" />
     <ClInclude Include="src\state\account\settings\settings_state.h" />
     <ClInclude Include="src\state\account\settings\settings_delta.h" />
     <ClInclude Include="src\state\account\settings\key_bindings.h" />

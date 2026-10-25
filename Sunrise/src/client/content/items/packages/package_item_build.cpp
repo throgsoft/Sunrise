@@ -55,8 +55,15 @@ namespace {
     std::vector<std::byte> blob{};
     tables::Array rows{};
     if (!tables::slot_tag(
-            std::span<const std::byte>{storage.root}, tables::kRestrictedGrantTableSlot, tag)
-        || tag == 0 || !reader::read_tag(source, storage.scratch, tag, blob)
+            std::span<const std::byte>{storage.root}, tables::kRestrictedGrantTableSlot, tag)) {
+        return false;
+    }
+    storage.restrictedGrants.assign(state::build_data::items::kDefinitionCapacity, false);
+    // A build without the list restricts nothing.
+    if (tag == 0) {
+        return true;
+    }
+    if (!reader::read_tag(source, storage.scratch, tag, blob)
         || !tables::find_array_at(
             std::span<const std::byte>{blob}, tables::kTableArrayDescriptor, rows)
         || rows.elementClass != tables::kRestrictedGrantElementClass
@@ -64,7 +71,6 @@ namespace {
         || rows.count > (blob.size() - rows.dataOffset) / tables::kRestrictedGrantStride) {
         return false;
     }
-    storage.restrictedGrants.assign(state::build_data::items::kDefinitionCapacity, false);
     for (std::size_t row = 0; row < rows.count; ++row) {
         std::uint16_t itemIndex = 0;
         std::memcpy(&itemIndex,

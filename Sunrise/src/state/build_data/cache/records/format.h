@@ -167,11 +167,6 @@ struct ItemRecord {
     /** 0 or 1. */
     std::uint8_t toastlessAcquisition{};
     std::uint32_t stackUniqueLabel{items::kNoStackUniqueLabel};
-    std::uint16_t questlineIndex{items::kUnavailableQuestlineIndex};
-    std::uint16_t questlineStep{items::kUnavailableQuestlineStep};
-    std::uint16_t questlineStepCount{};
-    /** 0 or 1. */
-    std::uint8_t questlineOrdered{};
     /** 0 or 1. */
     std::uint8_t grantRestricted{};
 };
@@ -762,7 +757,7 @@ static_assert(sizeof(NamedRecord)
               == content::kDefinitionNameCapacity + 2 * sizeof(std::uint16_t)
                      + 2 * sizeof(std::uint32_t));
 static_assert(sizeof(ItemRecord)
-              == 4 * sizeof(std::uint32_t) + 9 * sizeof(std::uint16_t) + 8 * sizeof(std::uint8_t));
+              == 4 * sizeof(std::uint32_t) + 6 * sizeof(std::uint16_t) + 7 * sizeof(std::uint8_t));
 static_assert(sizeof(MaterialRequirementRecord)
               == sizeof(std::uint32_t) + 2 * sizeof(std::uint16_t) + 2 * sizeof(std::uint8_t));
 static_assert(sizeof(CollectibleRecord)

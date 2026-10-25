@@ -43,7 +43,7 @@ character_bucket_admission(const CharacterState& character,
 /** Removes a selected combined-array row while keeping both saved arrays dense. */
 [[nodiscard]] bool erase_character_bucket_row(CharacterState& character, std::size_t row) noexcept;
 
-/** Rows one batch touched; both change rings together bound how many it can announce. */
+/** Rows one batch touched, keeping the newest each change ring can announce. */
 struct PlacedRows {
     std::array<GrantedRow, kRecordRewardGrantCapacity> values{};
     std::size_t count{};
@@ -85,15 +85,18 @@ struct ArrivalOutcome {
                                  const char*& reason) noexcept;
 
 /**
- * Moves one Lost Items claim back to the item's own bucket the way the client's transfer does:
- * presence is the quantity all its Lost Items rows hold, Lost Items is debited from its last row,
- * and the destination merges, fills empty rows and evicts under its own policy.
+ * Moves one claim from the item's recovery bucket back to its authored bucket once the client's
+ * claim validation passes: presence is the quantity all its rows there hold. The source is then
+ * debited from its last row, and the destination merges, fills empty rows and evicts under its own
+ * policy, in the order of the client's own helpers; the retail server's executor is unobserved.
+ * @param sourceBucket The bucket the claim names; it must be the item's recovery bucket.
  * @param instanceSoid The claimed instance, or zero for a stack.
  * @param reason Receives the static refusal label.
  * @return False when the client's transfer validation would refuse the claim.
  */
 [[nodiscard]] bool place_claim(AccountState& working,
                                std::size_t characterIndex,
+                               std::uint8_t sourceBucket,
                                const build_data::items::Definition& item,
                                const build_data::items::details::Definition& detail,
                                std::uint64_t instanceSoid,
@@ -113,15 +116,11 @@ struct ArrivalOutcome {
                                std::size_t characterIndex,
                                const GrantedRow& row) noexcept;
 
-/**
- * Stores a placed batch's before and after images and the rows still present after it.
- * @return False with a reason when the rows overflow a change list; the grant stays unprepared.
- */
-[[nodiscard]] bool record_grant_images(const AccountState& before,
-                                       const AccountState& after,
-                                       std::size_t characterIndex,
-                                       const PlacedRows& placed,
-                                       PendingRecordRewardGrant& mutation,
-                                       const char*& reason) noexcept;
+/** Stores a placed batch's before and after images and the rows still present after it. */
+void record_grant_images(const AccountState& before,
+                         const AccountState& after,
+                         std::size_t characterIndex,
+                         const PlacedRows& placed,
+                         PendingRecordRewardGrant& mutation) noexcept;
 
 } // namespace sunrise::state::runtime::detail

@@ -105,8 +105,8 @@ struct ProfileItem {
     bool seen{};
 };
 
-/** Saved ownership location, independent of the item's normal definition bucket. */
-enum class ItemPlacement : std::uint8_t { inventory, lostItems };
+/** Which of its item's buckets a saved row occupies: the authored one, or the recovery one. */
+enum class ItemPlacement : std::uint8_t { authored, recovery };
 
 /** One authored equipment item without native table or wire-layout fields. */
 struct Item {
@@ -135,7 +135,7 @@ struct Item {
     std::uint8_t classAbilityEntry{2};
     /** The client has dismissed this item's new-item marker. */
     bool seen{};
-    ItemPlacement placement{ItemPlacement::inventory};
+    ItemPlacement placement{ItemPlacement::authored};
 };
 
 /** Ordered unequipped items placed into their native character-inventory bucket ranges. */
@@ -148,8 +148,8 @@ struct CharacterStack {
     std::uint32_t definitionHash{};
     std::int32_t quantity{};
     std::int32_t mutationSerial{};
-    /** Lost Items also holds overflow of profile-bucket items as character stacks. */
-    ItemPlacement placement{ItemPlacement::inventory};
+    /** A profile-bucket item's overflow sits here when its recovery bucket is a character one. */
+    ItemPlacement placement{ItemPlacement::authored};
 };
 
 struct CharacterStacks {

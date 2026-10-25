@@ -83,7 +83,7 @@ static_assert(account::inventory::kCharacterItemCapacity == 333);
 static_assert(account::inventory::kCharacterStackCapacity == 333);
 
 /** Widens saved row bounds to the character ABI and adds item and stack placement. */
-static bool migrate_lost_items_storage() noexcept {
+static bool migrate_placement_storage() noexcept {
     // SQLite cannot change foreign_keys inside a savepoint. The open-time mutex is held and
     // no account readers exist yet; restore enforcement after the savepoint ends on either path.
     if (!execute("PRAGMA foreign_keys=OFF")) {
@@ -199,7 +199,7 @@ bool open(std::string_view path,
                 && !characterStarter.empty() && execute(starterText.c_str())
                 && transaction.commit();
     } else if (ready) {
-        // Version 4 adds saved item placement and room for Lost Items. Version 3 added the
+        // Version 4 adds saved item placement and room for recovered rows. Version 3 added the
         // appearance header and the starter tables; version 2 account preferences and seen state.
         constexpr int kSchemaVersion = 4;
         constexpr int kApplicationId = 1397902921;
@@ -239,7 +239,7 @@ bool open(std::string_view path,
         }
     }
     if (ready && version == 3) {
-        ready = migrate_lost_items_storage();
+        ready = migrate_placement_storage();
     }
     if (!ready) {
         shutdown();

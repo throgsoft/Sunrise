@@ -59,10 +59,11 @@ inline constexpr std::uint8_t kChangeKind = 1;
 inline constexpr std::uint8_t kVendorTransferChangeKind = 0xD;
 /** Clear policy bits leave the record enabled; the observer skips any other pair. */
 inline constexpr std::uint16_t kChangeFlags = 0;
-/** The client's record writer marks the first step of an item's questline with this bit. */
-inline constexpr std::uint16_t kFirstQuestStepChangeFlag = 0x1;
-/** The client's record writer marks the last step of an item's questline with this bit. */
-inline constexpr std::uint16_t kLastQuestStepChangeFlag = 0x4;
+/**
+ * The client's record writer sets this on a new row whose collectible it has not yet acquired; its
+ * observer then adds the collectible to its list of newly acquired ones.
+ */
+inline constexpr std::uint16_t kNewCollectibleChangeFlag = 0x10;
 /** The client's record writer sets this for a quiet item; observers skip its toast and count. */
 inline constexpr std::uint16_t kQuietChangeFlag = 0x8;
 /** The client's record writer sets this for a toastless item; only the toast is skipped. */
@@ -71,14 +72,8 @@ inline constexpr std::uint16_t kToastlessChangeFlag = 0x100;
 /** @return The policy bits the client's record writer derives from one item's definition. */
 [[nodiscard]] inline std::uint16_t
 change_flags(const state::build_data::items::Definition& item) noexcept {
-    const auto& line = item.questline;
-    const bool stepped = line.questlineIndex != state::build_data::items::kUnavailableQuestlineIndex
-                         && line.step != state::build_data::items::kUnavailableQuestlineStep;
-    const unsigned flags =
-        kChangeFlags | (stepped && line.step == 0 ? kFirstQuestStepChangeFlag : 0U)
-        | (stepped && line.step + 1U == line.stepCount ? kLastQuestStepChangeFlag : 0U)
-        | (item.quietAcquisition ? kQuietChangeFlag : 0U)
-        | (item.toastlessAcquisition ? kToastlessChangeFlag : 0U);
+    const unsigned flags = kChangeFlags | (item.quietAcquisition ? kQuietChangeFlag : 0U)
+                           | (item.toastlessAcquisition ? kToastlessChangeFlag : 0U);
     return static_cast<std::uint16_t>(flags);
 }
 

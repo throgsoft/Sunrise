@@ -63,7 +63,7 @@ struct EquipmentSwapTransaction {
     queuez::EquipmentSwap update{};
 };
 
-/** Lost Items claim and its promised Family-4 revision. */
+/** Postmaster claim and its promised Family-4 revision. */
 struct PostmasterClaimTransaction {
     std::unique_ptr<state::PendingPostmasterClaim> pending{};
     queuez::RecordRewardGrant update{};

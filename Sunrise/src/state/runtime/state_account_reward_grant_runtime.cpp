@@ -12,7 +12,6 @@
 #include "../../core/logging/log.h"
 #include "../../middleware/datagen/family4/account/layout.h"
 #include "../../middleware/datagen/family4/character/layout.h"
-#include "../../middleware/datagen/family4/loadout/loadout_item_resolver.h"
 #include "../../middleware/datagen/family4/loadout/loadout_resolver.h"
 #include "../build_data/runtime.h"
 #include "../investment/store_internal.h"
@@ -45,7 +44,8 @@ prepare_reward_grant(std::span<const DirectRecordReward> rewards,
                                              const PendingRecordRewardGrant& mutation,
                                              AccountState& after) noexcept;
 
-/** @return The kind of item a reward grants; overflow can still land a stack in Lost Items. */
+/** @return The kind of item a reward grants; overflow can still land a stack in its recovery
+ * bucket. */
 [[nodiscard]] RecordRewardKind reward_kind(const item_details::Definition& detail,
                                            const inventory_buckets::Descriptor& bucket) noexcept {
     if (detail.instancedDefinitionState == item_details::InstancedDefinitionState::instanced) {
@@ -159,17 +159,6 @@ apply_reward_sockets(const item_details::Definition& detail,
     }
     reason = "not_ready";
     return RewardPreparation::deferred;
-}
-
-/** Wrappers and direct account perks bypass quest initialization. */
-bool uses_reward_definition(const build_data::items::Definition& item) noexcept {
-    build_data::rewards::Item reward{};
-    if (!build_data::find_reward_item(item.definitionIndex, reward)) {
-        return false;
-    }
-    return reward.poolIndex != build_data::rewards::kAbsent
-           || (item.bucketId == inventory_buckets::kPerkBucketId
-               && reward.acquiredFlag != build_data::rewards::kAbsent);
 }
 
 enum class PassResolution { claim, replay };
@@ -316,28 +305,6 @@ bool prepare_season_pass_reward(std::uint16_t rewardIndex,
     mutation.rewardIndex = rewardIndex;
     mutation.prepared = true;
     return true;
-}
-
-ItemGrantRoute item_grant_route(std::uint16_t itemIndex) noexcept {
-    build_data::items::Definition item{};
-    if (!build_data::find_item_definition_index(itemIndex, item)) {
-        return ItemGrantRoute::unavailable;
-    }
-    if (uses_reward_definition(item)) {
-        return ItemGrantRoute::reward;
-    }
-    item_details::Definition detail{};
-    inventory_buckets::Descriptor bucket{};
-    if (!build_data::find_configured_item_detail(itemIndex, detail)
-        || !build_data::find_inventory_bucket_descriptor(item.bucketId, bucket)) {
-        return ItemGrantRoute::unavailable;
-    }
-    const bool profileStack =
-        bucket.arraySelector == inventory_buckets::ArraySelector::profile
-        && detail.instancedDefinitionState == item_details::InstancedDefinitionState::stackable;
-    return profileStack || bucket.arraySelector == inventory_buckets::ArraySelector::character
-               ? ItemGrantRoute::reward
-               : ItemGrantRoute::unavailable;
 }
 
 RewardPreparation prepare_item_reward(std::uint16_t itemIndex,
@@ -718,16 +685,29 @@ prepare_reward_grant(std::span<const DirectRecordReward> rewards,
         || !family4_loadout::resolve(working, characterIndex, loadout)) {
         return RewardPreparation::deferred;
     }
-    // Only a wrapper draw can overflow a change list, and its next draw may fit.
-    if (!record_grant_images(account, working, characterIndex, placed, mutation, reason)) {
-        return RewardPreparation::deferred;
-    }
+    record_grant_images(account, working, characterIndex, placed, mutation);
     mutation.claimedRecordIndex = claimedRecordIndex;
     mutation.rewardCount = rewards.size();
     return RewardPreparation::prepared;
 }
 
 } // namespace
+
+/** A reward with no acquisition flag leaves its collectible state unknown, so it marks nothing. */
+bool newly_collected(const PendingRecordRewardGrant& mutation,
+                     const GrantedRow& row,
+                     const build_data::items::Definition& item) noexcept {
+    if (!row.newRow || mutation.rewardCount > mutation.rewards.size()
+        || !build_data::collectibles::grants_item(item.definitionIndex)) {
+        return false;
+    }
+    const auto rewards = std::span(mutation.rewards).first(mutation.rewardCount);
+    return std::any_of(rewards.begin(), rewards.end(), [&](const PreparedRecordReward& reward) {
+        return reward.definitionHash == item.definitionHash
+               && reward.acquiredFlag != build_data::rewards::kAbsent
+               && reward.previousFlag != unlocks::kFlagSet;
+    });
+}
 
 /** Diffs the grant's images by instance identity, new character instances first. */
 bool granted_residents(const PendingRecordRewardGrant& mutation,

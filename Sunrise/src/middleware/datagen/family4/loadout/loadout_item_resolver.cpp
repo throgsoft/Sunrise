@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <optional>
 
+#include "../../../../state/account/inventory/occupied_bucket.h"
 #include "../../../../state/build_data/runtime.h"
 #include "subclass_socket_selection.h"
 
@@ -148,8 +149,11 @@ bool resolve_item(const authored_inventory::Item& authored,
                 authored.definitionHash, itemDetail.equipmentSlot, nativeEquipmentSlot)
             && (requireEquipmentSlot || itemDetail.equipmentSlot.has_value()))
         || static_cast<std::size_t>(nativeEquipmentSlot) >= build_details::kEquipmentSlotCount
-        || !state::build_data::find_inventory_bucket_descriptor(itemDetail.bucketId, bucket)
+        || !authored_inventory::find_occupied_bucket(itemDefinition, authored.placement, bucket)
         || bucket.arraySelector != build_buckets::ArraySelector::character
+        // Equipment never sits in a recovery bucket.
+        || (requireEquipmentSlot
+            && authored.placement != authored_inventory::ItemPlacement::authored)
         || !state::build_data::find_socket_entry_list(itemDetail.socketEntryListIndex, socketList)
         || static_cast<std::size_t>(itemDefinition.definitionIndex) >= itemDefinitionCount
         || static_cast<std::size_t>(socketList.definitionIndex) >= socketEntryListCount
@@ -157,13 +161,6 @@ bool resolve_item(const authored_inventory::Item& authored,
         return false;
     }
 
-    // Lost Items holds whole instances whose recovery bucket names it; it never holds equipment.
-    if (authored.placement == authored_inventory::ItemPlacement::lostItems
-        && (requireEquipmentSlot || authored.quantity != 1
-            || itemDefinition.recoveryBucketId != build_buckets::kLostItemsBucketId
-            || !resolve_lost_items_bucket(bucket))) {
-        return false;
-    }
     Candidate candidate{};
     candidate.bucket = bucket;
     // Slot zero for a slotless item is safe: the encoder reads `equipmentSlot` only when `equipped`
@@ -207,21 +204,6 @@ bool resolve_item(const authored_inventory::Item& authored,
                           candidate.item.instance.socketEntryStates,
                           candidate.item.instance.socketSelectors);
     output = candidate;
-    return true;
-}
-
-/** Resolves Lost Items only while its installed row keeps the plain FIFO policy. */
-bool resolve_lost_items_bucket(build_buckets::Descriptor& output) noexcept {
-    build_buckets::Descriptor bucket{};
-    if (!state::build_data::find_inventory_bucket_descriptor(build_buckets::kLostItemsBucketId,
-                                                             bucket)
-        || bucket.bucketId != build_buckets::kLostItemsBucketId
-        || bucket.arraySelector != build_buckets::ArraySelector::character || bucket.slotCount == 0
-        || bucket.equipmentSlot != build_buckets::kUnavailableEquipmentSlot
-        || (bucket.policyFlags & build_buckets::kPolicyMask) != build_buckets::kFifo) {
-        return false;
-    }
-    output = bucket;
     return true;
 }
 

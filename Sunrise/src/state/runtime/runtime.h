@@ -26,10 +26,6 @@ struct SettingsDelta;
 
 namespace sunrise::state {
 
-/** Whether the reward grant path can place one installed item. */
-enum class ItemGrantRoute : std::uint8_t { unavailable, reward };
-/** Accepts wrappers, perks, and items whose bucket is a character or profile stack array. */
-[[nodiscard]] ItemGrantRoute item_grant_route(std::uint16_t itemIndex) noexcept;
 /**
  * Assigns runtime SOIDs only to installed profile mod/shader rows which are socket action sources.
  * Currency, material, and consumable profile rows remain canonically non-instanced.
@@ -250,6 +246,8 @@ enum class GrantedRowArray : std::uint8_t { profile, characterItem, characterSta
 struct GrantedRow {
     GrantedRowArray array{};
     std::int32_t mutationSerial{};
+    /** The change created the row rather than growing a held stack. */
+    bool newRow{};
 };
 
 /** One consumed wrapper's acquisition flag and the value its preparation observed. */
@@ -288,7 +286,7 @@ struct PendingRecordRewardGrant {
     bool prepared{};
 };
 
-/** A Lost Items claim: the rows it debits and returns, kept private until its update fits. */
+/** A Postmaster claim: the rows it debits and returns, kept private until its update fits. */
 struct PendingPostmasterClaim {
     PendingRecordRewardGrant grant{};
     /** The claimed instance, or zero for a stack. */
@@ -313,6 +311,15 @@ struct GrantedResidents {
  */
 [[nodiscard]] bool granted_residents(const PendingRecordRewardGrant& mutation,
                                      GrantedResidents& output) noexcept;
+
+/**
+ * Whether a granted row is a new row of an item whose Collections entry this grant first acquires,
+ * which the client's record writer marks for its list of newly acquired collectibles.
+ * @param item The row's item.
+ */
+[[nodiscard]] bool newly_collected(const PendingRecordRewardGrant& mutation,
+                                   const GrantedRow& row,
+                                   const build_data::items::Definition& item) noexcept;
 
 /** How one reward preparation ended. */
 enum class RewardPreparation : std::uint8_t { prepared, deferred, unresolvable };
@@ -586,12 +593,13 @@ set_selected_title(std::uint16_t recordIndex, std::uint64_t& characterSoid, bool
 [[nodiscard]] bool commit_equipment_swap(PendingEquipmentSwap& mutation) noexcept;
 
 /**
- * Prepares moving one selected-character Lost Items instance back to its authored bucket.
+ * Prepares moving a selected-character instance or stack quantity from the item's recovery bucket
+ * back to its authored bucket.
  * @param vendorIndex Vendor whose installed transfer rule must return this source bucket.
- * @param sourceBucket Bucket the Client named; only Lost Items is claimable.
- * @param instanceSoid Instance to move; the claim always moves the whole instance.
- * @param definitionIndex Definition row the Client named, checked against the instance.
- * @param quantity Requested quantity; must be 1.
+ * @param sourceBucket Bucket the Client named; it must be the item's recovery bucket.
+ * @param instanceSoid Instance to move, or zero for a stack.
+ * @param definitionIndex Definition row the Client named, checked against the claimed rows.
+ * @param quantity Requested quantity; 1 for an instance.
  * @param mutation Gets the checked after-image without changing account State.
  * @return True when the rule accepts the bucket and the authored bucket has room.
  */

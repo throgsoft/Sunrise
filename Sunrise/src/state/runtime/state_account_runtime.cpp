@@ -323,7 +323,7 @@ bool prepare_equipment_swap(std::uint64_t requestedInstanceSoid,
     }
 
     const authored_inventory::Item& requested = before.inventory.values[inventoryIndex];
-    if (requested.placement != authored_inventory::ItemPlacement::inventory) {
+    if (requested.placement != authored_inventory::ItemPlacement::authored) {
         return false;
     }
     std::uint8_t requestedNativeSlot = 0;

@@ -6,13 +6,13 @@
 #include <limits>
 #include <optional>
 
+#include "../../../../state/account/inventory/occupied_bucket.h"
 #include "../../../../state/build_data/runtime.h"
 #include "../../../../state/unlocks/unlocks_records.h"
 #include "../../../../state/unlocks/unlocks_runtime.h"
 #include "../../character_record/layout.h"
 #include "../../definitions.h"
 #include "../instance/layout.h"
-#include "../loadout/loadout_item_resolver.h"
 #include "../progression/progression_bank_keys.h"
 #include "equipment_summary_builder.h"
 #include "layout.h"
@@ -62,24 +62,7 @@ constexpr std::size_t kBitsPerFlagByte = 8;
 constexpr std::int32_t kOccupiedRowWatermark = 1;
 
 /**
- * Resolves the character bucket one saved stack occupies. Lost Items also holds the overflow of
- * profile-bucket items, so only a stack placed in inventory must name a character bucket itself.
- */
-[[nodiscard]] bool
-stack_bucket(const state::account::inventory::CharacterStack& stack,
-             const state::build_data::items::Definition& item,
-             state::build_data::inventory::buckets::Descriptor& bucket) noexcept {
-    if (stack.placement == state::account::inventory::ItemPlacement::lostItems) {
-        return item.recoveryBucketId == state::build_data::inventory::buckets::kLostItemsBucketId
-               && loadout::resolve_lost_items_bucket(bucket);
-    }
-    return state::build_data::find_inventory_bucket_descriptor(item.bucketId, bucket)
-           && bucket.arraySelector
-                  == state::build_data::inventory::buckets::ArraySelector::character;
-}
-
-/**
- * Places every authored stack into the first free row of the bucket it occupies.
+ * Places every authored stack into the first free row of the character bucket it occupies.
  * @param object Receives the row, its new-item flag bit and its progress watermark.
  * @return False when a stack fails validation or its bucket has no free row.
  */
@@ -102,8 +85,10 @@ stack_bucket(const state::account::inventory::CharacterStack& stack,
             || detail.instancedDefinitionState
                    != state::build_data::items::details::InstancedDefinitionState::stackable
             || detail.equipmentSlot.has_value() || stack.quantity > detail.maxStackSize
-            || !stack_bucket(stack, item, bucket) || bucket.slotCount == 0
-            || bucket.firstSlot >= object.inventoryItems.size()
+            || !state::account::inventory::find_occupied_bucket(item, stack.placement, bucket)
+            || bucket.arraySelector
+                   != state::build_data::inventory::buckets::ArraySelector::character
+            || bucket.slotCount == 0 || bucket.firstSlot >= object.inventoryItems.size()
             || bucket.slotCount > object.inventoryItems.size() - bucket.firstSlot) {
             return false;
         }

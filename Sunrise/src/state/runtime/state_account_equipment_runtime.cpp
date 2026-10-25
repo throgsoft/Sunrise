@@ -410,7 +410,7 @@ void report_item_state(std::string_view stage,
         }
         if (found
             || character.inventory.values[index].placement
-                   != authored_inventory::ItemPlacement::inventory) {
+                   != authored_inventory::ItemPlacement::authored) {
             return false;
         }
         found = true;
@@ -431,7 +431,7 @@ character_item_at(const CharacterState& character, const CharacterItemLocation& 
     }
     if (location.index >= character.inventory.count
         || character.inventory.values[location.index].placement
-               != authored_inventory::ItemPlacement::inventory) {
+               != authored_inventory::ItemPlacement::authored) {
         return nullptr;
     }
     return &character.inventory.values[location.index];
@@ -449,7 +449,7 @@ character_item_at(CharacterState& character, const CharacterItemLocation& locati
     }
     if (location.index >= character.inventory.count
         || character.inventory.values[location.index].placement
-               != authored_inventory::ItemPlacement::inventory) {
+               != authored_inventory::ItemPlacement::authored) {
         return nullptr;
     }
     return &character.inventory.values[location.index];

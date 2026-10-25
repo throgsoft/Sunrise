@@ -7,7 +7,7 @@
 
 namespace sunrise::server::web_service {
 
-/** Prepares an installed vendor's identity-preserving Lost Items claim. */
+/** Prepares an installed vendor's identity-preserving Postmaster claim. */
 void claim_postmaster_item(const middleware::web_service::Message& message,
                            Outcome& outcome) noexcept;
 

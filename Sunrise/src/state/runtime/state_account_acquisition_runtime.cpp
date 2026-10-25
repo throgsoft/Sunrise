@@ -9,7 +9,6 @@
 #include "../../middleware/datagen/family4/loadout/loadout_resolver.h"
 #include "../build_data/runtime.h"
 #include "../investment/store_internal.h"
-#include "bucket_admission.h"
 #include "runtime.h"
 #include "state_account_transaction_helpers.h"
 #include "storage/internal.h"
@@ -339,7 +338,7 @@ valid_item_acquisition_source(const PendingItemAcquisition& mutation) noexcept {
     }
 
     auto placed = mutation.afterCharacter.inventory.values[mutation.inventoryIndex];
-    placed.placement = authored_inventory::ItemPlacement::inventory;
+    placed.placement = authored_inventory::ItemPlacement::authored;
     CharacterState canonical = current.characters[mutation.characterIndex];
     if (canonical.inventory.count != mutation.inventoryIndex
         || canonical.nextInventorySerial != static_cast<std::uint32_t>(placed.mutationSerial)) {
@@ -480,23 +479,9 @@ finalize_profile_item_acquisition(const AccountState& account,
         }
     }
     if (greatestMutationSerial == (std::numeric_limits<std::int32_t>::max)()
+        || (appended && chargedAccount.profileItemCount >= chargedAccount.profileItems.size())
         || quantity > detail.maxStackSize - previousQuantity) {
         return false;
-    }
-
-    // A purchase or Collections pull is not a grant the client overflows; a full bucket refuses it.
-    if (appended) {
-        inventory_buckets::Descriptor bucket{};
-        BucketAdmission occupancy;
-        if (!build_data::find_inventory_bucket_descriptor(detail.bucketId, bucket)
-            || !profile_bucket_admission(
-                std::span(chargedAccount.profileItems).first(chargedAccount.profileItemCount),
-                bucket.bucketId,
-                occupancy)
-            || occupancy.count >= bucket.slotCount
-            || profileIndex >= chargedAccount.profileItems.size()) {
-            return false;
-        }
     }
 
     std::uint64_t acquiredInstanceSoid =

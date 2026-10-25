@@ -18,32 +18,6 @@ inline constexpr std::uint16_t kUnavailableMaterialRequirementSetIndex = 0xFFFFU
 inline constexpr std::uint16_t kUnavailableLinkedPlugIndex = 0xFFFFU;
 /** The stack-unique label is the FNV-1 hash of its string; this is the hash of the empty one. */
 inline constexpr std::uint32_t kNoStackUniqueLabel = 0x811C9DC5U;
-/** An item outside every questline names this questline index. */
-inline constexpr std::uint16_t kUnavailableQuestlineIndex = 0xFFFFU;
-/** An item absent from its questline's step list holds this position. */
-inline constexpr std::uint16_t kUnavailableQuestlineStep = 0xFFFFU;
-
-/** One item's place in the step list of the questline that owns it. */
-struct QuestlineStep {
-    /** Item-table index of the questline, or kUnavailableQuestlineIndex for none. */
-    std::uint16_t questlineIndex{kUnavailableQuestlineIndex};
-    /** Position in the list, or kUnavailableQuestlineStep when the item is missing from it. */
-    std::uint16_t step{kUnavailableQuestlineStep};
-    std::uint16_t stepCount{};
-    /** The client admits only a later step of an ordered questline. */
-    bool ordered{};
-
-    bool operator==(const QuestlineStep&) const = default;
-};
-
-/** @return True for no questline, or a position inside its list or marked absent from it. */
-[[nodiscard]] constexpr bool valid(const QuestlineStep& questline) noexcept {
-    if (questline.questlineIndex == kUnavailableQuestlineIndex) {
-        return questline == QuestlineStep{};
-    }
-    return questline.stepCount != kUnavailableQuestlineStep
-           && (questline.step == kUnavailableQuestlineStep || questline.step < questline.stepCount);
-}
 
 /** One installed-build item identity, used to look up authored definition hashes. */
 struct Definition {
@@ -75,7 +49,6 @@ struct Definition {
     bool toastlessAcquisition{};
     /** Rows sharing a label never coexist as separate stacks, or kNoStackUniqueLabel. */
     std::uint32_t stackUniqueLabel{kNoStackUniqueLabel};
-    QuestlineStep questline{};
     /** The installed restricted-grant list names this item; ordinary grants refuse it. */
     bool grantRestricted{};
 };

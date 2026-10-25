@@ -1,6 +1,7 @@
 #include <memory>
 #include <new>
 
+#include "../../core/logging/log.h"
 #include "../build_data/runtime.h"
 #include "../investment/store_internal.h"
 #include "bucket_admission.h"
@@ -9,7 +10,6 @@
 
 namespace sunrise::state {
 namespace family4_loadout = middleware::datagen::family4::loadout;
-namespace inventory_buckets = build_data::inventory::buckets;
 namespace item_details = build_data::items::details;
 using namespace runtime::detail;
 
@@ -17,8 +17,7 @@ using namespace runtime::detail;
 [[nodiscard]] static bool accepted_claim_rule(std::uint16_t vendorIndex,
                                               std::uint8_t sourceBucket) noexcept {
     std::uint8_t destination = 0;
-    return sourceBucket == inventory_buckets::kLostItemsBucketId
-           && build_data::find_vendor_transfer_destination(vendorIndex, sourceBucket, destination)
+    return build_data::find_vendor_transfer_destination(vendorIndex, sourceBucket, destination)
            && destination == build_data::vendors::kAuthoredDestination;
 }
 
@@ -52,14 +51,29 @@ bool prepare_postmaster_claim(std::uint16_t vendorIndex,
     PlacedRows placed;
     const char* reason = nullptr;
     family4_loadout::ResolvedLoadout loadout{};
-    if (!place_claim(*working, characterIndex, item, detail, instanceSoid, quantity, placed, reason)
-        || !account::valid(*working) || !valid_profile_inventory(*working)
-        || !family4_loadout::resolve(*working, characterIndex, loadout)
-        || !record_grant_images(
-            *before, *working, characterIndex, placed, mutation.grant, reason)) {
-        mutation = {};
+    const bool moved = place_claim(*working,
+                                   characterIndex,
+                                   sourceBucket,
+                                   item,
+                                   detail,
+                                   instanceSoid,
+                                   quantity,
+                                   placed,
+                                   reason);
+    if (!moved || !account::valid(*working) || !valid_profile_inventory(*working)
+        || !family4_loadout::resolve(*working, characterIndex, loadout)) {
+        core::log::writef(core::log::Channel::state,
+                          core::log::Level::warn,
+                          "ev=postmaster_claim stage=prepare result=refused reason=%s vendor=%u "
+                          "source=%u item=%u quantity=%d",
+                          moved ? "claim_after_image" : reason,
+                          static_cast<unsigned>(vendorIndex),
+                          static_cast<unsigned>(sourceBucket),
+                          static_cast<unsigned>(item.definitionHash),
+                          static_cast<int>(quantity));
         return false;
     }
+    record_grant_images(*before, *working, characterIndex, placed, mutation.grant);
     mutation.grant.vendorTransfer = true;
     mutation.instanceSoid = instanceSoid;
     mutation.quantity = quantity;

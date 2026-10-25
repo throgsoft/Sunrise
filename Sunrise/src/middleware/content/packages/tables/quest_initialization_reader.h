@@ -4,7 +4,6 @@
 #include <cstdint>
 #include <span>
 
-#include "../../../../state/build_data/items/item_catalog.h"
 #include "../../../../state/build_data/items/quest_initialization.h"
 
 namespace sunrise::middleware::content::packages::tables::items {
@@ -18,26 +17,6 @@ inline constexpr std::uint16_t kUnavailableQuestParent = 0xFFFFU;
  * @return The owner's item-table index, or kUnavailableQuestParent on rejection.
  */
 [[nodiscard]] std::uint16_t quest_parent(std::span<const std::byte> definition) noexcept;
-
-/**
- * Reads the questline any item's objective block names, whatever bucket the item uses.
- * @return The questline's item-table index, or kUnavailableQuestParent when it names none.
- */
-[[nodiscard]] std::uint16_t questline_owner(std::span<const std::byte> definition) noexcept;
-
-/**
- * Finds one item in the ordered step list its questline holds.
- * @param owner Questline item bytes selected by questline_owner.
- * @param ownerIndex The questline's item-table index.
- * @param itemIndex Item whose position is wanted.
- * @param itemCount Exclusive bound for item-table indices.
- * @return The position, list length and ordering, or an empty step when the list is unreadable.
- */
-[[nodiscard]] state::build_data::items::QuestlineStep
-read_questline_step(std::span<const std::byte> owner,
-                    std::uint16_t ownerIndex,
-                    std::uint16_t itemIndex,
-                    std::size_t itemCount) noexcept;
 
 /**
  * Only a unique first member with one supported save-bank mapping may start a quest.

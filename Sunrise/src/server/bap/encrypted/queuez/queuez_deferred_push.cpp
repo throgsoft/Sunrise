@@ -73,14 +73,13 @@ constexpr const char* kWorldRewardStage = "world_publish";
     }
     StagedItemGrant staged{};
     const char* reason = nullptr;
-    const ItemGrantStage stage =
-        stage_item_grant({request.itemDefinitionIndex, request.quantity, request.kind},
-                         session,
-                         scratch,
-                         response,
-                         touchesScratch,
-                         staged,
-                         reason);
+    const ItemGrantStage stage = stage_item_grant({request.itemDefinitionIndex, request.quantity},
+                                                  session,
+                                                  scratch,
+                                                  response,
+                                                  touchesScratch,
+                                                  staged,
+                                                  reason);
     if (stage == ItemGrantStage::unresolvable) {
         (void)bap::retire_world_reward(transaction, request, reason);
         return false;

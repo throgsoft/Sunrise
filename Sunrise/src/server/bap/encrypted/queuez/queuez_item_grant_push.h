@@ -17,11 +17,10 @@ struct StagedFrame {
     std::size_t size{};
 };
 
-/** One installed item to grant, and the inventory it lands in. */
+/** One installed item to grant; State places it like every other grant. */
 struct ItemGrant {
     std::uint16_t itemDefinitionIndex{};
     std::int32_t quantity{};
-    WorldRewardKind kind{};
 };
 
 /** How far one grant attempt got inside the caller's savepoint. */

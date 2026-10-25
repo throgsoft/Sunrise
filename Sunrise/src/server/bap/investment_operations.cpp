@@ -169,18 +169,10 @@ void report_receipt(const char* stage, const InvestmentReceipt& receipt) noexcep
                > static_cast<std::uint32_t>((std::numeric_limits<std::int32_t>::max)())) {
         return refused_transition("quantity");
     }
-    switch (state::item_grant_route(item.definitionIndex)) {
-    case state::ItemGrantRoute::unavailable:
-        return refused_transition("item_route");
-    case state::ItemGrantRoute::quest:
-        // A quest item is one instance; its acquisition takes no quantity.
-        return request.quantity == 1 ? InvestmentTransition{}
-                                     : refused_transition("instance_quantity");
-    case state::ItemGrantRoute::profile:
-    case state::ItemGrantRoute::reward:
-        break;
-    }
-    return {};
+    // The grant path places every routable item and refuses an instance asked for more than once.
+    return state::item_grant_route(item.definitionIndex) == state::ItemGrantRoute::unavailable
+               ? refused_transition("item_route")
+               : InvestmentTransition{};
 }
 
 /** An edit names an installed item and a quantity State can hold. */

@@ -216,7 +216,9 @@ void append_stacks(const state::CharacterState& character,
         record.definitionHash = stack.definitionHash;
         record.quantity = stack.quantity;
         record.mutationSerial = stack.mutationSerial;
-        record.bucketId = bucket_of(stack.definitionHash);
+        record.bucketId = stack.placement == state::account::inventory::ItemPlacement::lostItems
+                              ? state::build_data::inventory::buckets::kLostItemsBucketId
+                              : bucket_of(stack.definitionHash);
     }
     snapshot.stackCount = static_cast<std::uint16_t>(count);
 }

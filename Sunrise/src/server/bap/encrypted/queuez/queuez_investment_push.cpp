@@ -117,17 +117,13 @@ commit_and_publish(state::investment::store::Transaction& transaction,
     if (!state::build_data::find_item_definition_hash(request.definitionHash, item)) {
         return refused_transition("item_definition");
     }
-    const WorldRewardKind kind =
-        state::item_grant_route(item.definitionIndex) == state::ItemGrantRoute::profile
-            ? WorldRewardKind::profileItem
-            : WorldRewardKind::item;
     state::investment::store::Transaction transaction;
     if (!transaction.ready()) {
         return refused_transition("transaction");
     }
     StagedItemGrant staged{};
     const char* reason = nullptr;
-    const ItemGrant grant{item.definitionIndex, static_cast<std::int32_t>(request.quantity), kind};
+    const ItemGrant grant{item.definitionIndex, static_cast<std::int32_t>(request.quantity)};
     switch (stage_item_grant(grant, session, scratch, response, touchesScratch, staged, reason)) {
     case ItemGrantStage::committed:
         break;

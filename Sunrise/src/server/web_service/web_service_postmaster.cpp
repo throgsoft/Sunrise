@@ -1,9 +1,12 @@
+/** Postmaster claims the web service prepares from one opcode-405 request. */
+
 #include "../../core/logging/log.h"
 #include "../../middleware/web_service/messages/opcode405.h"
 #include "../../state/runtime/runtime.h"
 #include "web_service_actions.h"
 
 namespace sunrise::server::web_service {
+
 /** Parses and prepares one opcode-405 Postmaster claim. */
 void claim_postmaster_item(const middleware::web_service::Message& message,
                            Outcome& outcome) noexcept {
@@ -39,4 +42,5 @@ void claim_postmaster_item(const middleware::web_service::Message& message,
                       static_cast<unsigned long long>(request.instanceSoid),
                       request.quantity);
 }
+
 } // namespace sunrise::server::web_service

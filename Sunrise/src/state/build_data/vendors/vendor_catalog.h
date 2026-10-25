@@ -171,7 +171,4 @@ transfer_rule(const Definition& definition, std::size_t row, TransferRule& outpu
 /** @return The flat installed bank row count, read under the lock. */
 [[nodiscard]] std::size_t installed_row_count() noexcept;
 
-/** @return The flat transfer bank row count, read under the lock. */
-[[nodiscard]] std::size_t transfer_rule_count() noexcept;
-
 } // namespace sunrise::state::build_data::vendors

@@ -21,6 +21,23 @@ using namespace runtime::detail;
            && destination == build_data::vendors::kAuthoredDestination;
 }
 
+/** Logs why a claim was refused, naming it as the client's request did. */
+static void report_claim_refusal(const char* reason,
+                                 std::uint16_t vendorIndex,
+                                 std::uint8_t sourceBucket,
+                                 std::uint16_t definitionIndex,
+                                 std::int32_t quantity) noexcept {
+    core::log::writef(core::log::Channel::state,
+                      core::log::Level::warn,
+                      "ev=postmaster_claim stage=prepare result=refused reason=%s vendor=%u "
+                      "source=%u item=%u quantity=%d",
+                      reason,
+                      static_cast<unsigned>(vendorIndex),
+                      static_cast<unsigned>(sourceBucket),
+                      static_cast<unsigned>(definitionIndex),
+                      static_cast<int>(quantity));
+}
+
 /** Stages one claim against the saved account without writing it. */
 bool prepare_postmaster_claim(std::uint16_t vendorIndex,
                               std::uint8_t sourceBucket,
@@ -33,7 +50,12 @@ bool prepare_postmaster_claim(std::uint16_t vendorIndex,
     const std::lock_guard lock(investment::store::g_mutex);
     const std::unique_ptr<AccountState> before(new (std::nothrow) AccountState{});
     const std::unique_ptr<AccountState> working(new (std::nothrow) AccountState{});
-    if (!before || !working || !accepted_claim_rule(vendorIndex, sourceBucket)) {
+    if (!before || !working) {
+        return false;
+    }
+    // Only a rule returning the source to each item's authored bucket is a Postmaster claim.
+    if (!accepted_claim_rule(vendorIndex, sourceBucket)) {
+        report_claim_refusal("claim_rule", vendorIndex, sourceBucket, definitionIndex, quantity);
         return false;
     }
     *before = account_snapshot();
@@ -62,15 +84,11 @@ bool prepare_postmaster_claim(std::uint16_t vendorIndex,
                                    reason);
     if (!moved || !account::valid(*working) || !valid_profile_inventory(*working)
         || !family4_loadout::resolve(*working, characterIndex, loadout)) {
-        core::log::writef(core::log::Channel::state,
-                          core::log::Level::warn,
-                          "ev=postmaster_claim stage=prepare result=refused reason=%s vendor=%u "
-                          "source=%u item=%u quantity=%d",
-                          moved ? "claim_after_image" : reason,
-                          static_cast<unsigned>(vendorIndex),
-                          static_cast<unsigned>(sourceBucket),
-                          static_cast<unsigned>(item.definitionHash),
-                          static_cast<int>(quantity));
+        report_claim_refusal(moved ? "claim_after_image" : reason,
+                             vendorIndex,
+                             sourceBucket,
+                             definitionIndex,
+                             quantity);
         return false;
     }
     record_grant_images(*before, *working, characterIndex, placed, mutation.grant);
@@ -82,13 +100,6 @@ bool prepare_postmaster_claim(std::uint16_t vendorIndex,
     mutation.sourceBucket = sourceBucket;
     mutation.prepared = true;
     return true;
-}
-
-/** Rebuilds the claimed account for publication without writing it. */
-bool preview_postmaster_claim(const PendingPostmasterClaim& mutation,
-                              AccountState& after) noexcept {
-    return mutation.prepared && accepted_claim_rule(mutation.vendorIndex, mutation.sourceBucket)
-           && preview_record_reward_grant(mutation.grant, after);
 }
 
 /** Writes the claim after re-checking its vendor rule and saved before-image in one transaction. */

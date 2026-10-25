@@ -378,10 +378,4 @@ std::size_t installed_row_count() noexcept {
     return g_installedRows.count();
 }
 
-/** @return The flat transfer bank row count, read under the lock. */
-std::size_t transfer_rule_count() noexcept {
-    const std::shared_lock guard(g_lock);
-    return g_transferRules.count();
-}
-
 } // namespace sunrise::state::build_data::vendors

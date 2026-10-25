@@ -17,11 +17,19 @@ namespace item_details = build_data::items::details;
 namespace {
 
 /**
- * Buckets an eviction chain is still freeing a row in. The client inserts an evicted row into its
- * recovery bucket under that bucket's policy, which can evict in turn; a transfer back into a
- * bucket on the chain would recurse without end, so that victim is discarded.
+ * Buckets an eviction chain is still freeing a row in. The client inserts an evicted row's copy
+ * before clearing its slot, so a chain leading back into a bucket on it never finishes there. Here
+ * the victim leaves first, and a transfer back would take the row freed for the arrival, so that
+ * victim is discarded instead.
  */
 using EvictionChain = std::bitset<inventory_buckets::kDescriptorCapacity>;
+
+/** One index space over a character's held instances, stacks and equipped rows, in that order. */
+constexpr std::size_t kStackRowBase = authored_inventory::kCharacterItemCapacity;
+constexpr std::size_t kEquippedRowBase =
+    kStackRowBase + authored_inventory::kCharacterStackCapacity;
+constexpr std::size_t kCharacterRowCount =
+    kEquippedRowBase + authored_inventory::kEquipmentSlotCount;
 
 /** Finds the bucket a saved row occupies from its item and placement. */
 [[nodiscard]] bool occupied_bucket(std::uint32_t definitionHash,
@@ -106,6 +114,82 @@ static_assert(
         return false;
     }
     mutationSerial = greatest + 1;
+    return true;
+}
+
+/**
+ * Counts one bucket's character rows and picks its oldest. As in the client, an equipped row is
+ * an ordinary occupied row of its bucket.
+ */
+[[nodiscard]] bool character_bucket_admission(const CharacterState& character,
+                                              const inventory_buckets::Descriptor& bucket,
+                                              BucketAdmission& occupancy) noexcept {
+    occupancy = {};
+    if (character.inventory.count > character.inventory.values.size()
+        || character.stacks.count > character.stacks.values.size()) {
+        return false;
+    }
+    const auto include = [&](std::uint32_t definitionHash,
+                             authored_inventory::ItemPlacement placement,
+                             std::int32_t mutationSerial,
+                             std::size_t row) noexcept {
+        std::uint8_t bucketId = 0;
+        if (!occupied_bucket(definitionHash, placement, bucketId)) {
+            return false;
+        }
+        if (bucketId == bucket.bucketId) {
+            occupancy.include(row, mutationSerial);
+        }
+        return true;
+    };
+    for (std::size_t index = 0; index < character.inventory.count; ++index) {
+        const auto& item = character.inventory.values[index];
+        if (!include(item.definitionHash, item.placement, item.mutationSerial, index)) {
+            return false;
+        }
+    }
+    for (std::size_t index = 0; index < character.stacks.count; ++index) {
+        const auto& item = character.stacks.values[index];
+        if (!include(
+                item.definitionHash, item.placement, item.mutationSerial, kStackRowBase + index)) {
+            return false;
+        }
+    }
+    for (std::size_t slot = 0; slot < character.equipment.slots.size(); ++slot) {
+        const auto& item = character.equipment.slots[slot];
+        if (item
+            && !include(item->definitionHash,
+                        item->placement,
+                        item->mutationSerial,
+                        kEquippedRowBase + slot)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+/** Removes one held instance, stack or equipped row named by its character row index. */
+[[nodiscard]] bool erase_character_row(CharacterState& character, std::size_t row) noexcept {
+    const auto erase = [](auto& held, std::size_t index) noexcept {
+        if (index >= held.count || held.count > held.values.size()) {
+            return false;
+        }
+        std::move(held.values.begin() + static_cast<std::ptrdiff_t>(index) + 1,
+                  held.values.begin() + static_cast<std::ptrdiff_t>(held.count),
+                  held.values.begin() + static_cast<std::ptrdiff_t>(index));
+        held.values[--held.count] = {};
+        return true;
+    };
+    if (row < kStackRowBase) {
+        return erase(character.inventory, row);
+    }
+    if (row < kEquippedRowBase) {
+        return erase(character.stacks, row - kStackRowBase);
+    }
+    if (row >= kCharacterRowCount || !character.equipment.slots[row - kEquippedRowBase]) {
+        return false;
+    }
+    character.equipment.slots[row - kEquippedRowBase].reset();
     return true;
 }
 
@@ -393,7 +477,7 @@ template <typename Visit>
     return true;
 }
 
-/** Evicts the oldest unequipped row of a full character FIFO bucket, moving it when allowed. */
+/** Evicts the oldest row of a full character FIFO bucket, moving it when allowed. */
 [[nodiscard]] bool evict_character_row(AccountState& working,
                                        std::size_t characterIndex,
                                        const inventory_buckets::Descriptor& bucket,
@@ -404,40 +488,43 @@ template <typename Visit>
     BucketAdmission occupancy;
     reason = "fifo_victim";
     if (!character_bucket_admission(character, bucket, occupancy)
-        || occupancy.oldest >= kCharacterAdmissionCapacity) {
+        || occupancy.oldest >= kCharacterRowCount) {
         return false;
     }
-    const bool victimInstance = occupancy.oldest < kCharacterStackAdmissionBase;
+    const bool victimStack =
+        occupancy.oldest >= kStackRowBase && occupancy.oldest < kEquippedRowBase;
     authored_inventory::Item instance{};
     authored_inventory::CharacterStack stack{};
-    if (victimInstance) {
+    if (victimStack) {
+        stack = character.stacks.values[occupancy.oldest - kStackRowBase];
+    } else if (occupancy.oldest < kStackRowBase) {
         instance = character.inventory.values[occupancy.oldest];
     } else {
-        stack = character.stacks.values[occupancy.oldest - kCharacterStackAdmissionBase];
+        instance = *character.equipment.slots[occupancy.oldest - kEquippedRowBase];
     }
     build_data::items::Definition victim{};
     item_details::Definition victimDetail{};
     inventory_buckets::Descriptor recovery{};
     bool transfers = false;
     if (!build_data::find_item_definition_hash(
-            victimInstance ? instance.definitionHash : stack.definitionHash, victim)
+            victimStack ? stack.definitionHash : instance.definitionHash, victim)
         || !build_data::find_configured_item_detail(victim.definitionIndex, victimDetail)
         || !transfers_victim(working,
                              characterIndex,
                              bucket,
                              victim,
                              victimDetail,
-                             victimInstance ? instance.quantity : stack.quantity,
+                             victimStack ? stack.quantity : instance.quantity,
                              chain,
                              recovery,
                              transfers)
-        || !erase_character_bucket_row(character, occupancy.oldest)) {
+        || !erase_character_row(character, occupancy.oldest)) {
         return false;
     }
     if (!transfers) {
         return true;
     }
-    if (victimInstance) {
+    if (!victimStack) {
         return insert_instance(
             working, characterIndex, recovery, victim, instance, chain, rows, reason);
     }
@@ -507,79 +594,107 @@ template <typename Visit>
     return evicted;
 }
 
-/** Tops up the item's own stacks in the bucket, then adds whole new stacks. */
-bool insert_stack(AccountState& working,
-                  std::size_t characterIndex,
-                  const inventory_buckets::Descriptor& bucket,
-                  const build_data::items::Definition& item,
-                  const item_details::Definition& detail,
-                  std::int32_t quantity,
-                  EvictionChain& chain,
-                  PlacedRows& rows,
-                  const char*& reason) noexcept {
-    reason = "stack_insert";
-    if (quantity <= 0 || detail.maxStackSize <= 0 || instanced(detail)) {
-        return false;
-    }
+/**
+ * The client's merge into one same-item row: it takes what fits, and gains a fresh serial even
+ * when nothing fits, so a full stack the arrival touched is no longer the oldest row.
+ * @return The quantity the row took.
+ */
+template <typename Row>
+[[nodiscard]] std::int32_t merge_into(Row& row,
+                                      std::int32_t serial,
+                                      std::int32_t quantity,
+                                      std::int32_t maxStackSize) noexcept {
+    const std::int32_t added = (std::min)(quantity, (std::max)(maxStackSize - row.quantity, 0));
+    row.quantity += added;
+    row.mutationSerial = serial;
+    return added;
+}
+
+/** Merges into the item's own profile stacks, then adds whole new ones in its authored bucket. */
+[[nodiscard]] bool insert_profile_stack(AccountState& working,
+                                        std::size_t characterIndex,
+                                        const inventory_buckets::Descriptor& bucket,
+                                        const build_data::items::Definition& item,
+                                        const item_details::Definition& detail,
+                                        std::int32_t quantity,
+                                        EvictionChain& chain,
+                                        PlacedRows& rows,
+                                        const char*& reason) noexcept {
     // A saved profile row records no placement, so it only ever sits in its authored bucket.
-    if (bucket.arraySelector == inventory_buckets::ArraySelector::profile) {
-        if (bucket.bucketId != item.bucketId) {
-            return false;
-        }
-        for (std::size_t index = 0; quantity > 0 && index < working.profileItemCount; ++index) {
-            auto& row = working.profileItems[index];
-            if (row.definitionHash != item.definitionHash || row.quantity >= detail.maxStackSize) {
-                continue;
-            }
-            const std::int32_t added = (std::min)(quantity, detail.maxStackSize - row.quantity);
-            std::int32_t serial = 0;
-            if (!next_profile_serial(working, serial)) {
-                return false;
-            }
-            record(rows, GrantedRowArray::profile, serial, false);
-            row.quantity += added;
-            row.mutationSerial = serial;
-            quantity -= added;
-        }
-        while (quantity > 0) {
-            std::int32_t serial = 0;
-            std::uint64_t soid = 0;
-            if (!free_row(working, characterIndex, bucket, chain, rows, reason)
-                || working.profileItemCount >= working.profileItems.size()
-                || !next_profile_serial(working, serial)
-                || (build_data::is_profile_action_source(item.definitionIndex, item.bucketId)
-                    && !next_profile_item_instance_soid(working, soid))) {
-                return false;
-            }
-            record(rows, GrantedRowArray::profile, serial, true);
-            const std::int32_t added = (std::min)(quantity, detail.maxStackSize);
-            working.profileItems[working.profileItemCount++] = {
-                soid, item.definitionHash, added, serial};
-            quantity -= added;
-        }
-        return true;
-    }
-    authored_inventory::ItemPlacement placement{};
-    if (bucket.arraySelector != inventory_buckets::ArraySelector::character
-        || !authored_inventory::placement_in(item, bucket.bucketId, placement)) {
+    if (bucket.bucketId != item.bucketId) {
         return false;
     }
-    CharacterState& character = working.characters[characterIndex];
-    for (std::size_t index = 0; quantity > 0 && index < character.stacks.count; ++index) {
-        auto& row = character.stacks.values[index];
-        if (row.definitionHash != item.definitionHash || row.placement != placement
-            || row.quantity >= detail.maxStackSize) {
+    const bool labelled = item.stackUniqueLabel != build_data::items::kNoStackUniqueLabel;
+    for (std::size_t index = 0; index < working.profileItemCount; ++index) {
+        auto& row = working.profileItems[index];
+        std::int32_t serial = 0;
+        if (row.definitionHash != item.definitionHash) {
             continue;
         }
-        const std::int32_t added = (std::min)(quantity, detail.maxStackSize - row.quantity);
+        if (!next_profile_serial(working, serial)) {
+            return false;
+        }
+        const std::int32_t added = merge_into(row, serial, quantity, detail.maxStackSize);
+        if (added != 0) {
+            record(rows, GrantedRowArray::profile, serial, false);
+        }
+        quantity -= added;
+        if (labelled) {
+            break;
+        }
+    }
+    while (quantity > 0) {
         std::int32_t serial = 0;
+        std::uint64_t soid = 0;
+        if (!free_row(working, characterIndex, bucket, chain, rows, reason)
+            || working.profileItemCount >= working.profileItems.size()
+            || !next_profile_serial(working, serial)
+            || (build_data::is_profile_action_source(item.definitionIndex, item.bucketId)
+                && !next_profile_item_instance_soid(working, soid))) {
+            return false;
+        }
+        record(rows, GrantedRowArray::profile, serial, true);
+        const std::int32_t added = (std::min)(quantity, detail.maxStackSize);
+        working.profileItems[working.profileItemCount++] = {
+            soid, item.definitionHash, added, serial};
+        quantity -= added;
+    }
+    return true;
+}
+
+/** Merges into the item's own stacks in a character bucket, then adds whole new ones. */
+[[nodiscard]] bool insert_character_stack(AccountState& working,
+                                          std::size_t characterIndex,
+                                          const inventory_buckets::Descriptor& bucket,
+                                          const build_data::items::Definition& item,
+                                          const item_details::Definition& detail,
+                                          std::int32_t quantity,
+                                          EvictionChain& chain,
+                                          PlacedRows& rows,
+                                          const char*& reason) noexcept {
+    authored_inventory::ItemPlacement placement{};
+    if (!authored_inventory::placement_in(item, bucket.bucketId, placement)) {
+        return false;
+    }
+    const bool labelled = item.stackUniqueLabel != build_data::items::kNoStackUniqueLabel;
+    CharacterState& character = working.characters[characterIndex];
+    for (std::size_t index = 0; index < character.stacks.count; ++index) {
+        auto& row = character.stacks.values[index];
+        std::int32_t serial = 0;
+        if (row.definitionHash != item.definitionHash || row.placement != placement) {
+            continue;
+        }
         if (!next_character_serial(character, serial)) {
             return false;
         }
-        record(rows, GrantedRowArray::characterStack, serial, false);
-        row.quantity += added;
-        row.mutationSerial = serial;
+        const std::int32_t added = merge_into(row, serial, quantity, detail.maxStackSize);
+        if (added != 0) {
+            record(rows, GrantedRowArray::characterStack, serial, false);
+        }
         quantity -= added;
+        if (labelled) {
+            break;
+        }
     }
     while (quantity > 0) {
         std::int32_t serial = 0;
@@ -595,6 +710,29 @@ bool insert_stack(AccountState& working,
         quantity -= added;
     }
     return true;
+}
+
+/** Places a stackable arrival in the array its bucket belongs to. */
+bool insert_stack(AccountState& working,
+                  std::size_t characterIndex,
+                  const inventory_buckets::Descriptor& bucket,
+                  const build_data::items::Definition& item,
+                  const item_details::Definition& detail,
+                  std::int32_t quantity,
+                  EvictionChain& chain,
+                  PlacedRows& rows,
+                  const char*& reason) noexcept {
+    reason = "stack_insert";
+    if (quantity <= 0 || detail.maxStackSize <= 0 || instanced(detail)) {
+        return false;
+    }
+    if (bucket.arraySelector == inventory_buckets::ArraySelector::profile) {
+        return insert_profile_stack(
+            working, characterIndex, bucket, item, detail, quantity, chain, rows, reason);
+    }
+    return bucket.arraySelector == inventory_buckets::ArraySelector::character
+           && insert_character_stack(
+               working, characterIndex, bucket, item, detail, quantity, chain, rows, reason);
 }
 
 /** Adds one instance, keeping its identity, in a free or freed row of a character bucket. */
@@ -660,72 +798,76 @@ bool insert_instance(AccountState& working,
         working, characterIndex, bucket, arrival.item, instance, chain, rows, reason);
 }
 
-} // namespace
+/** What a claim found in its source bucket. */
+struct ClaimSource {
+    /** The claimed instance's row, when the item is instanced. */
+    std::size_t instanceRow{};
+    /** The quantity every same-item stack in the source holds. */
+    std::int64_t held{};
+    /** The quantity of the first such stack. */
+    std::int32_t firstRow{};
+};
 
-/** Counts one bucket's rows; equipped rows hold capacity but are never offered for eviction. */
-bool character_bucket_admission(const CharacterState& character,
-                                const inventory_buckets::Descriptor& bucket,
-                                BucketAdmission& occupancy) noexcept {
-    occupancy = {};
-    if (character.inventory.count > character.inventory.values.size()
-        || character.stacks.count > character.stacks.values.size()) {
-        return false;
-    }
-    // Equipped rows count toward capacity but are never offered for eviction.
-    for (const auto& equipped : character.equipment.slots) {
-        std::uint8_t bucketId = 0;
-        if (equipped && !occupied_bucket(equipped->definitionHash, equipped->placement, bucketId)) {
-            return false;
+/** Finds the claimed instance, or the stacks of the item, among the rows in its recovery bucket. */
+[[nodiscard]] bool find_claim_source(const CharacterState& character,
+                                     const build_data::items::Definition& item,
+                                     bool instance,
+                                     std::uint64_t instanceSoid,
+                                     std::int32_t quantity,
+                                     ClaimSource& source) noexcept {
+    const auto recovered = authored_inventory::ItemPlacement::recovery;
+    source = {};
+    if (instance) {
+        source.instanceRow = character.inventory.count;
+        for (std::size_t index = 0; index < character.inventory.count; ++index) {
+            const auto& row = character.inventory.values[index];
+            if (row.instanceSoid == instanceSoid && row.placement == recovered
+                && row.definitionHash == item.definitionHash) {
+                source.instanceRow = index;
+            }
         }
-        occupancy.count += equipped && bucketId == bucket.bucketId;
-    }
-    for (std::size_t index = 0; index < character.inventory.count; ++index) {
-        const auto& item = character.inventory.values[index];
-        std::uint8_t bucketId = 0;
-        if (!occupied_bucket(item.definitionHash, item.placement, bucketId)) {
-            return false;
-        }
-        if (bucketId == bucket.bucketId) {
-            occupancy.include(index, item.mutationSerial);
-        }
+        return instanceSoid != 0 && quantity == 1
+               && source.instanceRow != character.inventory.count;
     }
     for (std::size_t index = 0; index < character.stacks.count; ++index) {
-        const auto& item = character.stacks.values[index];
-        std::uint8_t bucketId = 0;
-        if (!occupied_bucket(item.definitionHash, item.placement, bucketId)) {
-            return false;
+        const auto& row = character.stacks.values[index];
+        if (row.definitionHash == item.definitionHash && row.placement == recovered) {
+            source.firstRow = source.held == 0 ? row.quantity : source.firstRow;
+            source.held += row.quantity;
         }
-        if (bucketId == bucket.bucketId) {
-            occupancy.include(kCharacterStackAdmissionBase + index, item.mutationSerial);
+    }
+    return instanceSoid == 0 && source.held >= quantity;
+}
+
+/** Debits the claim from its source with no change record, the stack quantity from the last row. */
+[[nodiscard]] bool debit_claim_source(CharacterState& character,
+                                      const build_data::items::Definition& item,
+                                      bool instance,
+                                      const ClaimSource& source,
+                                      std::int32_t quantity,
+                                      authored_inventory::Item& moved) noexcept {
+    if (instance) {
+        moved = character.inventory.values[source.instanceRow];
+        return erase_character_row(character, source.instanceRow);
+    }
+    std::int32_t owed = quantity;
+    for (std::size_t index = character.stacks.count; owed > 0 && index-- > 0;) {
+        auto& row = character.stacks.values[index];
+        if (row.definitionHash != item.definitionHash
+            || row.placement != authored_inventory::ItemPlacement::recovery) {
+            continue;
+        }
+        const std::int32_t taken = (std::min)(owed, row.quantity);
+        row.quantity -= taken;
+        owed -= taken;
+        if (row.quantity == 0 && !erase_character_row(character, kStackRowBase + index)) {
+            return false;
         }
     }
     return true;
 }
 
-/** Removes one held instance or stack named by its combined admission index. */
-bool erase_character_bucket_row(CharacterState& character, std::size_t row) noexcept {
-    if (row < kCharacterStackAdmissionBase) {
-        auto& held = character.inventory;
-        if (row >= held.count || held.count > held.values.size()) {
-            return false;
-        }
-        std::move(held.values.begin() + static_cast<std::ptrdiff_t>(row) + 1,
-                  held.values.begin() + static_cast<std::ptrdiff_t>(held.count),
-                  held.values.begin() + static_cast<std::ptrdiff_t>(row));
-        held.values[--held.count] = {};
-    } else {
-        auto& held = character.stacks;
-        row -= kCharacterStackAdmissionBase;
-        if (row >= held.count || held.count > held.values.size()) {
-            return false;
-        }
-        std::move(held.values.begin() + static_cast<std::ptrdiff_t>(row) + 1,
-                  held.values.begin() + static_cast<std::ptrdiff_t>(held.count),
-                  held.values.begin() + static_cast<std::ptrdiff_t>(row));
-        held.values[--held.count] = {};
-    }
-    return true;
-}
+} // namespace
 
 /** Places what fits in the item's own bucket, then its recovery bucket, and drops the rest. */
 bool place_arrival(AccountState& working,
@@ -812,39 +954,16 @@ bool place_claim(AccountState& working,
     }
     CharacterState& character = working.characters[characterIndex];
     const bool instance = instanced(detail);
-    const auto recovered = authored_inventory::ItemPlacement::recovery;
+    ClaimSource claimed{};
     reason = "claim_presence";
-    std::int64_t held = 0;
-    std::int32_t firstRow = 0;
-    std::size_t instanceIndex = character.inventory.count;
-    if (instance) {
-        for (std::size_t index = 0; index < character.inventory.count; ++index) {
-            const auto& row = character.inventory.values[index];
-            if (row.instanceSoid == instanceSoid && row.placement == recovered
-                && row.definitionHash == item.definitionHash) {
-                instanceIndex = index;
-            }
-        }
-        if (instanceSoid == 0 || quantity != 1 || instanceIndex == character.inventory.count) {
-            return false;
-        }
-    } else {
-        for (std::size_t index = 0; index < character.stacks.count; ++index) {
-            const auto& row = character.stacks.values[index];
-            if (row.definitionHash == item.definitionHash && row.placement == recovered) {
-                firstRow = held == 0 ? row.quantity : firstRow;
-                held += row.quantity;
-            }
-        }
-        if (instanceSoid != 0 || held < quantity) {
-            return false;
-        }
+    if (!find_claim_source(character, item, instance, instanceSoid, quantity, claimed)) {
+        return false;
     }
     // A labelled stack claimed within one array moves its first row whole, or not at all.
     const bool sameArray = destination.arraySelector == source.arraySelector;
     reason = "claim_label";
     if (sameArray && !instance && item.stackUniqueLabel != build_data::items::kNoStackUniqueLabel
-        && firstRow != quantity) {
+        && claimed.firstRow != quantity) {
         return false;
     }
     reason = "claim_capacity";
@@ -854,41 +973,20 @@ bool place_claim(AccountState& working,
         || admitted < quantity) {
         return false;
     }
-    // The source is debited first, and with no change record.
     authored_inventory::Item moved{};
-    if (instance) {
-        moved = character.inventory.values[instanceIndex];
-        if (!erase_character_bucket_row(character, instanceIndex)) {
-            return false;
-        }
-    } else {
-        std::int32_t owed = quantity;
-        for (std::size_t index = character.stacks.count; owed > 0 && index-- > 0;) {
-            auto& row = character.stacks.values[index];
-            if (row.definitionHash != item.definitionHash || row.placement != recovered) {
-                continue;
-            }
-            const std::int32_t taken = (std::min)(owed, row.quantity);
-            row.quantity -= taken;
-            owed -= taken;
-            if (row.quantity == 0
-                && !erase_character_bucket_row(character, kCharacterStackAdmissionBase + index)) {
-                return false;
-            }
-        }
-    }
     EvictionChain chain;
-    if (instance ? !insert_instance(
-                       working, characterIndex, destination, item, moved, chain, rows, reason)
-                 : !insert_stack(working,
-                                 characterIndex,
-                                 destination,
-                                 item,
-                                 detail,
-                                 quantity,
-                                 chain,
-                                 rows,
-                                 reason)) {
+    if (!debit_claim_source(character, item, instance, claimed, quantity, moved)
+        || (instance ? !insert_instance(
+                           working, characterIndex, destination, item, moved, chain, rows, reason)
+                     : !insert_stack(working,
+                                     characterIndex,
+                                     destination,
+                                     item,
+                                     detail,
+                                     quantity,
+                                     chain,
+                                     rows,
+                                     reason))) {
         return false;
     }
     reason = nullptr;

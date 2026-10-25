@@ -9,8 +9,7 @@ namespace sunrise::middleware::web_service::messages::opcode405 {
 /** Web Service opcode a Postmaster vendor sends to return an item from its recovery bucket. */
 inline constexpr std::uint16_t kOpcode = 405;
 
-/** Vendor-mediated transfer. The vendor's installed rule, not the request, picks the destination.
- */
+/** Vendor-mediated transfer; the vendor's rule, not the request, picks the destination. */
 struct Request {
     std::int16_t vendorIndex{};
     std::int8_t sourceBucket{};

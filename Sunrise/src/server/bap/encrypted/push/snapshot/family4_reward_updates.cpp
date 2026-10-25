@@ -52,6 +52,7 @@ granted_row_definition(const state::AccountState& account,
     return definitionHash != 0
            && state::build_data::find_item_definition_hash(definitionHash, definition);
 }
+
 /** Builds all record rewards and the pending claim into one Family-4 revision. */
 bool prepare_record_reward_grant(
     Scratch& scratch,

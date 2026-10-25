@@ -148,7 +148,7 @@ struct CharacterStack {
     std::uint32_t definitionHash{};
     std::int32_t quantity{};
     std::int32_t mutationSerial{};
-    /** A profile-bucket item's overflow sits here when its recovery bucket is a character one. */
+    /** Overflow and FIFO transfers leave a stack in its recovery bucket. */
     ItemPlacement placement{ItemPlacement::authored};
 };
 

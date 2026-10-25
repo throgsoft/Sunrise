@@ -313,8 +313,9 @@ struct GrantedResidents {
                                      GrantedResidents& output) noexcept;
 
 /**
- * Whether a granted row is a new row of an item whose Collections entry this grant first acquires,
- * which the client's record writer marks for its list of newly acquired collectibles.
+ * Whether a granted row is a new row of an item with a Collections entry whose acquisition flag
+ * this grant first sets. Sunrise keeps a collectible's acquired state in that flag; the client's
+ * record writer marks such a row for its list of newly acquired collectibles.
  * @param item The row's item.
  */
 [[nodiscard]] bool newly_collected(const PendingRecordRewardGrant& mutation,
@@ -609,9 +610,6 @@ set_selected_title(std::uint16_t recordIndex, std::uint64_t& characterSoid, bool
                                             std::uint16_t definitionIndex,
                                             std::int32_t quantity,
                                             PendingPostmasterClaim& mutation) noexcept;
-/** Rebuilds the claim's after-image against current State without writing it. */
-[[nodiscard]] bool preview_postmaster_claim(const PendingPostmasterClaim& mutation,
-                                            AccountState& after) noexcept;
 /** Rechecks the claim under the transaction lock and commits it; always consumes the mutation. */
 [[nodiscard]] bool commit_postmaster_claim(PendingPostmasterClaim& mutation) noexcept;
 

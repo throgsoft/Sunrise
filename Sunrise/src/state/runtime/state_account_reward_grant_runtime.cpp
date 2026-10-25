@@ -7,6 +7,8 @@
 #include <cstddef>
 #include <cstdint>
 #include <limits>
+#include <memory>
+#include <new>
 #include <span>
 
 #include "../../core/logging/log.h"
@@ -327,7 +329,13 @@ RewardPreparation prepare_item_reward(std::uint16_t itemIndex,
         return catalog_refusal(reason);
     }
     reason = "selected_character";
-    const AccountState account = account_snapshot();
+    // A whole account is large, so its snapshot is owned on the heap like the claim path's.
+    const std::unique_ptr<const AccountState> snapshot(new (std::nothrow)
+                                                           AccountState(account_snapshot()));
+    if (!snapshot) {
+        return RewardPreparation::deferred;
+    }
+    const AccountState& account = *snapshot;
     const auto character = selected_character_index(account);
     unlocks::Table flags{};
     if (character >= account.characterCount
@@ -564,7 +572,14 @@ prepare_reward_grant(std::span<const DirectRecordReward> rewards,
         return RewardPreparation::deferred;
     }
     reason = "account_state";
-    const AccountState account = account_snapshot();
+    // Both whole-account images are owned on the heap like the claim path's.
+    const std::unique_ptr<const AccountState> snapshot(new (std::nothrow)
+                                                           AccountState(account_snapshot()));
+    const std::unique_ptr<AccountState> image(new (std::nothrow) AccountState{});
+    if (!snapshot || !image) {
+        return RewardPreparation::deferred;
+    }
+    const AccountState& account = *snapshot;
     const std::size_t characterIndex = selected_character_index(account);
     if (!account::valid(account) || !valid_profile_inventory(account)
         || characterIndex >= account.characterCount) {
@@ -574,7 +589,8 @@ prepare_reward_grant(std::span<const DirectRecordReward> rewards,
     if (!prepare_wrapper_flags(wrapperFlags, mutation, reason)) {
         return RewardPreparation::deferred;
     }
-    AccountState working = account;
+    AccountState& working = *image;
+    working = account;
     // Identities stay above the pre-eviction inventory, so a discarded resident is never reused.
     std::uint64_t nextInstanceSoid = 0;
     PlacedRows placed;

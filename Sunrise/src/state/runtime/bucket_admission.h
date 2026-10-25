@@ -29,20 +29,6 @@ struct BucketAdmission {
     }
 };
 
-/** Character rows share one FIFO order across instances and stacks. */
-inline constexpr std::size_t kCharacterStackAdmissionBase =
-    account::inventory::kCharacterItemCapacity;
-inline constexpr std::size_t kCharacterAdmissionCapacity =
-    kCharacterStackAdmissionBase + account::inventory::kCharacterStackCapacity;
-
-/** Counts equipped rows but chooses eviction candidates only from held instances and stacks. */
-[[nodiscard]] bool
-character_bucket_admission(const CharacterState& character,
-                           const build_data::inventory::buckets::Descriptor& bucket,
-                           BucketAdmission& occupancy) noexcept;
-/** Removes a selected combined-array row while keeping both saved arrays dense. */
-[[nodiscard]] bool erase_character_bucket_row(CharacterState& character, std::size_t row) noexcept;
-
 /** Rows one batch touched, keeping the newest each change ring can announce. */
 struct PlacedRows {
     std::array<GrantedRow, kRecordRewardGrantCapacity> values{};

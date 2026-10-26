@@ -209,7 +209,7 @@ void append_stacks(const state::CharacterState& character,
     snapshot.stackCount = static_cast<std::uint16_t>(count);
 }
 
-/** @return One pass row; its index is its position in the snapshot. */
+/** @return One pass row, whose index is its position in the snapshot. */
 [[nodiscard]] wire::SeasonPassRow season_pass_row(const state::SeasonPassRowStatus& row) noexcept {
     std::uint32_t flags = 0;
     flags |= row.available ? wire::rowAvailable : 0U;
@@ -416,7 +416,7 @@ pursuit_objective(const state::PursuitObjectiveStatus& objective) noexcept {
            && unlock_bank(source.bank, output.bank);
 }
 
-/** @return True for a source slot past the request's count, which carries nothing. */
+/** @return True for an all-zero source, which every slot past the request's count must be. */
 [[nodiscard]] bool unlock_source_empty(const wire::UnlockSource& source) noexcept {
     return source.kind == wire::UnlockKind{} && source.bank == wire::UnlockBank{}
            && source.index == 0;

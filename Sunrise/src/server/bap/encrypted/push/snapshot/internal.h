@@ -189,8 +189,7 @@ prepare_item_state(Scratch& scratch,
 
 /**
  * Builds the selected character's current object as one upsert above the peer version.
- * @param accountSoid Account the character belongs to.
- * @param characterIndex The selected character's slot in that account.
+ * @param characterIndex The selected character's slot in the account.
  */
 [[nodiscard]] bool prepare_selected_character_refresh(
     Scratch& scratch,

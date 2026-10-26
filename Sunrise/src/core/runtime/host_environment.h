@@ -12,7 +12,6 @@ namespace sunrise::core::runtime {
 
 /**
  * Confirms a process has stopped without guessing through access failures.
- * @param processId Process id to check.
  * @return True only when Windows reports no process or a signaled process object.
  */
 [[nodiscard]] bool process_stopped(std::uint32_t processId) noexcept;

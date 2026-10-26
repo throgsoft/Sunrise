@@ -73,8 +73,9 @@ bool PursuitBuild::begin(const reader::Source& source,
         std::vector<std::byte> blob;
         std::uint32_t tableClass = 0;
         tables::Array operations{};
-        // The table only explains why an operation body is unresolved, so a failed read records
-        // it missing. Retrying it would hold back every other investment-root domain.
+        // The operation table only explains why an operation body is unresolved, so a failed read
+        // treats the table as missing. Retrying the read would hold back every other
+        // investment-root domain.
         if (!reader::read_tag(source, scratch, tag, blob, tableClass)) {
             core::log::write(core::log::Channel::client,
                              core::log::Level::warn,
@@ -117,7 +118,8 @@ bool PursuitBuild::item(const tables::items::Row& row) noexcept {
     if (!ready_) {
         return false;
     }
-    // Only pursuits declare completion metadata. An unreadable block gets an unreadable contract.
+    // Only pursuits declare completion metadata. An unreadable metadata block still gets a
+    // contract, marked unreadable.
     if (!row.hasCompletionMetadata && row.objectiveMetadataValid) {
         return true;
     }
@@ -188,7 +190,7 @@ void PursuitBuild::publish() noexcept {
                       || row.secondaryOperation.index != pursuits::kAbsent;
     }
     const bool valid = state::build_data::valid_pursuit_definitions(rows_);
-    // A cache write can still fail, so a refused publish walks again on a later pass.
+    // The cache write can still fail, and a failed publish repeats the item walk on a later pass.
     const bool published = valid && state::build_data::publish_pursuit_definitions(rows_);
     const std::size_t rowCount = rows_.size();
     // State keeps its own copy, so release the collected rows.

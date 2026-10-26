@@ -29,7 +29,7 @@ static_assert((std::max)({unlocks::kAccountFlagCapacity,
                           unlocks::kCharacterObjectValueCapacity})
               <= (std::numeric_limits<std::uint16_t>::max)());
 
-/** The saved view one pursuit edit reads, and the installed contract of the pursuit it holds. */
+/** The saved view one pursuit edit reads, and the installed contract of the edited pursuit. */
 struct HeldPursuit {
     SavedSelection<AccountState> saved{};
     pursuits::Definition contract{};
@@ -66,7 +66,7 @@ struct HeldPursuit {
     return false;
 }
 
-/** @return True for banks the account object publishes; the rest are the character object's. */
+/** @return True for banks the account object publishes, false for the character object's. */
 [[nodiscard]] bool account_row(store::Bank bank) noexcept {
     switch (bank) {
     case store::Bank::accountFlags:
@@ -85,7 +85,7 @@ struct HeldPursuit {
 
 /**
  * Copies the selected character's saved view inside the caller's savepoint, then finds the
- * identity's pursuit in it and the pursuit's contract.
+ * identified pursuit and its installed contract.
  * @param reason Receives the refusal label on failure.
  */
 [[nodiscard]] bool read_held_pursuit(const PursuitIdentity& identity,
@@ -136,7 +136,7 @@ struct HeldPursuit {
         || held.contract.objectiveCount > pursuits::kObjectiveCapacity) {
         return false;
     }
-    // No bounty deadline is saved, so an expired bounty cannot be told apart and none is edited.
+    // No bounty deadline is saved, so an expired bounty looks live and no bounty is edited.
     reason = "expiry_not_saved";
     return held.contract.lifetimeSeconds <= 0;
 }
@@ -149,8 +149,8 @@ struct HeldPursuit {
 /**
  * Writes one required objective's saved row to its adjusted target when the banks, including
  * earlier writes of this savepoint, leave it incomplete. A write re-reads the banks and
- * re-evaluates the contract, so later objectives see it.
- * @param status The contract as the banks stand; replaced after a write.
+ * re-evaluates the contract, so later objectives see the new row.
+ * @param status The contract evaluated against the current banks, replaced after a write.
  * @param incomplete Set when the objective was incomplete.
  * @param change Counts the row when the write changed it.
  * @param reason Receives the refusal label on failure.
@@ -249,7 +249,7 @@ struct HeldPursuit {
     return saved_row(source, bank);
 }
 
-/** @return True when every required objective reads complete; optional ones never gate it. */
+/** @return True when every objective that is not optional reads complete. */
 [[nodiscard]] bool required_objectives_complete(const HeldPursuit& held,
                                                 const PursuitCompletionStatus& status) noexcept {
     for (std::size_t ordinal = 0; ordinal < held.contract.objectiveCount; ++ordinal) {
@@ -364,7 +364,8 @@ bool complete_pursuit_objectives(const PursuitIdentity& identity,
         return false;
     }
     // A zero target, a flag target other than one, a target adjustment, or a row shared with
-    // another objective can still leave one incomplete. The savepoint then rolls back every write.
+    // another objective can still leave an objective incomplete. The savepoint then rolls back
+    // every write.
     reason = "objective_target";
     if (!required_objectives_complete(*held, status)) {
         return false;

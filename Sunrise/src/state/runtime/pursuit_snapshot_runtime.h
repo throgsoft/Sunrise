@@ -9,18 +9,18 @@
 
 namespace sunrise::state {
 
-/** Why no snapshot was produced; a partial snapshot is never returned. */
+/** Why no snapshot was produced. A partial snapshot is never returned. */
 enum class PursuitSnapshotRefusal : std::uint8_t {
     none,
     /** The objective or pursuit catalog is not published, or was republished mid-read. */
     catalogUnavailable,
     /** The installed data has settled that no pursuit catalog can be read. */
     catalogUnsupported,
-    /** No valid saved account. */
+    /** The saved account could not be read or is invalid. */
     accountUnavailable,
     /** No character is selected. */
     characterUnavailable,
-    /** A SQLite or allocation failure. */
+    /** A SQLite read or an allocation failed. */
     storage,
 };
 
@@ -31,7 +31,7 @@ struct HeldPursuitStatus {
     std::int32_t quantity{};
     std::int32_t mutationSerial{};
     std::uint32_t flags{};
-    /** Positive marks a bounty. This server does not save the bounty's deadline. */
+    /** A positive lifetime marks a bounty, whose deadline this server does not save. */
     std::int32_t lifetimeSeconds{};
     bool contractFound{};
     PursuitCompletionStatus completion{};
@@ -47,13 +47,13 @@ struct PursuitSnapshot {
 
 /**
  * Reads the selected character's saved inventory and unlock banks under one store lock, then
- * evaluates installed contracts against those copies. Never writes, never draws, never publishes.
- * @param output Receives the snapshot; cleared on any refusal.
+ * evaluates installed contracts against those copies. It never writes, draws or publishes.
+ * @param output Receives the snapshot, and is cleared on any refusal.
  * @return None on success, otherwise why no snapshot was produced.
  */
 [[nodiscard]] PursuitSnapshotRefusal read_pursuit_snapshot(PursuitSnapshot& output) noexcept;
 
-/** One saved flag or value row; a flag reads 0 or 1. */
+/** One saved flag or value row. A flag reads 0 or 1. */
 struct UnlockRead {
     bool known{};
     std::int32_t value{};
@@ -68,9 +68,10 @@ struct UnlockReadOrigin {
 
 /**
  * Reads the selected character's saved flag and value rows under one store lock, through the
- * evaluator pursuit snapshots use. Never writes, never draws, never publishes.
- * @param sources One flag or value instruction per row; one the banks cannot answer is unknown.
- * @param output Receives one read per source, in order; must be at least as long as sources.
+ * evaluator pursuit snapshots use. It never writes, draws or publishes.
+ * @param sources One flag or value instruction per row. A source the banks cannot answer reads as
+ * unknown.
+ * @param output Receives one read per source, in order. It must be at least as long as sources.
  * @param origin Receives the saved identity and revision the reads came from.
  * @return None on success, otherwise why nothing was read.
  */

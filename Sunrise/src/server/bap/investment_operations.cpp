@@ -49,10 +49,10 @@ struct RetainedOperation {
 
 /**
  * Every receipt an editor has not yet acknowledged, oldest first. Guarded by the session lock.
- * Each entry is one explicit editor action, which the editor acknowledges after reading it
- * finished. A dropped link refuses whatever is still pending and a connecting link forgets the
- * receipts of exited editors, so the table needs no capacity of its own; only a failed allocation
- * refuses an entry.
+ * Each entry is one explicit editor action, which the editor acknowledges once it reads the
+ * finished receipt. A dropped link refuses whatever is still pending and a connecting link forgets
+ * the receipts of exited editors, so the table needs no capacity of its own. Only a failed
+ * allocation refuses an entry.
  */
 std::vector<RetainedOperation> g_operations{};
 
@@ -158,7 +158,7 @@ void stop_pending(RetainedOperation& entry, const char* reason, const char* stag
     report_receipt(stage, entry.receipt);
 }
 
-/** @return True while an item table that inventory grants and edits resolve through is loading. */
+/** @return True while any item table that inventory grants and edits read is still loading. */
 [[nodiscard]] bool inventory_catalogs_loading() noexcept {
     return !state::build_data::item_definitions_ready()
            || !state::build_data::configured_item_details_ready()
@@ -239,7 +239,7 @@ void stop_pending(RetainedOperation& entry, const char* reason, const char* stag
 
 /**
  * A pass operation must name an installed row that still grants the expected item and that the
- * earned-perk walk does not grant. Telling the walk's rows apart reads the reward graph.
+ * earned-perk walk does not grant. Finding the walk's rows needs the reward graph.
  */
 [[nodiscard]] InvestmentTransition check_season_pass_row(std::uint16_t rewardIndex,
                                                          std::uint32_t itemHash) noexcept {
@@ -325,12 +325,12 @@ check_operation_request(const InvestmentOperation& operation) noexcept {
 
 } // namespace
 
-/** The request's variant index is its kind; the static_asserts above tie the two orders. */
+/** The request's variant index is its kind, as the static_asserts above require. */
 InvestmentOperationKind investment_operation_kind(const InvestmentOperation& operation) noexcept {
     return static_cast<InvestmentOperationKind>(operation.request.index());
 }
 
-/** State refuses with `not_ready` only while a catalog it needs is unpublished, so that waits. */
+/** State's `not_ready` means a catalog it needs is still unpublished, so the operation waits. */
 InvestmentTransition state_refusal_transition(const char* reason) noexcept {
     if (reason == nullptr) {
         return refused_transition("transaction");
@@ -339,7 +339,7 @@ InvestmentTransition state_refusal_transition(const char* reason) noexcept {
                                                    : refused_transition(reason);
 }
 
-/** Checks the target first, so an editor bound to a stale context is told that before anything. */
+/** Checks the target first, so a stale context is reported before any other refusal. */
 InvestmentTransition check_investment_operation(const InvestmentOperation& operation) noexcept {
     const InvestmentTransition verdict = check_target(operation.target);
     if (verdict.state != InvestmentReceiptState::queued) {
@@ -407,7 +407,7 @@ bool investment_context(InvestmentContext& output) noexcept {
     return true;
 }
 
-/** A repeated id never runs again; it returns the receipt already retained. */
+/** A repeated id never runs again and returns the receipt already retained. */
 InvestmentSubmission submit_investment_operation(const InvestmentOperation& operation,
                                                  std::uint32_t editorPid,
                                                  InvestmentReceipt& receipt) noexcept {
@@ -436,7 +436,7 @@ InvestmentSubmission submit_investment_operation(const InvestmentOperation& oper
     return InvestmentSubmission::accepted;
 }
 
-/** Answers from the retained receipt alone; nothing runs. */
+/** Answers from the retained receipt alone, without running anything. */
 bool investment_receipt(std::uint64_t operationId, InvestmentReceipt& receipt) noexcept {
     const std::shared_lock lock(session_lock());
     const RetainedOperation* retained = find_operation(operationId);

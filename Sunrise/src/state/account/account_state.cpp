@@ -178,7 +178,7 @@ std::uint64_t selected_character_soid(const AccountState& state) noexcept {
     return first_selected_soid(state);
 }
 
-/** Finds the selected character in an identity read. */
+/** Finds the selected character's SOID in an identity read. */
 std::uint64_t selected_character_soid(const AccountIdentity& identity) noexcept {
     return first_selected_soid(identity);
 }

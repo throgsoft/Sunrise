@@ -27,7 +27,7 @@ static_assert(unlocks::kAccountFlagCapacity <= build_data::rewards::kAbsent);
 /** Saved values one pass evaluation reads, copied under one store lock. */
 struct SavedPass {
     SavedSelection<AccountIdentity> view{};
-    /** False while no character is selected; the banks then carry only the shared account rows. */
+    /** False while no character is selected. The banks then carry only the shared account rows. */
     bool selected{};
     std::int32_t experience{};
     std::uint16_t rank{};
@@ -63,12 +63,12 @@ struct SavedPass {
     return true;
 }
 
-/** @return True when the saved account flag is set; an absent index never is. */
+/** @return True when the saved account flag is set. An absent index is never set. */
 [[nodiscard]] bool flag_set(const unlocks::Table& banks, std::uint16_t index) noexcept {
     return index < banks.accountFlags.size() && banks.accountFlags[index] == unlocks::kFlagSet;
 }
 
-/** Evaluates one native row against the saved copies; a placeholder row stays unavailable. */
+/** Evaluates one native row against the saved copies. A placeholder row stays unavailable. */
 [[nodiscard]] SeasonPassRowStatus row_status(std::uint16_t rewardIndex,
                                              const SavedPass& saved) noexcept {
     SeasonPassRowStatus row{};

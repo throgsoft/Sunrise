@@ -29,12 +29,12 @@ struct ObjectiveReport {
 };
 
 /**
- * How a row read ended. A refusal decided by the installed data is final; a failed allocation is
- * retried.
+ * How one row read ended. The installed data decides `unsupported` for good, and a failed
+ * allocation is retried on a later pass.
  */
 enum class RowRead : std::uint8_t { read, unsupported, retry };
 
-/** The table being read: dense rows and the one bank all their programs share. */
+/** The dense rows being read and the one instruction bank all their programs share. */
 struct ObjectiveTable {
     std::vector<objectives::Row> rows;
     std::vector<state::unlocks::Instruction> bank;
@@ -50,7 +50,7 @@ struct ObjectiveTable {
            && tables::read_boolean(blob, at + tables::kObjectiveCountsDownOffset, row.countsDown);
 }
 
-/** A full instruction bank is decided by the installed data; failed storage is retried. */
+/** Treats a full instruction bank as final and failed storage as retryable. */
 [[nodiscard]] RowRead bank_refusal(BankFailure failure) noexcept {
     return failure == BankFailure::full ? RowRead::unsupported : RowRead::retry;
 }

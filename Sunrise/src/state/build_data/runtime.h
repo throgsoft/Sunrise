@@ -50,7 +50,7 @@ void invalidate_cache() noexcept;
  */
 void bind_content(std::uint64_t contentHash) noexcept;
 
-/** @return The content hash bound at boot; zero without a content manifest. */
+/** @return The content hash bound at boot, or zero when the host has no content manifest. */
 [[nodiscard]] std::uint64_t content_hash() noexcept;
 
 /**

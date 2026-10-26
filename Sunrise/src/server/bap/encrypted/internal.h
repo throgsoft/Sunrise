@@ -394,7 +394,7 @@ process(const ServiceRoute& route,
 
 /**
  * Emplaces an opcode-2400 claim transaction and stages its Queuez after-image.
- * @param claim A prepared claim; the caller moves it into the returned transaction.
+ * @param claim Prepared claim, which the caller then moves into the returned transaction.
  * @return The staged transaction, or null with nothing left in the outcome.
  */
 

@@ -243,7 +243,7 @@ bool set_quantity(const QuantityEdit& edit,
     if (!investment::store::write_account(saved) || !transaction.commit()) {
         return false;
     }
-    // Profile rows live in the account object; character rows only in the character object.
+    // Profile rows live in the account object, and character rows only in the character object.
     change = {
         saved.primarySoid, character.soid, characterIndex, edit.scope == EditScope::profile, 1};
     reason = nullptr;

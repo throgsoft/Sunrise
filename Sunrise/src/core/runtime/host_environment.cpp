@@ -21,7 +21,7 @@ bool is_wine() noexcept {
     return underWine;
 }
 
-/** An access refusal means the process still runs, so only a missing id or a signal counts. */
+/** An access refusal means the process still runs, so only a missing or signaled process counts. */
 bool process_stopped(std::uint32_t processId) noexcept {
     const HANDLE process = OpenProcess(SYNCHRONIZE, FALSE, processId);
     if (process == nullptr) {

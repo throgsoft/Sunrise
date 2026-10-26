@@ -23,18 +23,18 @@ inline constexpr std::uint16_t kNoItemValue = 0xFFFF;
 /** Whether an item value uses the inspected instance or the maximum over held instances. */
 enum class ItemValueMode : std::uint8_t { context, maximum };
 
-/** One stored objective row; both programs are ranges of the instruction bank. */
+/** One stored objective row, whose two programs are ranges of the instruction bank. */
 struct Row {
     std::uint32_t definitionHash{};
     std::int32_t completionValue{};
     std::uint16_t definitionIndex{};
     bool optional{};
     bool countsDown{};
-    /** False when the optional target adjustment could not be bound; empty is valid. */
+    /** False when the optional target adjustment could not be bound. A row may have none. */
     bool adjustmentReadable{};
     /** The native evaluator subtracts this program's value from completionValue. */
     rewards::Range targetAdjustment{};
-    /** The progress source is a per-item value that each instance carries. */
+    /** True when the progress source is a per-item value that each instance carries. */
     bool itemProgress{};
     ItemValueMode itemValueMode{};
     /** Native value-table index of the per-item source, or kNoItemValue. */
@@ -57,11 +57,11 @@ struct Definition {
     std::uint16_t definitionIndex{};
     bool optional{};
     bool countsDown{};
-    /** False when the optional target adjustment could not be bound; empty is valid. */
+    /** False when the optional target adjustment could not be bound. A row may have none. */
     bool adjustmentReadable{};
     /** The native evaluator subtracts this expression's value from completionValue. */
     std::vector<unlocks::Instruction> targetAdjustment;
-    /** The progress source is a per-item value that each instance carries. */
+    /** True when the progress source is a per-item value that each instance carries. */
     bool itemProgress{};
     ItemValueMode itemValueMode{};
     /** Native value-table index of the per-item source, or kNoItemValue. */

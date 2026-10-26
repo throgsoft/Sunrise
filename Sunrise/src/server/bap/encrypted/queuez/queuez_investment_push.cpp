@@ -38,7 +38,7 @@ constexpr std::uint32_t kEditedRowCount = 1;
 
 /**
  * Encodes a refresh of the objects a State edit changed, read from the caller's uncommitted
- * savepoint: the account and selected character, or the selected character alone.
+ * savepoint. That is the selected character, plus the account when the edit changed its rows.
  * @param reason Receives inventory_stage or inventory_encode on failure.
  */
 [[nodiscard]] bool stage_changed_objects(const state::AccountEditChange& changed,
@@ -115,7 +115,7 @@ publish_changed_objects(state::investment::store::Transaction& transaction,
         transaction, frame, change.changedRows, session, scratch, response, written);
 }
 
-/** @return The change for an edit to one account row. An account refresh ignores the slot. */
+/** @return The change for one account-row edit. An account refresh needs no character index. */
 [[nodiscard]] state::AccountEditChange account_row_change(const InvestmentTarget& target) noexcept {
     return {target.accountSoid, target.characterSoid, 0, true, kEditedRowCount};
 }
@@ -190,12 +190,12 @@ publish_operation(const GrantItemOperation& request,
     case ItemGrantStage::deferred:
     case ItemGrantStage::unresolvable:
     case ItemGrantStage::failed:
-        // The lane only runs with a whole-frame buffer, so a grant never waits for one. Unless a
-        // catalog is still loading, a grant State cannot draw or place is refused for resubmission.
+        // The lane runs only with a whole-frame buffer, so a grant never waits for one. A grant
+        // that State cannot draw or place is refused for resubmission, unless a catalog is loading.
         return state_refusal_transition(reason);
     }
-    // An item with no room anywhere would be dropped. The editor is told so, and the savepoint
-    // rolls back uncommitted.
+    // An item with no room anywhere would be dropped, so the grant is refused and its savepoint is
+    // never committed.
     if (!staged.placed) {
         return refused_transition("no_room");
     }
@@ -345,7 +345,7 @@ publish_operation(const SeasonPassClaimOperation& request,
     return transition;
 }
 
-/** Clears one pass row's claim flag; the items it granted stay. */
+/** Clears one pass row's claim flag and leaves the items it granted. */
 [[nodiscard]] InvestmentTransition
 publish_operation(const SeasonPassResetOperation& request,
                   const InvestmentTarget& target,

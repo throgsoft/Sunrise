@@ -48,9 +48,9 @@ inline constexpr std::size_t kSeasonPassRowCapacity = 256;
 inline constexpr std::size_t kHeldPursuitCapacity = 333;
 inline constexpr std::size_t kPursuitObjectiveCapacity = 7;
 /**
- * Sources per unlockValues request, a chosen capacity. The fixed block offsets bound it: the
- * request block ends where the response block begins, which leaves room after the request header
- * for a 4-byte count and nine 4-byte sources.
+ * Sources one unlockValues request can carry. The fixed block offsets set this limit: the request
+ * block ends where the response block begins, which leaves room after the request header for a
+ * 4-byte count and nine 4-byte sources.
  */
 inline constexpr std::size_t kUnlockReadCapacity = 9;
 /** An item whose definition names no installed bucket. */
@@ -111,7 +111,7 @@ enum class UnlockKind : std::uint8_t { flag = 1, value };
 /** The saved bank one source reads. The profile bank holds only flags. */
 enum class UnlockBank : std::uint8_t { account = 1, profile, character };
 
-/** Invalid when the bank cannot hold that kind or the index is outside its capacity. */
+/** A source is invalid when its bank cannot hold that kind or its index is outside the bank. */
 enum class UnlockReadState : std::uint8_t { invalid, known };
 
 /** Why a held pursuit's completion stands where it does, in the game's priority order. */
@@ -210,8 +210,9 @@ static_assert(offsetof(Context, characterSoid) == 8 && offsetof(Context, content
 // --- Request payloads ---
 
 /**
- * quantity must be positive and no more than the account can hold of the item at once, which for
- * an inventory item is its own and recovery buckets. A larger one is refused as "quantity".
+ * quantity must be positive and no more than the account can hold of the item at once. For an
+ * inventory item, that is a full stack in every row of its own bucket and of its recovery bucket.
+ * A larger quantity is refused as "quantity".
  */
 struct GrantItemRequest final {
     std::uint32_t itemHash{};
@@ -259,7 +260,7 @@ struct SeasonPassRowRequest final {
 static_assert(sizeof(SeasonPassRowRequest) == 8 && offsetof(SeasonPassRowRequest, reserved) == 2
               && offsetof(SeasonPassRowRequest, itemHash) == 4);
 
-/** The index is a row of the named bank. */
+/** One saved flag or value, named by its bank and row. */
 struct UnlockSource final {
     UnlockKind kind{};
     UnlockBank bank{};
@@ -426,7 +427,7 @@ struct CharacterItem final {
     /** Zero for native socket defaults, one for authored lanes. */
     std::uint8_t socketPolicy{};
     std::uint8_t plugCount{};
-    /** Bit i is set when lane i holds a plug; a clear bit below plugCount is an empty lane. */
+    /** Bit i is set when lane i holds a plug, so a clear bit below plugCount is an empty lane. */
     std::uint16_t plugPresent{};
     /** ItemRecordFlags. */
     std::uint8_t flags{};
@@ -568,7 +569,7 @@ struct Receipt final {
     /** Family-4 version of the last frame the operation published. */
     std::int32_t family4Version{};
     std::uint32_t changedRows{};
-    /** Server GetTickCount64 values; finishedTick stays zero while the receipt is pending. */
+    /** Server GetTickCount64 values. finishedTick stays zero while the receipt is pending. */
     std::uint64_t submittedTick{};
     std::uint64_t finishedTick{};
 };
@@ -612,7 +613,7 @@ static_assert(kResponsePayloadBytes == 55'008);
 
 // --- The mapping ---
 
-/** Studio writes the header, heartbeat and request id; the game writes the rest. */
+/** Studio writes the header, heartbeat and request id, and the game writes the rest. */
 struct alignas(8) Control final {
     std::uint32_t magic{};
     std::uint32_t version{};
@@ -664,7 +665,7 @@ struct Response final {
     Opcode opcode{};
     /** The opcode's fixed payload size, or zero. */
     std::uint32_t payloadBytes{};
-    /** The identity the payload is bound to; zero for invalid requests. */
+    /** The identity the payload is bound to, or zero for an invalid request. */
     Context context{};
     std::array<char, kReasonBytes> reason{};
     std::array<std::byte, kResponsePayloadBytes> payload{};
@@ -674,7 +675,7 @@ static_assert(offsetof(Response, reserved) == 4 && offsetof(Response, operationI
               && offsetof(Response, context) == 24 && offsetof(Response, reason) == 48
               && offsetof(Response, payload) == 112);
 
-/** Studio writes the request block, then its id; the game writes the response, then its id. */
+/** Each side writes its block in full before writing the id that announces it. */
 struct alignas(8) SharedInvestment final {
     Control control;
     Request request;

@@ -16,7 +16,7 @@ bool g_ready{};
 bool g_unsupported{};
 std::uint64_t g_revision{};
 
-/** An unbound reference stays valid for inspection; a bound one must be a valid value load. */
+/** An unbound reference stays valid for inspection, but a bound one must be a valid value load. */
 [[nodiscard]] bool valid_value(const ValueReference& value) noexcept {
     if (value.index == kAbsent) {
         return !value.bound;
@@ -38,7 +38,7 @@ std::uint64_t g_revision{};
     return false;
 }
 
-/** Declared objectives name rows of the table; the slots after them stay zero. */
+/** Declared objectives name rows of the table, and the slots after them stay zero. */
 [[nodiscard]] bool valid_objectives(const Definition& row, std::size_t objectiveCount) noexcept {
     if (row.objectiveCount > row.objectives.size()) {
         return false;
@@ -52,7 +52,7 @@ std::uint64_t g_revision{};
                unused.begin(), unused.end(), [](std::uint16_t index) { return index == 0; });
 }
 
-/** Checks one contract's own fields and edges; item identity is checked by the caller. */
+/** Checks one contract's own fields and edges. The caller checks its item identity. */
 [[nodiscard]] bool valid_contract(const Definition& row, std::size_t objectiveCount) noexcept {
     return row.definitionIndex != kAbsent && row.lifetimeSeconds >= 0
            && valid_objectives(row, objectiveCount) && valid_value(row.completionValue)

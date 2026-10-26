@@ -23,7 +23,9 @@ struct ValueReference {
     unlocks::Instruction source{};
 };
 
-/** Why an operation body is or is not available; missing data is not an authored absence. */
+/**
+ * Why an operation body is or is not available. Missing data is distinct from an authored absence.
+ */
 enum class OperationAvailability : std::uint8_t {
     absent,
     missingTable,
@@ -47,7 +49,7 @@ struct Definition {
     bool requireAllObjectives{};
     bool requireNonOptionalCompletion{};
     bool automaticCompletion{};
-    /** Objective-table indices; slots past objectiveCount stay zero. */
+    /** Objective-table indices. Slots past objectiveCount stay zero. */
     std::array<std::uint16_t, kObjectiveCapacity> objectives{};
     std::uint8_t objectiveCount{};
     /** Unless suppressed, an absent value removes the step and a present one is incremented. */

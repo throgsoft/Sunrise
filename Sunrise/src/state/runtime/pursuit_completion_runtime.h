@@ -19,7 +19,7 @@ enum class PursuitObjectiveUnknown : std::uint8_t {
     adjustmentUnreadable,
     /** Per-item progress lives in the instance, which this server does not save. */
     itemProgressNotSaved,
-    /** The program reads an identity outside the saved banks. */
+    /** The objective reads an external value, which the saved banks do not hold. */
     externalValue,
     sourceUnavailable,
 };
@@ -65,7 +65,10 @@ struct PursuitCompletionStatus {
     bool effectsKnown{};
     std::uint8_t objectiveCount{};
     std::array<PursuitObjectiveStatus, build_data::pursuits::kObjectiveCapacity> objectives{};
-    /** The deciding reason. An effects reason leaves the evaluated condition fields intact. */
+    /**
+     * The reason that decides the result. When an effect problem decides it, the condition fields
+     * still hold their evaluated values.
+     */
     PursuitCompletionReason reason{PursuitCompletionReason::contractUnavailable};
 };
 

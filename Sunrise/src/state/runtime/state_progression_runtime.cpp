@@ -181,8 +181,9 @@ upsert_value(Family5State& family, std::uint16_t slot, std::int32_t value) noexc
 
 /**
  * Hands every character's unlock banks to visit in slot order, reusing one heap copy.
- * @param visit Takes the slot and its banks; false stops the walk.
- * @return False when the account, a bank or a visit fails.
+ * @param visit Takes the slot and its banks, and returns false to stop the walk.
+ * @return False when the bank copy cannot be allocated, the account or a bank cannot be read, or
+ * a visit returns false.
  */
 template <typename Visit> [[nodiscard]] bool visit_character_banks(Visit visit) noexcept {
     AccountIdentity account{};
@@ -239,7 +240,7 @@ void strip_artifact_flags_locked(Family5State& family,
  * Reads the largest artifact points-used count across every character bank. Ownership is read
  * through the artifact sale rows, so this waits for the catalogs those rows resolve through. Rows
  * the published catalogs still cannot resolve are refused, since no retry changes them.
- * @param most Receives the count; ownership lives in each character's own bank.
+ * @param most Receives the largest count.
  * @param reason Receives the refusal label on failure.
  * @return False when the rows are unusable, or the account or a character bank cannot be read.
  */
@@ -483,7 +484,7 @@ progression::season_pass::progress_flag(const build_data::season_pass::Reward& r
     return build_data::rewards::kAbsent;
 }
 
-/** A row with a direct perk flag is walked, not claimed. */
+/** A row with a direct perk flag is granted by the earned-perk walk, never claimed. */
 bool progression::season_pass::automatic_row(
     const build_data::season_pass::Reward& reward) noexcept {
     return progress_flag(reward) != build_data::rewards::kAbsent;

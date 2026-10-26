@@ -110,7 +110,7 @@ prepare_record_reward(const middleware::web_service::Message& message,
     return RecordRewardPreparation::prepared;
 }
 
-/** Draws the seed in this layer; State replays the claim rules under its own lock. */
+/** The seed is drawn in this layer, and State replays the claim rules under its own lock. */
 bool prepare_season_pass_claim(std::uint16_t rewardIndex,
                                state::PendingSeasonPassReward& claim,
                                const char*& reason) noexcept {

@@ -123,7 +123,7 @@ bool build_item_rows(const reader::Source& source,
         if (!reader::read_tag(
                 source, storage.scratch, row.targetTag, storage.definition, itemClass)) {
             // The published catalog read this row before, so its reward and contract wait for a
-            // retry; a row the catalog lacks stays pruned from all three.
+            // retry. A row the catalog lacks stays out of the rewards and contracts as well.
             state::build_data::items::Definition cataloged{};
             const bool retryable =
                 state::build_data::find_item_definition_index(item.definitionIndex, cataloged);

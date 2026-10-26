@@ -372,7 +372,7 @@ inline constexpr std::uint32_t kObjectiveTableClass = 0x8080775BU;
 inline constexpr std::uint32_t kObjectiveRowClass = 0x8080775FU;
 inline constexpr std::size_t kObjectiveRowStride = 0xA0;
 inline constexpr std::size_t kObjectiveCompletionValueOffset = 0x30;
-/** Completion control bytes of one objective row: optional, then counts down. */
+/** Byte offsets of an objective row's optional and counts-down flags. */
 inline constexpr std::size_t kObjectiveOptionalOffset = 0x28;
 inline constexpr std::size_t kObjectiveCountsDownOffset = 0x2C;
 /** Expression whose value the native evaluator subtracts from an objective's completion value. */

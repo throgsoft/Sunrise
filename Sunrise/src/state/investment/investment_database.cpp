@@ -9,7 +9,7 @@ std::uint64_t g_failureSerial{};
 
 namespace {
 
-/** SQLite calls this only when a write transaction commits; zero lets the commit proceed. */
+/** SQLite calls this only when a write transaction commits. Returning zero lets it proceed. */
 int count_committed_write(void* /*context*/) noexcept {
     ++g_session.revision;
     return 0;

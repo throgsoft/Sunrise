@@ -64,9 +64,9 @@ read_boolean(std::span<const std::byte> blob, std::size_t offset, bool& value) n
 inline constexpr std::size_t kBlockClassPrefixSize = sizeof(std::uint32_t);
 
 /**
- * Locates a class-tagged block through its self-relative field; a zero field names no block.
+ * Locates a class-tagged block through its self-relative field. A zero field names no block.
  * @param present Receives whether the field names a block.
- * @param block Receives the payload offset; use only when present.
+ * @param block Receives the payload offset, which is meaningful only when present is set.
  * @return False when the field is unreadable or names an out-of-bounds or wrong-class block.
  */
 [[nodiscard]] inline bool class_block(std::span<const std::byte> bytes,

@@ -19,8 +19,8 @@ using namespace runtime::detail;
 namespace {
 
 /**
- * The instance an editor read. A different character, hash, serial or quantity refuses its
- * removal.
+ * The instance an editor read. Its removal is refused once the character, hash, serial or
+ * quantity no longer matches.
  */
 struct ExpectedItem {
     std::uint64_t characterSoid{};

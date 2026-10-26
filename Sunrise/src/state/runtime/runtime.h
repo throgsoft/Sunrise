@@ -28,7 +28,10 @@ namespace sunrise::state {
 
 /** Whether the reward grant path can place one installed item. */
 enum class ItemGrantRoute : std::uint8_t { unavailable, reward };
-/** Routes wrappers, account perks, stackable profile items and any item in a character bucket. */
+/**
+ * Wrappers, account perks, stackable profile items and any item in a character bucket take the
+ * reward path.
+ */
 [[nodiscard]] ItemGrantRoute item_grant_route(std::uint16_t itemIndex) noexcept;
 /**
  * How much of a larger grant one placement carries: one instance, draw or perk, or up to one full
@@ -39,8 +42,8 @@ enum class ItemGrantRoute : std::uint8_t { unavailable, reward };
 /**
  * The most of one item a grant can leave held at once: one step in every row of the item's own
  * bucket and of the recovery bucket that takes its overflow. Past that, a step only evicts or
- * drops an earlier one. An account perk holds one, and a wrapper, whose draws land wherever its
- * pool sends them, is bounded only by the largest quantity a grant carries.
+ * drops an earlier one. An account perk holds one. A wrapper's draws land wherever its pool sends
+ * them, so a wrapper is bounded only by the largest quantity a grant carries.
  * @return Zero when the item has no installed bucket.
  */
 [[nodiscard]] std::int32_t item_grant_capacity(std::uint16_t itemIndex) noexcept;
@@ -421,11 +424,10 @@ struct QuantityEdit {
 struct AccountEditChange {
     std::uint64_t accountSoid{};
     std::uint64_t characterSoid{};
-    /** The selected character's slot. */
     std::size_t characterIndex{};
     /** A row the account object publishes changed, so that object is refreshed too. */
     bool accountRows{};
-    /** Saved inventory or unlock rows written. */
+    /** How many saved inventory or unlock rows the edit wrote. */
     std::uint32_t changedRows{};
 };
 
@@ -804,8 +806,8 @@ commit_profile_item_acquisition(PendingProfileItemAcquisition& mutation) noexcep
                                           PendingItemDismantle& mutation) noexcept;
 
 /**
- * Prepares the removal prepare_item_dismantle stages, for an exact expected instance and without
- * crediting dismantle materials.
+ * Prepares the same removal as prepare_item_dismantle, but only for the exact instance the caller
+ * read, and without crediting dismantle materials.
  * @param characterSoid Character expected to be selected.
  * @param instanceSoid Unequipped item instance to remove.
  * @param definitionHash Definition the instance is expected to carry.
@@ -947,7 +949,7 @@ struct ProfileExchangePayout {
 
 /**
  * @param revision Receives the account change generation, never zero, read under the same lock
- * as the copy. Two equal reads mean no save committed and the selection did not change between.
+ * as the copy. Two equal reads mean no save committed and the selection did not change in between.
  * @return A copy of the active account state.
  */
 [[nodiscard]] AccountState account_snapshot(std::uint64_t& revision) noexcept;
@@ -955,7 +957,7 @@ struct ProfileExchangePayout {
 /**
  * Reads the account and character keys without copying inventory or settings.
  * @param revision Receives the account change generation, read under the same lock.
- * @return False when the save does not read.
+ * @return False when the saved account cannot be read.
  */
 [[nodiscard]] bool account_identity(AccountIdentity& output, std::uint64_t& revision) noexcept;
 
@@ -999,11 +1001,11 @@ inline constexpr std::uint16_t kArtifactUnlockProgressionIndex = 39;
 
 /**
  * Replaces the published XP total, provided it still equals expected, and republishes every
- * value derived from it. An increase walks newly earned perks; a decrease leaves earned and
+ * value derived from it. An increase grants newly earned perks. A decrease leaves earned and
  * claimed flags set.
  * @param expected XP total the caller read.
- * @param replacement New total. A decrease must still earn the artifact points already spent, which
- * the artifact sale rows count.
+ * @param replacement New total. A decrease must still earn the artifact points any character has
+ * spent.
  * @param refusal Receives a static reason on failure.
  */
 [[nodiscard]] bool replace_seasonal_experience(std::int32_t expected,

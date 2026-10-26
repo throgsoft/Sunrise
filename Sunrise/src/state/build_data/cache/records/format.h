@@ -674,7 +674,7 @@ struct RewardModifierRecord {
     float value{};
 };
 
-/** One objective row; both programs are ranges of the objective instruction bank. */
+/** Disk form of one objective row. Both programs are ranges of the objective instruction bank. */
 struct ObjectiveRecord {
     std::uint32_t definitionHash{};
     std::int32_t completionValue{};
@@ -690,20 +690,20 @@ struct ObjectiveRecord {
     RewardRangeRecord expression{};
 };
 
-/** A native value reference; an unbound one stores an all-zero source. */
+/** Disk form of one native value reference. An unbound reference stores an all-zero source. */
 struct PursuitValueRecord {
     std::uint16_t index{};
     std::uint8_t bound{};
     RewardInstructionRecord source{};
 };
 
-/** A native completion operation reference and why its body is or is not available. */
+/** Disk form of one completion operation reference and why its body is or is not available. */
 struct PursuitOperationRecord {
     std::uint16_t index{};
     std::uint8_t availability{};
 };
 
-/** One pursuit completion contract; objective slots past objectiveCount are zero. */
+/** Disk form of one pursuit completion contract. Objective slots past objectiveCount are zero. */
 struct PursuitRecord {
     std::uint32_t definitionHash{};
     std::int32_t lifetimeSeconds{};

@@ -34,7 +34,7 @@ valid_row(const Row& row, std::size_t index, std::span<const unlocks::Instructio
            && (row.adjustmentReadable || row.targetAdjustment.count == 0);
 }
 
-/** Copies one stored program out of the bank; may throw on allocation. */
+/** Copies one stored program out of the bank. The copy may throw on allocation. */
 [[nodiscard]] std::vector<unlocks::Instruction> program(rewards::Range range) {
     const auto rows = g_instructions.rows().subspan(range.first, range.count);
     return {rows.begin(), rows.end()};
@@ -79,7 +79,7 @@ bool replace(View data) noexcept {
     return g_rows.replace(data.rows) && g_instructions.replace(data.instructions);
 }
 
-/** Copies one row with its programs; false when the table holds no such row. */
+/** Copies one row with its programs, returning false when the row is missing or the copy fails. */
 bool find(std::uint16_t index, Definition& output) noexcept {
     output = {};
     const std::shared_lock guard(g_lock);

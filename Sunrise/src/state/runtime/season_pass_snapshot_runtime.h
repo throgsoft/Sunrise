@@ -10,7 +10,7 @@ namespace sunrise::state {
 
 /** One native pass row and its saved state, evaluated without a draw. */
 struct SeasonPassRowStatus {
-    /** Installed item the row grants; zero for an unavailable placeholder row. */
+    /** Installed item the row grants, or zero for an unavailable placeholder row. */
     std::uint32_t itemHash{};
     std::uint32_t quantity{};
     std::uint8_t requiredRank{};
@@ -34,15 +34,15 @@ struct SeasonPassSnapshot {
     std::uint64_t investmentRevision{};
     std::int32_t experience{};
     std::uint16_t rank{};
-    /** Catalog rows, including unavailable placeholders; the index is the native claim index. */
+    /** Catalog rows, including unavailable placeholders. Each index is a native claim index. */
     std::size_t rowCount{};
     std::array<SeasonPassRowStatus, build_data::season_pass::kRewardCapacity> rows{};
 };
 
 /**
  * Reads XP, claims and the selected character's banks under one store lock, then evaluates every
- * pass row against those copies. Never writes and never draws.
- * @param output Receives the snapshot; cleared on any refusal.
+ * pass row against those copies. It never writes or draws.
+ * @param output Receives the snapshot, and is cleared on any refusal.
  * @param refusal Receives a static reason on failure.
  */
 [[nodiscard]] bool read_season_pass_snapshot(SeasonPassSnapshot& output,

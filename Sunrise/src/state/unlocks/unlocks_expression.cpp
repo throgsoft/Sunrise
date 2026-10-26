@@ -212,7 +212,7 @@ bool evaluate(std::span<const Instruction> program,
     return true;
 }
 
-/** Evaluates one condition program as a nonzero final value. */
+/** Evaluates one condition program, which holds when its final value is nonzero. */
 bool evaluate(std::span<const Instruction> program, const Inputs& inputs, bool& result) noexcept {
     std::int32_t value = 0;
     const bool evaluated = evaluate(program, inputs, value);

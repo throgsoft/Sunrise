@@ -136,7 +136,7 @@ struct InvestmentReceipt {
      * why a published grant stopped short of its full quantity.
      */
     const char* reason{""};
-    /** Family-4 version of the last frame the operation published; zero until it publishes. */
+    /** Family-4 version of the last frame the operation published, or zero until it publishes. */
     std::int32_t family4Version{};
     /** Inventory or unlock rows granted or edited. An XP total or a pass flag counts as one. */
     std::uint32_t changedRows{};
@@ -184,7 +184,7 @@ investment_operation_kind(const InvestmentOperation& operation) noexcept;
  * Validates an operation without drawing or writing, and retains its receipt until the editor
  * acknowledges it. A refused operation is retained too, unless allocation fails.
  * @param operation Operation with a nonzero identity.
- * @param editorPid Process id of the editor that submitted it.
+ * @param editorPid Process id of the submitting editor, whose receipts are forgotten once it exits.
  * @param receipt Receives the new receipt, or the one already retained under that identity.
  */
 [[nodiscard]] InvestmentSubmission submit_investment_operation(const InvestmentOperation& operation,
@@ -197,7 +197,7 @@ investment_operation_kind(const InvestmentOperation& operation) noexcept;
 
 /**
  * Forgets a finished receipt.
- * @param receipt Receives the receipt; empty when none is retained under that identity.
+ * @param receipt Receives the receipt, or an empty one when none is retained under that identity.
  * @return False while the operation is still pending, or when no receipt is retained.
  */
 [[nodiscard]] bool acknowledge_investment_receipt(std::uint64_t operationId,
@@ -206,7 +206,7 @@ investment_operation_kind(const InvestmentOperation& operation) noexcept;
 /**
  * Refuses a queued or deferred operation as withdrawn. A grant that already published some
  * steps finishes as published with the withdrawal reason. A finished operation is unchanged.
- * @param receipt Receives the resulting receipt; empty when none is retained.
+ * @param receipt Receives the resulting receipt, or an empty one when none is retained.
  * @return False when no receipt is retained under that identity.
  */
 [[nodiscard]] bool withdraw_investment_operation(std::uint64_t operationId,
@@ -223,7 +223,7 @@ void refuse_pending_investment_operations(const char* reason) noexcept;
 /**
  * Forgets the receipts of every editor process that has exited. Only that process knew their
  * ids, so no one can ask for them again.
- * @param editorExited True once no process runs under the editor's process id.
+ * @param editorExited Returns true once no process runs under the given editor process id.
  */
 void forget_exited_editor_receipts(bool (*editorExited)(std::uint32_t editorPid) noexcept) noexcept;
 

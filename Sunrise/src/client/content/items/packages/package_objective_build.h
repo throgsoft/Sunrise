@@ -11,10 +11,8 @@ struct SlotMaps;
 
 /**
  * Reads the dense objective table from the investment root and publishes it to State. A table
- * the installed data refuses settles the pursuit domains as unsupported; a failed read is
+ * the installed data refuses settles the pursuit domains as unsupported, while a failed read is
  * retried on a later pass.
- * @param source Installed package source.
- * @param scratch Shared package reader scratch.
  * @param root Investment root bytes.
  * @param maps Unlock slot maps the objective programs bind through.
  * @return True when the objective table is in State.

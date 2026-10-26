@@ -28,7 +28,7 @@ inline constexpr std::size_t kArtClassCapacity = 4;
 inline constexpr std::uint16_t kUnavailableSocketType = 0xFFFF;
 /** A signed material override key is empty at minus one. */
 inline constexpr std::int8_t kEmptyOverrideKey = -1;
-/** Native inventory bucket of pursuits, the quest items and bounties. */
+/** Native inventory bucket of pursuits, which are the quest items and bounties. */
 inline constexpr std::uint8_t kPursuitBucketId = 40;
 /** The installed pursuit objective block supports seven displayed objectives. */
 inline constexpr std::size_t kObjectiveCapacity = 7;
@@ -94,7 +94,7 @@ struct Row {
     bool objectiveMetadataValid{true};
     /** A present objective block declares these completion controls, even without objectives. */
     bool hasCompletionMetadata{};
-    /** Completion operation rows; native completion invokes the secondary before the primary. */
+    /** Completion operation rows. Native completion invokes the secondary before the primary. */
     std::uint16_t primaryOperationIndex{kAbsentReference};
     std::uint16_t secondaryOperationIndex{kAbsentReference};
     /** Native unlock value indices, not saved-bank rows. */

@@ -37,7 +37,8 @@ public:
      * Resolves an external value identity to its per-item source.
      * @param hash External identity a bound value instruction carries.
      * @param index Receives the native value-table index of the per-item source.
-     * @param mode Receives whether the source reads the inspected instance or held maximum.
+     * @param mode Receives whether the source reads the inspected instance or the maximum over
+     * held instances.
      * @return True when the identity names a per-item source.
      */
     [[nodiscard]] bool

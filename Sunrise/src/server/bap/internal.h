@@ -586,15 +586,15 @@ struct InvestmentTransition {
 }
 
 /**
- * @param reason State's label, which may be null.
- * @return A catalog wait for State's `not_ready`, otherwise a refusal with State's label.
+ * @param reason State's label. A null label refuses as `transaction`.
+ * @return A catalog wait for `not_ready`, otherwise a refusal carrying the label.
  */
 [[nodiscard]] InvestmentTransition state_refusal_transition(const char* reason) noexcept;
 
 /**
  * Checks an operation against the live account, the catalogs and its kind's rules, without
  * drawing.
- * @return Queued when it may run now, deferred while a catalog loads, else refused with a label.
+ * @return Queued when it may run now, deferred while a catalog loads, or refused with a label.
  */
 [[nodiscard]] InvestmentTransition
 check_investment_operation(const InvestmentOperation& operation) noexcept;

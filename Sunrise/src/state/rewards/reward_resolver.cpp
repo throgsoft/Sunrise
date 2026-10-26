@@ -95,7 +95,7 @@ bool evaluate_program(std::span<const definitions::Instruction> program,
     return unlocks::evaluate(program, inputs, result) || refuse(context, "condition_shape");
 }
 
-/** An empty program is unconditional; otherwise a nonzero value holds. */
+/** An empty program always holds, and any other program holds when it evaluates to nonzero. */
 bool condition(std::span<const definitions::Instruction> program,
                const Context& context,
                bool& result,

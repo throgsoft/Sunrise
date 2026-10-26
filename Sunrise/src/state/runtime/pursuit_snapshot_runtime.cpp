@@ -18,7 +18,7 @@ namespace pursuits = build_data::pursuits;
 
 using SavedState = SavedSelection<AccountState>;
 
-/** Copies the selected character's saved view, naming why none was copied. */
+/** Copies the selected character's saved view, or returns why it could not be copied. */
 [[nodiscard]] PursuitSnapshotRefusal read_saved_state(SavedState& saved) noexcept {
     switch (read_saved_selection(saved)) {
     case SavedSelectionRead::read:
@@ -35,7 +35,7 @@ using SavedState = SavedSelection<AccountState>;
 }
 
 /**
- * Evaluates one inventory resident when it is a pursuit; may throw on allocation.
+ * Evaluates one inventory resident when it is a pursuit.
  * @return False when the resident is not in the pursuit bucket.
  */
 [[nodiscard]] bool read_held_pursuit(const account::inventory::Item& item,

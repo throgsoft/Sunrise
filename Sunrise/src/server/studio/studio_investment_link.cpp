@@ -71,7 +71,7 @@ void disconnect() noexcept {
     middleware::studio::close_editor_view(g_mapping, g_view);
 }
 
-/** @return This process's creation FILETIME, which tells a reused process id apart, or 0. */
+/** @return This process's creation FILETIME, or 0. The time tells a reused process id apart. */
 [[nodiscard]] std::uint64_t process_started() noexcept {
     FILETIME creation{};
     FILETIME exit{};
@@ -298,7 +298,7 @@ template <typename Payload>
     return encode_receipt(operationId, receipt, payload);
 }
 
-/** A pending receipt stays retained; the refusal carries the receipt as it stands. */
+/** A pending receipt stays retained, and the refusal carries the receipt as it stands. */
 [[nodiscard]] InvestmentAnswer acknowledge_receipt(std::uint64_t operationId,
                                                    InvestmentPayload payload) noexcept {
     bap::InvestmentReceipt receipt{};
@@ -319,7 +319,7 @@ template <typename Payload>
     return encode_receipt(operationId, receipt, payload);
 }
 
-/** Answers one copied request; nothing it does reads the shared request block again. */
+/** Answers one copied request without reading the shared request block again. */
 [[nodiscard]] InvestmentAnswer serve(const wire::Request& request) noexcept {
     if (request.opcode == wire::Opcode::none || request.opcode >= wire::Opcode::count) {
         return invalid("request_opcode");
@@ -415,7 +415,7 @@ void answer(std::uint32_t request,
 
 /** Each request id gets exactly one answer, in the slice that copies it. */
 void service_investment(std::uint64_t now) noexcept {
-    // Studio attach is off by default, and then no mapping is opened.
+    // Studio attach is off by default, and while it is off no mapping is opened.
     if (!core::settings::get().studioAttach) {
         if (g_view != nullptr) {
             disconnect();
@@ -442,7 +442,7 @@ void service_investment(std::uint64_t now) noexcept {
     MemoryBarrier();
     const wire::Request copy = g_view->request;
     MemoryBarrier();
-    // Studio replaced the request while it was copied; the next slice serves the new one.
+    // Studio replaced the request during the copy, so the next slice serves the new one.
     if (read_id(g_view->control.request) != request) {
         return;
     }

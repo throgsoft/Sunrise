@@ -38,7 +38,7 @@ struct Context {
                             const Context& context,
                             bool& result) noexcept;
 
-/** Reads a numeric bound expression from the same saved banks as reward conditions. */
+/** Evaluates a bound numeric expression against the same saved banks as reward conditions. */
 [[nodiscard]] bool evaluate(std::span<const build_data::rewards::Instruction> program,
                             const Context& context,
                             std::int32_t& value) noexcept;

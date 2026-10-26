@@ -130,7 +130,7 @@ read_completion_value(const pursuits::ValueReference& reference,
     return result;
 }
 
-/** Only an authored absent reference needs no operation body. */
+/** True only when the contract declares no operation, so no operation body is needed. */
 [[nodiscard]] bool
 absent_pursuit_operation(const pursuits::OperationReference& operation) noexcept {
     return operation.index == pursuits::kAbsent

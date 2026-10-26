@@ -12,7 +12,7 @@ void clear() noexcept;
 [[nodiscard]] bool valid(View data) noexcept;
 /** Publishes the validated table and bank together under the catalog lock. */
 [[nodiscard]] bool replace(View data) noexcept;
-/** Copies one row with its programs; false when the table holds no such row. */
+/** Copies one row with its programs, returning false when the row is missing or the copy fails. */
 [[nodiscard]] bool find(std::uint16_t index, Definition& output) noexcept;
 /** @return Published row count, read under the lock. */
 [[nodiscard]] std::size_t count() noexcept;

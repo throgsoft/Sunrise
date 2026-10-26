@@ -54,7 +54,7 @@ struct Arrival {
 /**
  * Finds the recovery bucket an item names when a saved row can occupy it. An arrival's overflow
  * lands there.
- * @return False when the item names none, or one outside the character array.
+ * @return False when the item names no recovery bucket, or one outside the character array.
  */
 [[nodiscard]] bool
 find_recovery_bucket(const build_data::items::Definition& item,

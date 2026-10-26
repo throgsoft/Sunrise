@@ -24,17 +24,20 @@ enum class SavedSelectionRead : std::uint8_t {
 
 /**
  * One account view, its selected character's slot and unlock banks, and the revision, copied
- * under one store lock. A whole account and a bank table are large, so callers own it on the heap.
+ * under one store lock. A whole account and a bank table are large, so callers keep it on the heap.
  */
 template <typename Account> struct SavedSelection {
     Account account{};
     unlocks::Table banks{};
-    /** The selected character's slot, which also owns its unlock banks. */
+    /** The selected character's slot, which also indexes its unlock banks. */
     std::size_t slot{};
     /** Account change generation read under the same lock. */
     std::uint64_t revision{};
 
-    /** @return The selected character's evaluation context; evaluation never draws. */
+    /**
+     * @return The selected character's evaluation context. Its seed is zero because evaluation
+     * never draws.
+     */
     [[nodiscard]] reward_resolution::Context context() const noexcept {
         return {banks, account.characters[slot].characterClass, 0, nullptr};
     }
@@ -44,7 +47,7 @@ template <typename Account> struct SavedSelection {
  * Copies the whole account, the selected character's banks and the revision under one store lock,
  * so inventory and banks come from the same saved state. Inside a caller's savepoint the copy
  * includes that savepoint's own writes.
- * @param output Receives the view; only fields read before a refusal are set.
+ * @param output Receives the view. After a refusal, only the fields read before it are set.
  */
 [[nodiscard]] SavedSelectionRead
 read_saved_selection(SavedSelection<AccountState>& output) noexcept;
@@ -52,7 +55,7 @@ read_saved_selection(SavedSelection<AccountState>& output) noexcept;
 /**
  * Copies the account keys, the selected character's banks and the revision under one store lock,
  * for a caller that needs no inventory.
- * @param output Receives the view; only fields read before a refusal are set.
+ * @param output Receives the view. After a refusal, only the fields read before it are set.
  */
 [[nodiscard]] SavedSelectionRead
 read_saved_selection(SavedSelection<AccountIdentity>& output) noexcept;

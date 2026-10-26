@@ -6,7 +6,10 @@
 
 namespace sunrise::state {
 
-/** The held pursuit an editor read. A different character, instance, hash or serial refuses it. */
+/**
+ * The held pursuit an editor read. An edit is refused once the character, instance, hash or
+ * serial no longer matches.
+ */
 struct PursuitIdentity {
     std::uint64_t characterSoid{};
     std::uint64_t instanceSoid{};
@@ -22,7 +25,7 @@ struct PursuitIdentity {
  * @param ordinal Objective position in the held pursuit's installed contract.
  * @param objectiveHash Definition hash the editor read at that position.
  * @param expected The row as the evaluator reads it: 0 or 1 for a flag.
- * @param value Replacement; 0 or 1 for a flag.
+ * @param value Replacement value, 0 or 1 for a flag.
  * @param change Receives the changed objects on success.
  * @param refusal Receives a static reason on failure.
  */

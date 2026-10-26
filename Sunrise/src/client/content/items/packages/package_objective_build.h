@@ -10,8 +10,9 @@ namespace sunrise::client::content::items::packages {
 struct SlotMaps;
 
 /**
- * Publishes the dense objective table from the investment root, including on a warm cache.
- * A table the installed data refuses settles the pursuit domains; a failed read is retried.
+ * Reads the dense objective table from the investment root and publishes it to State. A table
+ * the installed data refuses settles the pursuit domains as unsupported; a failed read is
+ * retried on a later pass.
  * @param source Installed package source.
  * @param scratch Shared package reader scratch.
  * @param root Investment root bytes.

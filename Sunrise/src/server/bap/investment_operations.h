@@ -1,12 +1,10 @@
 #pragma once
 
-#include <array>
-#include <cstddef>
 #include <cstdint>
 #include <variant>
 
 #include "../../state/account/account_state.h"
-#include "../../state/account/inventory/inventory_edit.h"
+#include "../../state/runtime/runtime.h"
 
 namespace sunrise::server::bap {
 
@@ -19,7 +17,7 @@ struct InvestmentTarget {
     bool operator==(const InvestmentTarget&) const = default;
 };
 
-/** Grants one installed item through the lane that grants world rewards. */
+/** Grants one installed item through the same staging that grants world rewards. */
 struct GrantItemOperation {
     std::uint32_t definitionHash{};
     std::uint32_t quantity{};
@@ -27,7 +25,7 @@ struct GrantItemOperation {
     bool operator==(const GrantItemOperation&) const = default;
 };
 
-/** Replaces the seasonal XP total the editor read. */
+/** Replaces the seasonal XP total, provided it still equals the total the editor read. */
 struct SeasonalExperienceOperation {
     std::int32_t expected{};
     std::int32_t replacement{};
@@ -35,7 +33,7 @@ struct SeasonalExperienceOperation {
     bool operator==(const SeasonalExperienceOperation&) const = default;
 };
 
-/** Claims one pass row through the native opcode-2400 handler. */
+/** Claims one Season pass row through the server's opcode-2400 claim path. */
 struct SeasonPassClaimOperation {
     std::uint16_t rewardIndex{};
     std::uint32_t itemHash{};
@@ -43,7 +41,7 @@ struct SeasonPassClaimOperation {
     bool operator==(const SeasonPassClaimOperation&) const = default;
 };
 
-/** Clears one claimed pass row's claim flag. */
+/** Clears the claim flag of one claimed Season pass row. */
 struct SeasonPassResetOperation {
     std::uint16_t rewardIndex{};
     std::uint32_t itemHash{};
@@ -51,7 +49,7 @@ struct SeasonPassResetOperation {
     bool operator==(const SeasonPassResetOperation&) const = default;
 };
 
-/** Replaces the saved row one objective of one held pursuit reads. */
+/** Replaces the saved flag or value row that one objective of a held pursuit reads. */
 struct ObjectiveProgressOperation {
     std::uint64_t instanceSoid{};
     std::uint32_t itemHash{};
@@ -64,7 +62,7 @@ struct ObjectiveProgressOperation {
     bool operator==(const ObjectiveProgressOperation&) const = default;
 };
 
-/** Sets every incomplete objective of one held pursuit to its target. */
+/** Sets every required objective of a held pursuit that is still incomplete to its target. */
 struct ObjectiveCompletionOperation {
     std::uint64_t instanceSoid{};
     std::uint32_t itemHash{};
@@ -73,7 +71,7 @@ struct ObjectiveCompletionOperation {
     bool operator==(const ObjectiveCompletionOperation&) const = default;
 };
 
-/** What one operation changes, in the order of InvestmentRequest's alternatives. */
+/** What one operation changes. The order matches InvestmentRequest's alternatives. */
 enum class InvestmentOperationKind : std::uint8_t {
     grantItem,
     setQuantity,
@@ -84,9 +82,9 @@ enum class InvestmentOperationKind : std::uint8_t {
     completePursuitObjectives,
 };
 
-/** One operation's request; each alternative's position is its InvestmentOperationKind. */
+/** One operation's request. Each alternative's index is its InvestmentOperationKind. */
 using InvestmentRequest = std::variant<GrantItemOperation,
-                                       state::account::inventory::QuantityEdit,
+                                       state::QuantityEdit,
                                        SeasonalExperienceOperation,
                                        SeasonPassClaimOperation,
                                        SeasonPassResetOperation,
@@ -95,7 +93,7 @@ using InvestmentRequest = std::variant<GrantItemOperation,
 
 /** One editor operation, copied out of the editor mapping before it is submitted. */
 struct InvestmentOperation {
-    /** Editor-chosen and nonzero; resubmitting the same identity never runs it twice. */
+    /** Chosen by the editor and nonzero. Resubmitting the same id never runs it twice. */
     std::uint64_t id{};
     InvestmentTarget target{};
     InvestmentRequest request{};
@@ -103,19 +101,23 @@ struct InvestmentOperation {
     bool operator==(const InvestmentOperation&) const = default;
 };
 
-/** Where one operation stands. Refused and both committed states are final. */
+/** Where one operation stands. Refused, published and committedUnpublished are final. */
 enum class InvestmentReceiptState : std::uint8_t {
     queued,
     deferred,
     refused,
     published,
-    /** Committed, but its frame failed, so every Family-4 peer resyncs the account instead. */
+    /**
+     * State committed the change but its frame failed, so every Family-4 peer resyncs. A grant
+     * ends at that step: the rest of its quantity is never granted, and the receipt counts the
+     * rows its steps changed but not the quantity they granted.
+     */
     committedUnpublished,
 };
 
 /** What a queued or deferred operation is waiting for. */
 enum class InvestmentWait : std::uint8_t {
-    /** Nothing named, including an in-game presentation the bound peer is still playing. */
+    /** No named condition. This covers an in-game presentation the peer is still showing. */
     none,
     publicationPeer,
     accountResync,
@@ -129,42 +131,39 @@ struct InvestmentReceipt {
     InvestmentOperationKind kind{};
     InvestmentReceiptState state{};
     InvestmentWait wait{};
-    /** Static refusal label, or the frame failure a committed operation was left with. */
+    /**
+     * Static label: why the operation was refused, why a committed operation has no frame, or
+     * why a published grant stopped short of its full quantity.
+     */
     const char* reason{""};
-    /** Family-4 version of the frame that published the operation; zero until published. */
+    /** Family-4 version of the last frame the operation published; zero until it publishes. */
     std::int32_t family4Version{};
-    /** Inventory or unlock rows granted or edited; one for an XP total or a pass flag. */
+    /** Inventory or unlock rows granted or edited. An XP total or a pass flag counts as one. */
     std::uint32_t changedRows{};
     std::uint64_t submittedTick{};
     /** Zero while the operation is pending. */
     std::uint64_t finishedTick{};
 };
 
-/** How a submission was taken. */
+/** How the server took one submission. */
 enum class InvestmentSubmission : std::uint8_t {
-    /** The receipt is retained; its state says whether the operation was queued or refused. */
+    /**
+     * The receipt is retained, and its state says whether the operation was queued or refused.
+     * Resubmitting the same request returns the retained receipt without running anything again.
+     */
     accepted,
-    /** The identity was already submitted with the same request; nothing ran again. */
-    existing,
-    /** The identity was already submitted with another request; nothing changed. */
+    /** The id was already submitted with a different request. Nothing changed. */
     reused,
-    /** No storage was left, so nothing was retained. */
+    /** Allocation failed, so nothing was retained. */
     refused,
-};
-
-/** One character the account holds. */
-struct InvestmentCharacter {
-    std::uint64_t soid{};
-    state::CharacterClass characterClass{};
-    bool selected{};
 };
 
 /** The live account an editor binds to, and whether a peer can publish to it. */
 struct InvestmentContext {
     InvestmentTarget live{};
-    std::array<InvestmentCharacter, state::kCharacterCapacity> characters{};
-    std::size_t characterCount{};
-    /** Saved-account revision read with the account. */
+    /** The account's characters, read under the same lock as the revision. */
+    state::AccountIdentity account{};
+    /** Saved-account revision. It changes on every committed save and selection change. */
     std::uint64_t revision{};
     bool peerPresent{};
     bool peerOwnsAccount{};
@@ -182,8 +181,8 @@ investment_operation_kind(const InvestmentOperation& operation) noexcept;
 [[nodiscard]] bool investment_context(InvestmentContext& output) noexcept;
 
 /**
- * Validates an operation without drawing or writing, and retains its receipt until acknowledged.
- * An operation refused here is retained too, unless no storage was left for it.
+ * Validates an operation without drawing or writing, and retains its receipt until the editor
+ * acknowledges it. A refused operation is retained too, unless allocation fails.
  * @param operation Operation with a nonzero identity.
  * @param editorPid Process id of the editor that submitted it.
  * @param receipt Receives the new receipt, or the one already retained under that identity.
@@ -205,7 +204,8 @@ investment_operation_kind(const InvestmentOperation& operation) noexcept;
                                                   InvestmentReceipt& receipt) noexcept;
 
 /**
- * Refuses a queued or deferred operation as withdrawn; a finished one is left as it is.
+ * Refuses a queued or deferred operation as withdrawn. A grant that already published some
+ * steps finishes as published with the withdrawal reason. A finished operation is unchanged.
  * @param receipt Receives the resulting receipt; empty when none is retained.
  * @return False when no receipt is retained under that identity.
  */
@@ -213,14 +213,16 @@ investment_operation_kind(const InvestmentOperation& operation) noexcept;
                                                  InvestmentReceipt& receipt) noexcept;
 
 /**
- * Refuses every queued or deferred operation, because the editor that would read how it ended
- * is gone. Finished receipts stay for that editor to read when it returns.
+ * Refuses every queued or deferred operation when the editor link drops, since nobody is left to
+ * read how they end. A grant that already published some steps finishes as published with this
+ * reason. Finished receipts stay so the editor can read them when it reconnects.
  * @param reason Static label each refused receipt carries.
  */
 void refuse_pending_investment_operations(const char* reason) noexcept;
 
 /**
- * Forgets the receipts of every editor that has exited; only that editor knew their ids.
+ * Forgets the receipts of every editor process that has exited. Only that process knew their
+ * ids, so no one can ask for them again.
  * @param editorExited True once no process runs under the editor's process id.
  */
 void forget_exited_editor_receipts(bool (*editorExited)(std::uint32_t editorPid) noexcept) noexcept;

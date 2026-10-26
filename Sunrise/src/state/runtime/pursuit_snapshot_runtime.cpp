@@ -2,46 +2,36 @@
 
 #include <algorithm>
 #include <cstddef>
-#include <mutex>
+#include <memory>
+#include <new>
 #include <utility>
 
 #include "../account/account_state.h"
 #include "../build_data/runtime.h"
-#include "../investment/store_internal.h"
 #include "../rewards/reward_resolver.h"
+#include "saved_selection_runtime.h"
 
 namespace sunrise::state {
 namespace {
 
 namespace pursuits = build_data::pursuits;
 
-/**
- * Copies the account, the selected character's unlock banks and the revision under one store
- * lock, so the inventory and banks come from the same saved state.
- * @param slot Receives the character's slot, which is also its unlock-bank owner.
- */
-[[nodiscard]] PursuitSnapshotRefusal read_saved_state(AccountState& account,
-                                                      unlocks::Table& values,
-                                                      std::size_t& slot,
-                                                      std::uint64_t& revision) noexcept {
-    const std::lock_guard lock(investment::store::g_mutex);
-    revision = investment::store::g_session.revision;
-    account = investment::store::account();
-    if (!account::valid(account)) {
+using SavedState = SavedSelection<AccountState>;
+
+/** Copies the selected character's saved view, naming why none was copied. */
+[[nodiscard]] PursuitSnapshotRefusal read_saved_state(SavedState& saved) noexcept {
+    switch (read_saved_selection(saved)) {
+    case SavedSelectionRead::read:
+        return PursuitSnapshotRefusal::none;
+    case SavedSelectionRead::accountStorage:
+    case SavedSelectionRead::accountInvalid:
         return PursuitSnapshotRefusal::accountUnavailable;
-    }
-    for (slot = 0; slot < account.characterCount; ++slot) {
-        const CharacterState& character = account.characters[slot];
-        if (character.selected) {
-            break;
-        }
-    }
-    if (slot == account.characterCount) {
+    case SavedSelectionRead::unselected:
         return PursuitSnapshotRefusal::characterUnavailable;
+    case SavedSelectionRead::bankStorage:
+        break;
     }
-    return investment::store::read_unlocks(values, static_cast<int>(slot))
-               ? PursuitSnapshotRefusal::none
-               : PursuitSnapshotRefusal::storage;
+    return PursuitSnapshotRefusal::storage;
 }
 
 /**
@@ -53,7 +43,7 @@ namespace pursuits = build_data::pursuits;
                                      HeldPursuitStatus& held) {
     build_data::items::Definition definition{};
     if (!build_data::find_item_definition_hash(item.definitionHash, definition)
-        || definition.bucketId != build_data::items::kPursuitBucketId) {
+        || !build_data::items::pursuit_bucket_item(definition)) {
         return false;
     }
     held.instanceSoid = item.instanceSoid;
@@ -84,23 +74,21 @@ PursuitSnapshotRefusal read_pursuit_snapshot(PursuitSnapshot& output) noexcept {
         return PursuitSnapshotRefusal::catalogUnavailable;
     }
     const std::uint64_t definitionsRevision = build_data::pursuit_definitions_revision();
-    AccountState account{};
-    unlocks::Table values{};
-    std::size_t slot = 0;
-    std::uint64_t investmentRevision = 0;
-    const PursuitSnapshotRefusal refusal =
-        read_saved_state(account, values, slot, investmentRevision);
+    const std::unique_ptr<SavedState> saved(new (std::nothrow) SavedState{});
+    if (!saved) {
+        return PursuitSnapshotRefusal::storage;
+    }
+    const PursuitSnapshotRefusal refusal = read_saved_state(*saved);
     if (refusal != PursuitSnapshotRefusal::none) {
         return refusal;
     }
-    const CharacterState& character = account.characters[slot];
-    // Evaluation never draws, so no seed is needed.
-    const reward_resolution::Context context{values, character.characterClass, 0, nullptr};
+    const CharacterState& character = saved->account.characters[saved->slot];
+    const reward_resolution::Context context = saved->context();
     try {
         PursuitSnapshot snapshot{};
-        snapshot.accountSoid = account.primarySoid;
+        snapshot.accountSoid = saved->account.primarySoid;
         snapshot.characterSoid = character.soid;
-        snapshot.investmentRevision = investmentRevision;
+        snapshot.investmentRevision = saved->revision;
         for (std::size_t i = 0; i < character.inventory.count; ++i) {
             HeldPursuitStatus held{};
             if (read_held_pursuit(character.inventory.values[i], context, held)) {
@@ -124,24 +112,22 @@ PursuitSnapshotRefusal read_unlock_values(std::span<const unlocks::Instruction> 
                                           UnlockReadOrigin& origin) noexcept {
     origin = {};
     std::fill(output.begin(), output.end(), UnlockRead{});
-    AccountState account{};
-    unlocks::Table values{};
-    std::size_t slot = 0;
-    std::uint64_t investmentRevision = 0;
-    const PursuitSnapshotRefusal refusal =
-        read_saved_state(account, values, slot, investmentRevision);
+    const std::unique_ptr<SavedState> saved(new (std::nothrow) SavedState{});
+    if (!saved) {
+        return PursuitSnapshotRefusal::storage;
+    }
+    const PursuitSnapshotRefusal refusal = read_saved_state(*saved);
     if (refusal != PursuitSnapshotRefusal::none) {
         return refusal;
     }
-    const CharacterState& character = account.characters[slot];
-    // Evaluation never draws, so no seed is needed.
-    const reward_resolution::Context context{values, character.characterClass, 0, nullptr};
+    const reward_resolution::Context context = saved->context();
     const std::size_t count = (std::min)(sources.size(), output.size());
     for (std::size_t index = 0; index < count; ++index) {
         UnlockRead& read = output[index];
         read.known = reward_resolution::evaluate(sources.subspan(index, 1), context, read.value);
     }
-    origin = {account.primarySoid, character.soid, investmentRevision};
+    origin = {
+        saved->account.primarySoid, saved->account.characters[saved->slot].soid, saved->revision};
     return PursuitSnapshotRefusal::none;
 }
 

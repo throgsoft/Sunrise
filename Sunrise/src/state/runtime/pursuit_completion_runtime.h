@@ -52,25 +52,25 @@ struct PursuitObjectiveStatus {
     PursuitObjectiveUnknown unknown{PursuitObjectiveUnknown::none};
 };
 
-/** Eligibility describes conditions only; it neither permits a claim nor promises a grant. */
+/** Eligibility describes conditions only. It does not permit a claim or promise a grant. */
 struct PursuitCompletionStatus {
-    /** The objective aggregate and completion gate have a determinate combined result. */
+    /** The objectives and the completion gate together give a determinate result. */
     bool conditionsKnown{};
-    /** Whether the objective aggregate alone is determinate, apart from its completion gate. */
+    /** The objective aggregate alone is determinate, ignoring the completion gate. */
     bool objectivesKnown{};
-    /** Can be proven in any-mode even when another objective remains unknown. */
+    /** In any-objective mode, one complete objective proves this even when others are unknown. */
     bool objectivesComplete{};
     bool eligible{};
-    /** True only when no operation body is needed and intrinsic destinations are supported. */
+    /** No operation body is needed, and the server can save every value completion writes. */
     bool effectsKnown{};
     std::uint8_t objectiveCount{};
     std::array<PursuitObjectiveStatus, build_data::pursuits::kObjectiveCapacity> objectives{};
-    /** Unavailable effects do not erase independently evaluated conditions. */
+    /** The deciding reason. An effects reason leaves the evaluated condition fields intact. */
     PursuitCompletionReason reason{PursuitCompletionReason::contractUnavailable};
 };
 
 /**
- * Inspects completion against saved banks without mutation or draws.
+ * Inspects completion against the saved banks without writing or drawing.
  * The caller matches the contract's item index and hash to the held instance.
  * @param definition Installed completion contract.
  * @param context Saved banks and class of the character holding the pursuit.

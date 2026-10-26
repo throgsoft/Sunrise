@@ -2,15 +2,17 @@
 
 #include <algorithm>
 #include <limits>
+#include <memory>
+#include <new>
 #include <span>
 
 #include "../account/account_state.h"
 #include "../build_data/runtime.h"
 #include "../investment/store_internal.h"
-#include "../rewards/reward_resolver.h"
 #include "../unlocks/definition.h"
 #include "../unlocks/unlocks_expression.h"
 #include "pursuit_completion_runtime.h"
+#include "saved_selection_runtime.h"
 
 namespace sunrise::state {
 namespace {
@@ -27,11 +29,9 @@ static_assert((std::max)({unlocks::kAccountFlagCapacity,
                           unlocks::kCharacterObjectValueCapacity})
               <= (std::numeric_limits<std::uint16_t>::max)());
 
-/** A held pursuit and the installed contract its snapshot is evaluated against. */
+/** The saved view one pursuit edit reads, and the installed contract of the pursuit it holds. */
 struct HeldPursuit {
-    /** The selected character's slot, which also owns its unlock banks. */
-    std::size_t characterIndex{};
-    CharacterClass characterClass{};
+    SavedSelection<AccountState> saved{};
     pursuits::Definition contract{};
 };
 
@@ -84,13 +84,11 @@ struct HeldPursuit {
 }
 
 /**
- * Finds the identity's pursuit in the account the caller's savepoint reads, and its contract.
- * @param transaction The caller's savepoint, opened before this call.
+ * Copies the selected character's saved view inside the caller's savepoint, then finds the
+ * identity's pursuit in it and the pursuit's contract.
  * @param reason Receives the refusal label on failure.
  */
-[[nodiscard]] bool read_held_pursuit(const store::Transaction& transaction,
-                                     const PursuitIdentity& identity,
-                                     AccountState& account,
+[[nodiscard]] bool read_held_pursuit(const PursuitIdentity& identity,
                                      HeldPursuit& held,
                                      const char*& reason) noexcept {
     reason = "not_ready";
@@ -98,29 +96,29 @@ struct HeldPursuit {
         || !build_data::pursuit_definitions_ready()) {
         return false;
     }
-    reason = "transaction";
-    if (!transaction.ready() || !store::read_account(account)) {
+    switch (read_saved_selection(held.saved)) {
+    case SavedSelectionRead::read:
+        break;
+    case SavedSelectionRead::accountInvalid:
+        reason = "account_state";
+        return false;
+    case SavedSelectionRead::unselected:
+        reason = "character_changed";
+        return false;
+    case SavedSelectionRead::accountStorage:
+    case SavedSelectionRead::bankStorage:
+        reason = "transaction";
         return false;
     }
-    reason = "account_state";
-    if (!account::valid(account)) {
-        return false;
-    }
+    const CharacterState& character = held.saved.account.characters[held.saved.slot];
     reason = "character_changed";
-    const auto characters =
-        std::span(account.characters)
-            .first((std::min)(account.characterCount, account.characters.size()));
-    const auto selected =
-        std::find_if(characters.begin(), characters.end(), [](const CharacterState& character) {
-            return character.selected;
-        });
-    if (selected == characters.end() || selected->soid != identity.characterSoid) {
+    if (character.soid != identity.characterSoid) {
         return false;
     }
     reason = "pursuit_changed";
     const auto items =
-        std::span(selected->inventory.values)
-            .first((std::min)(selected->inventory.count, selected->inventory.values.size()));
+        std::span(character.inventory.values)
+            .first((std::min)(character.inventory.count, character.inventory.values.size()));
     const bool copyHeld =
         std::any_of(items.begin(), items.end(), [&identity](const account::inventory::Item& row) {
             return row.instanceSoid == identity.instanceSoid
@@ -129,7 +127,7 @@ struct HeldPursuit {
         });
     build_data::items::Definition item{};
     if (!copyHeld || !build_data::find_item_definition_hash(identity.definitionHash, item)
-        || item.bucketId != build_data::items::kPursuitBucketId) {
+        || !build_data::items::pursuit_bucket_item(item)) {
         return false;
     }
     reason = "pursuit_contract";
@@ -138,40 +136,30 @@ struct HeldPursuit {
         || held.contract.objectiveCount > pursuits::kObjectiveCapacity) {
         return false;
     }
-    // Without a saved deadline an expired bounty cannot be told apart, so none is edited.
+    // No bounty deadline is saved, so an expired bounty cannot be told apart and none is edited.
     reason = "expiry_not_saved";
-    if (held.contract.lifetimeSeconds > 0) {
-        return false;
-    }
-    held.characterIndex = static_cast<std::size_t>(selected - characters.begin());
-    held.characterClass = selected->characterClass;
-    return true;
+    return held.contract.lifetimeSeconds <= 0;
 }
 
-/** Evaluates the contract against the selected character's banks as the savepoint holds them. */
-[[nodiscard]] bool inspect_saved(const HeldPursuit& held,
-                                 unlocks::Table& values,
-                                 PursuitCompletionStatus& status) noexcept {
-    if (!store::read_unlocks(values, static_cast<int>(held.characterIndex))) {
-        return false;
-    }
-    // Evaluation never draws, so no seed is needed.
-    status = inspect_pursuit_completion(held.contract, {values, held.characterClass, 0, nullptr});
-    return true;
+/** @return The contract evaluated against the banks as the savepoint holds them. */
+[[nodiscard]] PursuitCompletionStatus inspect_held(const HeldPursuit& held) noexcept {
+    return inspect_pursuit_completion(held.contract, held.saved.context());
 }
 
 /**
  * Writes one required objective's saved row to its adjusted target when the banks, including
- * earlier writes of this savepoint, leave it incomplete.
+ * earlier writes of this savepoint, leave it incomplete. A write re-reads the banks and
+ * re-evaluates the contract, so later objectives see it.
+ * @param status The contract as the banks stand; replaced after a write.
  * @param incomplete Set when the objective was incomplete.
  * @param change Counts the row when the write changed it.
  * @param reason Receives the refusal label on failure.
  */
-[[nodiscard]] bool complete_objective(const HeldPursuit& held,
+[[nodiscard]] bool complete_objective(HeldPursuit& held,
                                       std::size_t ordinal,
-                                      unlocks::Table& values,
+                                      PursuitCompletionStatus& status,
                                       bool& incomplete,
-                                      PursuitEditChange& change,
+                                      AccountEditChange& change,
                                       const char*& reason) noexcept {
     reason = "pursuit_contract";
     objectives::Definition objective{};
@@ -184,11 +172,6 @@ struct HeldPursuit {
     }
     reason = "item_progress_not_saved";
     if (objective.itemProgress) {
-        return false;
-    }
-    reason = "transaction";
-    PursuitCompletionStatus status{};
-    if (!inspect_saved(held, values, status)) {
         return false;
     }
     const PursuitObjectiveStatus& progress = status.objectives[ordinal];
@@ -221,16 +204,18 @@ struct HeldPursuit {
     if (before == after) {
         return true;
     }
-    if (!store::write_unlock(bank, row, after)) {
+    if (!store::write_unlock(bank, row, after)
+        || !store::read_unlocks(held.saved.banks, static_cast<int>(held.saved.slot))) {
         return false;
     }
     ++change.changedRows;
     change.accountRows = change.accountRows || account_row(bank);
+    status = inspect_held(held);
     return true;
 }
 
 /**
- * Resolves the one saved row the objective the editor named reads.
+ * Resolves the single saved row read by the objective the editor named.
  * @param source Receives the objective's only instruction.
  * @param reason Receives the refusal label on failure.
  */
@@ -287,20 +272,24 @@ bool set_pursuit_objective(const PursuitIdentity& identity,
                            std::uint32_t objectiveHash,
                            std::int32_t expected,
                            std::int32_t value,
-                           PursuitEditChange& change,
+                           AccountEditChange& change,
                            const char** refusal) noexcept {
     const char* unused = nullptr;
     auto& reason = refusal != nullptr ? *refusal : unused;
     change = {};
+    reason = "allocation";
+    const std::unique_ptr<HeldPursuit> held(new (std::nothrow) HeldPursuit{});
+    if (!held) {
+        return false;
+    }
     store::Transaction transaction;
-    AccountState account;
-    HeldPursuit held{};
-    if (!read_held_pursuit(transaction, identity, account, held, reason)) {
+    reason = "transaction";
+    if (!transaction.ready() || !read_held_pursuit(identity, *held, reason)) {
         return false;
     }
     unlocks::Instruction source{};
     store::Bank bank{};
-    if (!objective_row(held, ordinal, objectiveHash, source, bank, reason)) {
+    if (!objective_row(*held, ordinal, objectiveHash, source, bank, reason)) {
         return false;
     }
     const bool flag = source.opcode == unlocks::Opcode::flag;
@@ -335,30 +324,38 @@ bool set_pursuit_objective(const PursuitIdentity& identity,
     if (!store::write_unlock(bank, row, after) || !transaction.commit()) {
         return false;
     }
-    change = {
-        account.primarySoid, identity.characterSoid, held.characterIndex, account_row(bank), 1};
+    change = {held->saved.account.primarySoid,
+              identity.characterSoid,
+              held->saved.slot,
+              account_row(bank),
+              1};
     reason = nullptr;
     return true;
 }
 
 /** Writes in contract order, so each objective is evaluated against the rows already written. */
 bool complete_pursuit_objectives(const PursuitIdentity& identity,
-                                 PursuitEditChange& change,
+                                 AccountEditChange& change,
                                  const char** refusal) noexcept {
     const char* unused = nullptr;
     auto& reason = refusal != nullptr ? *refusal : unused;
     change = {};
-    store::Transaction transaction;
-    AccountState account;
-    HeldPursuit held{};
-    if (!read_held_pursuit(transaction, identity, account, held, reason)) {
+    reason = "allocation";
+    const std::unique_ptr<HeldPursuit> held(new (std::nothrow) HeldPursuit{});
+    if (!held) {
         return false;
     }
-    unlocks::Table values;
-    PursuitEditChange edited{account.primarySoid, identity.characterSoid, held.characterIndex};
+    store::Transaction transaction;
+    reason = "transaction";
+    if (!transaction.ready() || !read_held_pursuit(identity, *held, reason)) {
+        return false;
+    }
+    AccountEditChange edited{
+        held->saved.account.primarySoid, identity.characterSoid, held->saved.slot};
+    PursuitCompletionStatus status = inspect_held(*held);
     bool incomplete = false;
-    for (std::size_t ordinal = 0; ordinal < held.contract.objectiveCount; ++ordinal) {
-        if (!complete_objective(held, ordinal, values, incomplete, edited, reason)) {
+    for (std::size_t ordinal = 0; ordinal < held->contract.objectiveCount; ++ordinal) {
+        if (!complete_objective(*held, ordinal, status, incomplete, edited, reason)) {
             return false;
         }
     }
@@ -366,15 +363,10 @@ bool complete_pursuit_objectives(const PursuitIdentity& identity,
     if (!incomplete) {
         return false;
     }
-    // A zero target, a flag target other than one, an adjustment or a shared row the writes moved
-    // can still leave an objective incomplete; the savepoint then rolls every write back.
-    reason = "transaction";
-    PursuitCompletionStatus status{};
-    if (!inspect_saved(held, values, status)) {
-        return false;
-    }
+    // A zero target, a flag target other than one, a target adjustment, or a row shared with
+    // another objective can still leave one incomplete. The savepoint then rolls back every write.
     reason = "objective_target";
-    if (!required_objectives_complete(held, status)) {
+    if (!required_objectives_complete(*held, status)) {
         return false;
     }
     reason = "transaction";

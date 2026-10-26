@@ -12,16 +12,9 @@ namespace {
 
 namespace pursuits = state::build_data::pursuits;
 
-/**
- * Root slot 84 holds the operation table that completion references name, the same table reward
- * entries name as supplemental rows.
- */
-constexpr std::size_t kCompletionOperationTableSlot = 84;
-constexpr std::uint32_t kCompletionOperationTableClass = 0x808078BBU;
-constexpr std::size_t kCompletionOperationRowStride = 0x120;
-
 static_assert(pursuits::kObjectiveCapacity == tables::items::kObjectiveCapacity);
 static_assert(pursuits::kAbsent == tables::items::kAbsentReference);
+static_assert(state::build_data::items::kPursuitBucketId == tables::items::kPursuitBucketId);
 
 } // namespace
 
@@ -64,13 +57,15 @@ bool PursuitBuild::begin(const reader::Source& source,
     rows_.clear();
     unreadCount_ = 0;
     firstUnread_ = pursuits::kAbsent;
+    readFailures_ = 0;
+    firstReadFailure_ = pursuits::kAbsent;
     operationCount_ = 0;
     operationTablePresent_ = false;
     std::uint32_t tag = 0;
     if (!load_pursuit_conditions(conditions_, source, scratch, root, maps)) {
         return false;
     }
-    if (!tables::slot_tag(root, kCompletionOperationTableSlot, tag)) {
+    if (!tables::slot_tag(root, tables::kOperationTableSlot, tag)) {
         settle_pursuits_unsupported("operation_slot");
         return false;
     }
@@ -78,19 +73,23 @@ bool PursuitBuild::begin(const reader::Source& source,
         std::vector<std::byte> blob;
         std::uint32_t tableClass = 0;
         tables::Array operations{};
+        // The table only explains why an operation body is unresolved, so a failed read records
+        // it missing. Retrying it would hold back every other investment-root domain.
         if (!reader::read_tag(source, scratch, tag, blob, tableClass)) {
-            return false;
-        }
-        if (tableClass != kCompletionOperationTableClass
-            || !tables::find_array_at(blob, tables::kTableArrayDescriptor, operations)
-            || operations.dataOffset > blob.size()
-            || operations.count
-                   > (blob.size() - operations.dataOffset) / kCompletionOperationRowStride) {
+            core::log::write(core::log::Channel::client,
+                             core::log::Level::warn,
+                             "ev=pkg stage=pursuits result=partial reason=operation_table_read");
+        } else if (tableClass != tables::kOperationTableClass
+                   || !tables::find_array_at(blob, tables::kTableArrayDescriptor, operations)
+                   || operations.dataOffset > blob.size()
+                   || operations.count
+                          > (blob.size() - operations.dataOffset) / tables::kOperationRowStride) {
             settle_pursuits_unsupported("operation_schema");
             return false;
+        } else {
+            operationTablePresent_ = true;
+            operationCount_ = operations.count;
         }
-        operationTablePresent_ = true;
-        operationCount_ = operations.count;
     }
     ready_ = true;
     return true;
@@ -118,7 +117,7 @@ bool PursuitBuild::item(const tables::items::Row& row) noexcept {
     if (!ready_) {
         return false;
     }
-    // Only a pursuit declares completion metadata, or fails to read it.
+    // Only pursuits declare completion metadata. An unreadable block gets an unreadable contract.
     if (!row.hasCompletionMetadata && row.objectiveMetadataValid) {
         return true;
     }
@@ -153,12 +152,36 @@ void PursuitBuild::unread(std::uint16_t index) noexcept {
     }
 }
 
+void PursuitBuild::read_failed(std::uint16_t index) noexcept {
+    if (readFailures_++ == 0) {
+        firstReadFailure_ = index;
+    }
+}
+
 void PursuitBuild::publish() noexcept {
-    // Contracts check every edge against both tables, so they wait for them on a later pass.
+    // Every contract edge is checked against the item and objective tables, so wait for both.
     if (!ready_ || !state::build_data::item_definitions_ready()
         || !state::build_data::objective_definitions_ready()) {
         return;
     }
+    // A failed read or allocation left out contracts the data declares. Publishing now would cache
+    // the catalog without them, and validating it could settle the domain unsupported over a
+    // failure the data did not decide.
+    if (readFailures_ != 0) {
+        core::log::writef(core::log::Channel::client,
+                          core::log::Level::warn,
+                          "ev=pkg stage=pursuits result=fail reason=item_read read_failures=%zu "
+                          "first_index=%u",
+                          readFailures_,
+                          static_cast<unsigned>(firstReadFailure_));
+        return;
+    }
+    // A row an earlier pass failed to read stays out of the published item catalog, so its
+    // contract is pruned with it rather than settling the domain over an item State never holds.
+    const std::size_t pruned = std::erase_if(rows_, [](const pursuits::Definition& row) noexcept {
+        state::build_data::items::Definition item{};
+        return !state::build_data::find_item_definition_index(row.definitionIndex, item);
+    });
     std::size_t unresolved = 0;
     for (const pursuits::Definition& row : rows_) {
         unresolved += row.primaryOperation.index != pursuits::kAbsent
@@ -168,7 +191,7 @@ void PursuitBuild::publish() noexcept {
     // A cache write can still fail, so a refused publish walks again on a later pass.
     const bool published = valid && state::build_data::publish_pursuit_definitions(rows_);
     const std::size_t rowCount = rows_.size();
-    // State keeps its own copy; this pass never walks for pursuits again.
+    // State keeps its own copy, so release the collected rows.
     rows_ = {};
     ready_ = false;
     if (!valid) {
@@ -179,12 +202,14 @@ void PursuitBuild::publish() noexcept {
         return;
     }
     core::log::writef(core::log::Channel::client,
-                      unreadCount_ == 0 ? core::log::Level::info : core::log::Level::warn,
+                      unreadCount_ == 0 && pruned == 0 ? core::log::Level::info
+                                                       : core::log::Level::warn,
                       "ev=pkg stage=pursuits result=ready rows=%zu unread=%zu first_unread=%u "
-                      "unresolved_effects=%zu operation_table=%s",
+                      "pruned=%zu unresolved_effects=%zu operation_table=%s",
                       rowCount,
                       unreadCount_,
                       static_cast<unsigned>(firstUnread_),
+                      pruned,
                       unresolved,
                       operationTablePresent_ ? "present" : "absent");
 }

@@ -20,7 +20,6 @@ namespace domain = state::build_data::rewards;
 namespace unlocks = state::unlocks;
 
 /** Investment-root slots identify reward pools and unlock-slot bindings. */
-constexpr std::size_t kSupplementalRewardSlot = 84;
 constexpr std::size_t kPoolSlot = 88;
 constexpr std::size_t kExpressionSlot = 109;
 constexpr std::size_t kFlagSlot = 112;
@@ -102,7 +101,7 @@ void report_refusal(const char* reason) noexcept {
                       reason);
 }
 
-/** Logs a refusal the installed data decides and settles the domain once; no retry changes it. */
+/** Logs a refusal decided by the installed data and settles the domain, as no retry can help. */
 void settle_unsupported(const char* reason) noexcept {
     report_refusal(reason);
     if (!state::build_data::reward_definitions_unsupported()) {
@@ -611,7 +610,7 @@ bool RewardBuild::load(const reader::Source& source,
     if (!conditions.load(source, scratch, root, maps)) {
         return false;
     }
-    if (!tables::slot_tag(root, kSupplementalRewardSlot, supplementalTag)) {
+    if (!tables::slot_tag(root, tables::kOperationTableSlot, supplementalTag)) {
         settle_unsupported("supplemental_slot");
         return false;
     }

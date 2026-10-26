@@ -14,7 +14,7 @@ namespace {
            && item.definitionHash == row.definitionHash;
 }
 
-/** Drops both tables after a failed first cache write. */
+/** Drops both tables when the first cache write after settling fails. */
 void clear_pursuit_catalog() noexcept {
     objectives::clear();
     pursuits::clear();
@@ -37,7 +37,7 @@ std::uint64_t pursuit_definitions_revision() noexcept {
     return pursuits::revision();
 }
 
-/** Logs the first contract that names another item than the one it was read from. */
+/** Requires both tables and logs the first contract whose item differs from the installed one. */
 bool valid_pursuit_definitions(std::span<const pursuits::Definition> rows) noexcept {
     if (!item_definitions_ready() || !objective_definitions_ready()) {
         return false;

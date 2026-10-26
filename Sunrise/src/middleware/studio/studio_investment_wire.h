@@ -9,18 +9,21 @@
 
 namespace sunrise::middleware::studio::investment_wire {
 
-/** Investment commands use their own local mapping and the ASCII magic SSIV. */
+/** Investment requests use their own local mapping. The magic reads "SSIV" in memory. */
 inline constexpr std::uint32_t kMagic = 0x56495353;
 inline constexpr std::uint32_t kVersion = 2;
 inline constexpr wchar_t kMappingFormat[] = L"Local\\SunriseStudio.Investment.%lu";
-/** A missing editor is looked for once a second. */
+/** How often the game looks for a missing editor mapping. */
 inline constexpr std::uint64_t kConnectIntervalMs = 1'000;
 /** An editor that has not refreshed its heartbeat this long is gone. */
 inline constexpr std::uint64_t kHeartbeatTimeoutMs = 3'000;
-/** The NUL-terminated ASCII label a refusal or an invalid request carries. */
+/**
+ * Size of the NUL-terminated ASCII reason carried by a refusal, an invalid request or a grant that
+ * stopped part way.
+ */
 inline constexpr std::size_t kReasonBytes = 64;
 
-/** Studio and the game address these words at fixed offsets; the control block never moves. */
+/** Studio and the game use these fixed offsets. The control block is the same in every version. */
 inline constexpr std::size_t kControlBytes = 64;
 inline constexpr std::size_t kHeartbeatOffset = 16, kGameVersionOffset = 24, kGamePidOffset = 28;
 inline constexpr std::size_t kCapabilitiesOffset = 32, kGameStartedOffset = 40;
@@ -28,7 +31,7 @@ inline constexpr std::size_t kRequestOffset = 48, kResponseOffset = 52;
 inline constexpr std::size_t kRequestBlockOffset = 64, kResponseBlockOffset = 144;
 inline constexpr std::size_t kResponsePayloadOffset = 256;
 
-// --- Capacities; the server ties each one to the State constant that owns it ---
+// --- Capacities: the server asserts each one equals the State constant that owns it ---
 
 /** The profile array's native slot count. */
 inline constexpr std::size_t kProfileRowCapacity = 701;
@@ -44,7 +47,11 @@ inline constexpr std::size_t kSeasonPassRowCapacity = 256;
 /** Held pursuits are unequipped character instances. */
 inline constexpr std::size_t kHeldPursuitCapacity = 333;
 inline constexpr std::size_t kPursuitObjectiveCapacity = 7;
-/** Sources one unlockValues request reads: a 4-byte header and nine 4-byte sources fill it. */
+/**
+ * Sources per unlockValues request, a chosen capacity. The fixed block offsets bound it: the
+ * request block ends where the response block begins, which leaves room after the request header
+ * for a 4-byte count and nine 4-byte sources.
+ */
 inline constexpr std::size_t kUnlockReadCapacity = 9;
 /** An item whose definition names no installed bucket. */
 inline constexpr std::uint8_t kNoBucket = 0xFF;
@@ -53,7 +60,7 @@ inline constexpr std::uint8_t kUnequipped = 0xFF;
 
 // --- Enumerations ---
 
-/** Each opcode the game serves sets the capability bit at its own value. */
+/** The game advertises each opcode it serves by setting the capability bit at its value. */
 enum class Opcode : std::uint32_t {
     none,
     hello,
@@ -75,7 +82,7 @@ enum class Opcode : std::uint32_t {
 };
 static_assert(static_cast<std::uint32_t>(Opcode::count) <= 64);
 
-/** Transport outcome of one request; a mutation's own outcome is its receipt. */
+/** Transport outcome of one request. A mutation's own outcome is in its receipt. */
 enum class Status : std::uint32_t { none, ok, invalid, refused };
 
 /** Unknown means the game holds no receipt with that id in this process. */
@@ -85,6 +92,11 @@ enum class ReceiptState : std::uint32_t {
     deferred,
     refused,
     published,
+    /**
+     * The game saved the change but could not send its frame, so the client resyncs the account.
+     * A grant ends at that step: the rest of its quantity is never granted, and changedRows counts
+     * the rows its steps changed, not the quantity they granted.
+     */
     committedUnpublished,
 };
 
@@ -93,13 +105,13 @@ enum class Wait : std::uint32_t { none, publicationPeer, accountResync, catalog 
 
 enum class InventoryScope : std::uint8_t { profile, characterItem, characterStack };
 
-/** What one source reads; zero is never valid, so unused sources stay zero. */
+/** What one source reads. Zero is never valid, so an unused source is all zero. */
 enum class UnlockKind : std::uint8_t { flag = 1, value };
 
-/** Saved bank of one source, bound from the installed slot tables; a value names no profile row. */
+/** The saved bank one source reads. The profile bank holds only flags. */
 enum class UnlockBank : std::uint8_t { account = 1, profile, character };
 
-/** Invalid: the bank cannot hold this kind or the index is outside its capacity. */
+/** Invalid when the bank cannot hold that kind or the index is outside its capacity. */
 enum class UnlockReadState : std::uint8_t { invalid, known };
 
 /** Why a held pursuit's completion stands where it does, in the game's priority order. */
@@ -118,7 +130,7 @@ enum class PursuitReason : std::uint16_t {
     externalValue,
 };
 
-/** The game catalogs that finished loading. */
+/** One bit per game catalog that has finished loading. */
 enum Readiness : std::uint32_t {
     readyItems = 1,
     readyItemDetails = 2,
@@ -197,6 +209,10 @@ static_assert(offsetof(Context, characterSoid) == 8 && offsetof(Context, content
 
 // --- Request payloads ---
 
+/**
+ * quantity must be positive and no more than the account can hold of the item at once, which for
+ * an inventory item is its own and recovery buckets. A larger one is refused as "quantity".
+ */
 struct GrantItemRequest final {
     std::uint32_t itemHash{};
     std::uint32_t quantity{};
@@ -204,8 +220,8 @@ struct GrantItemRequest final {
 static_assert(sizeof(GrantItemRequest) == 8 && offsetof(GrantItemRequest, quantity) == 4);
 
 /**
- * Quantity zero removes the row; instanceSoid is zero for stacks without their own item.
- * A character row belongs to the expected context's character.
+ * A quantity of zero removes the row. instanceSoid is zero for plain profile rows and character
+ * stacks. A character row belongs to the expected context's character.
  */
 struct SetQuantityRequest final {
     InventoryScope scope{};
@@ -232,8 +248,8 @@ static_assert(sizeof(SetSeasonalExperienceRequest) == 8
               && offsetof(SetSeasonalExperienceRequest, replacement) == 4);
 
 /**
- * Names one pass row for a claim or a claim reset. The row index is the native claim index;
- * the item hash must still match it.
+ * Names one pass row for a claim or a claim reset. rowIndex is the native claim index, and
+ * itemHash must match the item that row grants.
  */
 struct SeasonPassRowRequest final {
     std::uint16_t rowIndex{};
@@ -252,7 +268,7 @@ struct UnlockSource final {
 static_assert(sizeof(UnlockSource) == 4 && offsetof(UnlockSource, bank) == 1
               && offsetof(UnlockSource, index) == 2);
 
-/** Sources after count stay zero. */
+/** Sources after count must be zero. */
 struct UnlockValuesRequest final {
     std::uint16_t count{};
     std::uint16_t reserved{};
@@ -262,7 +278,10 @@ static_assert(sizeof(UnlockValuesRequest) == 40);
 static_assert(offsetof(UnlockValuesRequest, reserved) == 2
               && offsetof(UnlockValuesRequest, sources) == 4);
 
-/** One held pursuit's objective and the saved row value the editor read; a flag reads 0 or 1. */
+/**
+ * Sets the saved row one objective of a held pursuit reads. expected is the value the editor read;
+ * a flag reads 0 or 1.
+ */
 struct SetPursuitObjectiveRequest final {
     std::uint64_t instanceSoid{};
     std::uint32_t itemHash{};
@@ -303,8 +322,9 @@ inline constexpr std::size_t kRequestPayloadBytes =
                 sizeof(SetPursuitObjectiveRequest),
                 sizeof(CompletePursuitObjectivesRequest)});
 static_assert(kRequestPayloadBytes == 40);
-static_assert(sizeof(UnlockValuesRequest) == kRequestPayloadBytes,
-              "kUnlockReadCapacity sources fill the request payload");
+// The unlock read is the largest request, so its capacity sets the payload size. The response
+// block's fixed offset, asserted with the mapping below, keeps that payload from growing.
+static_assert(sizeof(UnlockValuesRequest) == kRequestPayloadBytes);
 
 /** @return The payload size a request with this opcode carries; zero for those with none. */
 [[nodiscard]] constexpr std::size_t request_bytes(Opcode opcode) noexcept {
@@ -343,7 +363,7 @@ static_assert(offsetof(CharacterEntry, characterClass) == 8
               && offsetof(CharacterEntry, selected) == 9 && offsetof(CharacterEntry, reserved) == 10
               && offsetof(CharacterEntry, reserved2) == 12);
 
-/** gameStarted names the game process instance; receipts do not outlive it. */
+/** gameStarted identifies the game process instance. Receipts do not outlive it. */
 struct Hello final {
     std::uint32_t protocolVersion{};
     std::uint32_t readiness{};
@@ -538,14 +558,14 @@ static_assert(offsetof(PursuitSnapshot, reserved) == 2 && offsetof(PursuitSnapsh
               && offsetof(PursuitSnapshot, investmentRevision) == 8
               && offsetof(PursuitSnapshot, held) == 16);
 
-/** One mutation's retained outcome; every field after operationId is zero while unknown. */
+/** One mutation's retained outcome. Every field after operationId is zero for an unknown id. */
 struct Receipt final {
     std::uint64_t operationId{};
     Opcode opcode{};
     ReceiptState state{};
     std::uint32_t reserved{};
     Wait wait{};
-    /** Family-4 version of the frame that published the operation. */
+    /** Family-4 version of the last frame the operation published. */
     std::int32_t family4Version{};
     std::uint32_t changedRows{};
     /** Server GetTickCount64 values; finishedTick stays zero while the receipt is pending. */

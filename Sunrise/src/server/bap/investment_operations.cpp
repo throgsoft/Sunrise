@@ -3,7 +3,6 @@
 #include <Windows.h>
 
 #include <algorithm>
-#include <limits>
 #include <mutex>
 #include <new>
 #include <shared_mutex>
@@ -26,8 +25,8 @@ using KindRequest = std::variant_alternative_t<static_cast<std::size_t>(kind), I
 static_assert(std::variant_size_v<InvestmentRequest>
               == static_cast<std::size_t>(InvestmentOperationKind::completePursuitObjectives) + 1);
 static_assert(std::is_same_v<KindRequest<InvestmentOperationKind::grantItem>, GrantItemOperation>);
-static_assert(std::is_same_v<KindRequest<InvestmentOperationKind::setQuantity>,
-                             state::account::inventory::QuantityEdit>);
+static_assert(
+    std::is_same_v<KindRequest<InvestmentOperationKind::setQuantity>, state::QuantityEdit>);
 static_assert(std::is_same_v<KindRequest<InvestmentOperationKind::setSeasonalExperience>,
                              SeasonalExperienceOperation>);
 static_assert(std::is_same_v<KindRequest<InvestmentOperationKind::claimSeasonPassReward>,
@@ -44,17 +43,20 @@ struct RetainedOperation {
     InvestmentOperation operation{};
     std::uint32_t editorPid{};
     InvestmentReceipt receipt{};
+    /** Quantity the grant's earlier steps have already published. */
+    std::uint32_t grantedQuantity{};
 };
 
 /**
- * Every receipt an editor has not acknowledged, oldest first. Guarded by the session lock.
- * Each entry is one explicit editor action, acknowledged once read finished. A dropped link
- * refuses what is still pending, and a connecting link forgets the receipts of exited editors,
- * so the table holds no count of its own; only the allocator refuses an entry.
+ * Every receipt an editor has not yet acknowledged, oldest first. Guarded by the session lock.
+ * Each entry is one explicit editor action, which the editor acknowledges after reading it
+ * finished. A dropped link refuses whatever is still pending and a connecting link forgets the
+ * receipts of exited editors, so the table needs no capacity of its own; only a failed allocation
+ * refuses an entry.
  */
 std::vector<RetainedOperation> g_operations{};
 
-/** @return True once the receipt can no longer change. */
+/** @return True for a final state, which never changes again. */
 [[nodiscard]] bool finished(InvestmentReceiptState state) noexcept {
     return state == InvestmentReceiptState::refused || state == InvestmentReceiptState::published
            || state == InvestmentReceiptState::committedUnpublished;
@@ -81,8 +83,8 @@ std::vector<RetainedOperation> g_operations{};
 }
 
 /**
- * Copies a receipt, naming what a pending operation waits on now: no peer of its account can
- * run it, or that peer must resync first. Caller owns the session lock.
+ * Copies a receipt for the editor. A pending operation reads as deferred while no peer of its
+ * account can run it, or while that peer must resync first. Caller owns the session lock.
  */
 [[nodiscard]] InvestmentReceipt present(const RetainedOperation& retained) noexcept {
     InvestmentReceipt receipt = retained.receipt;
@@ -100,7 +102,7 @@ std::vector<RetainedOperation> g_operations{};
     return receipt;
 }
 
-/** Moves a receipt, stamping when it finished. */
+/** Applies a transition to a receipt and stamps the finish time once it is final. */
 void apply_transition(InvestmentReceipt& receipt, const InvestmentTransition& transition) noexcept {
     receipt.state = transition.state;
     receipt.wait = transition.wait;
@@ -110,7 +112,24 @@ void apply_transition(InvestmentReceipt& receipt, const InvestmentTransition& tr
     receipt.finishedTick = finished(transition.state) ? GetTickCount64() : 0;
 }
 
-/** Logs one receipt as it stands after a stage of its life. */
+/**
+ * Merges a later step into a grant that has already published part of its quantity. Changed rows
+ * accumulate, and a refused step finishes the grant as published with the refusal reason,
+ * because the earlier steps stay granted.
+ */
+[[nodiscard]] InvestmentTransition continue_grant(const InvestmentReceipt& receipt,
+                                                  InvestmentTransition step) noexcept {
+    step.changedRows += receipt.changedRows;
+    if (step.family4Version == 0) {
+        step.family4Version = receipt.family4Version;
+    }
+    if (step.state == InvestmentReceiptState::refused) {
+        step.state = InvestmentReceiptState::published;
+    }
+    return step;
+}
+
+/** Logs a receipt as it stands after one step, such as submit, execute or withdraw. */
 void report_receipt(const char* stage, const InvestmentReceipt& receipt) noexcept {
     core::log::writef(core::log::Channel::server,
                       receipt.state == InvestmentReceiptState::committedUnpublished
@@ -128,17 +147,29 @@ void report_receipt(const char* stage, const InvestmentReceipt& receipt) noexcep
                       static_cast<unsigned>(receipt.changedRows));
 }
 
-/** @return True while the item tables an inventory grant or edit resolves through still load. */
+/**
+ * Stops one pending operation with a refusal. A grant that already published some steps finishes
+ * as published with the refusal reason. Caller owns the session lock.
+ */
+void stop_pending(RetainedOperation& entry, const char* reason, const char* stage) noexcept {
+    const InvestmentTransition refusal = refused_transition(reason);
+    apply_transition(entry.receipt,
+                     entry.grantedQuantity != 0 ? continue_grant(entry.receipt, refusal) : refusal);
+    report_receipt(stage, entry.receipt);
+}
+
+/** @return True while an item table that inventory grants and edits resolve through is loading. */
 [[nodiscard]] bool inventory_catalogs_loading() noexcept {
     return !state::build_data::item_definitions_ready()
            || !state::build_data::configured_item_details_ready()
            || !state::build_data::inventory_bucket_descriptors_ready();
 }
 
-/** @return Queued while the live account still is the one the editor read, else a refusal. */
+/** @return Queued when the live account, character and content still match the target. */
 [[nodiscard]] InvestmentTransition check_target(const InvestmentTarget& target) noexcept {
-    const state::AccountState account = state::account_snapshot();
-    if (!state::account::valid(account)) {
+    state::AccountIdentity account{};
+    std::uint64_t revision = 0;
+    if (!state::account_identity(account, revision)) {
         return refused_transition("account_state");
     }
     if (account.primarySoid != target.accountSoid) {
@@ -154,86 +185,86 @@ void report_receipt(const char* stage, const InvestmentReceipt& receipt) noexcep
     return {};
 }
 
-/** A grant names an installed item, a positive quantity and an inventory State can fill. */
+/**
+ * A grant must name an installed item that State can route, and a positive quantity its
+ * destination can hold at once.
+ */
 [[nodiscard]] InvestmentTransition check_request(const GrantItemOperation& request,
                                                  const InvestmentTarget& /*target*/) noexcept {
     if (inventory_catalogs_loading()) {
         return deferred_transition(InvestmentWait::catalog);
     }
-    state::build_data::items::Definition item{};
-    if (!state::build_data::find_item_definition_hash(request.definitionHash, item)) {
-        return refused_transition("item_definition");
-    }
-    if (request.quantity == 0
-        || request.quantity
-               > static_cast<std::uint32_t>((std::numeric_limits<std::int32_t>::max)())) {
-        return refused_transition("quantity");
-    }
-    // The grant path places every routable item and refuses an instance asked for more than once.
-    return state::item_grant_route(item.definitionIndex) == state::ItemGrantRoute::unavailable
-               ? refused_transition("item_route")
-               : InvestmentTransition{};
-}
-
-/** An edit names an installed item and a quantity State can hold. */
-[[nodiscard]] InvestmentTransition
-check_request(const state::account::inventory::QuantityEdit& edit,
-              const InvestmentTarget& /*target*/) noexcept {
-    if (inventory_catalogs_loading()) {
-        return deferred_transition(InvestmentWait::catalog);
-    }
-    if (edit.quantity < 0) {
-        return refused_transition("quantity");
-    }
-    state::build_data::items::Definition item{};
-    if (!state::build_data::find_item_definition_hash(edit.definitionHash, item)) {
-        return refused_transition("item_definition");
-    }
-    return {};
-}
-
-/** State compares the expected total when the replacement runs; only its range is static. */
-[[nodiscard]] InvestmentTransition check_request(const SeasonalExperienceOperation& request,
-                                                 const InvestmentTarget& /*target*/) noexcept {
-    return request.replacement < 0 ? refused_transition("experience_range")
-                                   : InvestmentTransition{};
-}
-
-/** A pass operation names an installed row by its index and the item it grants. */
-[[nodiscard]] InvestmentTransition check_season_pass_row(std::uint16_t rewardIndex,
-                                                         std::uint32_t itemHash) noexcept {
-    if (!state::build_data::season_pass_ready()) {
-        return deferred_transition(InvestmentWait::catalog);
-    }
-    state::build_data::season_pass::Reward reward{};
-    if (!state::build_data::find_season_pass_reward(rewardIndex, reward)) {
-        return refused_transition("reward_index");
-    }
-    if (reward.itemHash != itemHash) {
-        return refused_transition("reward_hash");
-    }
-    return {};
-}
-
-/** A claim resolves its reward too; the opcode-2400 rules run when the claim does. */
-[[nodiscard]] InvestmentTransition check_request(const SeasonPassClaimOperation& request,
-                                                 const InvestmentTarget& /*target*/) noexcept {
+    // Routing and granting both read the reward graph, as a claim does.
     if (state::build_data::reward_definitions_unsupported()) {
         return refused_transition("rewards_unsupported");
     }
     if (!state::build_data::reward_definitions_ready()) {
         return deferred_transition(InvestmentWait::catalog);
     }
+    state::build_data::items::Definition item{};
+    if (!state::build_data::find_item_definition_hash(request.definitionHash, item)) {
+        return refused_transition("item_definition");
+    }
+    // The grant path can place any routable item, one instance or stack per step.
+    if (state::item_grant_route(item.definitionIndex) == state::ItemGrantRoute::unavailable) {
+        return refused_transition("item_route");
+    }
+    // Each step takes a poll ahead of the peer's other pushes, and past this capacity a step only
+    // evicts or drops an earlier one. The remainder is checked again before every step.
+    const std::int32_t capacity = state::item_grant_capacity(item.definitionIndex);
+    return request.quantity == 0 || request.quantity > static_cast<std::uint32_t>(capacity)
+               ? refused_transition("quantity")
+               : InvestmentTransition{};
+}
+
+/** A quantity edit must name an installed item and a quantity State can store. */
+[[nodiscard]] InvestmentTransition check_request(const state::QuantityEdit& edit,
+                                                 const InvestmentTarget& /*target*/) noexcept {
+    if (inventory_catalogs_loading()) {
+        return deferred_transition(InvestmentWait::catalog);
+    }
+    const char* reason = nullptr;
+    return state::check_quantity_edit(edit, &reason) ? InvestmentTransition{}
+                                                     : refused_transition(reason);
+}
+
+/** Only the range is checked here. State compares the expected total when the edit runs. */
+[[nodiscard]] InvestmentTransition check_request(const SeasonalExperienceOperation& request,
+                                                 const InvestmentTarget& /*target*/) noexcept {
+    const char* reason = nullptr;
+    return state::check_seasonal_experience(request.replacement, &reason)
+               ? InvestmentTransition{}
+               : refused_transition(reason);
+}
+
+/**
+ * A pass operation must name an installed row that still grants the expected item and that the
+ * earned-perk walk does not grant. Telling the walk's rows apart reads the reward graph.
+ */
+[[nodiscard]] InvestmentTransition check_season_pass_row(std::uint16_t rewardIndex,
+                                                         std::uint32_t itemHash) noexcept {
+    if (state::build_data::reward_definitions_unsupported()) {
+        return refused_transition("rewards_unsupported");
+    }
+    const char* reason = nullptr;
+    return state::check_season_pass_reward(rewardIndex, itemHash, &reason)
+               ? InvestmentTransition{}
+               : state_refusal_transition(reason);
+}
+
+/** The opcode-2400 claim rules run when the claim does. */
+[[nodiscard]] InvestmentTransition check_request(const SeasonPassClaimOperation& request,
+                                                 const InvestmentTarget& /*target*/) noexcept {
     return check_season_pass_row(request.rewardIndex, request.itemHash);
 }
 
-/** A reset clears the row's claim flag alone. */
+/** A reset only clears the row's claim flag. */
 [[nodiscard]] InvestmentTransition check_request(const SeasonPassResetOperation& request,
                                                  const InvestmentTarget& /*target*/) noexcept {
     return check_season_pass_row(request.rewardIndex, request.itemHash);
 }
 
-/** A pursuit edit names an installed item; State checks the held copy when the edit runs. */
+/** A pursuit edit must name an installed item. State checks the held instance when it runs. */
 [[nodiscard]] InvestmentTransition check_pursuit_item(std::uint32_t itemHash) noexcept {
     if (state::build_data::pursuit_catalog_unsupported()) {
         return refused_transition("pursuits_unsupported");
@@ -249,13 +280,13 @@ check_request(const state::account::inventory::QuantityEdit& edit,
                : refused_transition("item_definition");
 }
 
-/** The objective, its source and the value it replaces are State's to check. */
+/** State checks the objective, its saved row and the expected value when the edit runs. */
 [[nodiscard]] InvestmentTransition check_request(const ObjectiveProgressOperation& request,
                                                  const InvestmentTarget& /*target*/) noexcept {
     return check_pursuit_item(request.itemHash);
 }
 
-/** Which objectives are incomplete is State's to decide. */
+/** State decides which objectives are incomplete when the edit runs. */
 [[nodiscard]] InvestmentTransition check_request(const ObjectiveCompletionOperation& request,
                                                  const InvestmentTarget& /*target*/) noexcept {
     return check_pursuit_item(request.itemHash);
@@ -269,20 +300,20 @@ check_operation_request(const InvestmentOperation& operation) noexcept {
         operation.request);
 }
 
-/** @return Queued when a submission may wait for its peer's poll; the peer follows the target. */
+/** @return Queued when the submission can wait for a poll from a peer bound to its account. */
 [[nodiscard]] InvestmentTransition check_submission(const InvestmentOperation& operation) noexcept {
     const InvestmentTransition verdict = check_target(operation.target);
     if (verdict.state != InvestmentReceiptState::queued) {
         return verdict;
     }
-    // Every change publishes through a peer of the account, so none commits without one.
+    // Every change publishes through a peer bound to the account, so refuse when there is none.
     if (publication_peer(operation.target.accountSoid) == nullptr) {
         return refused_transition("publication_peer");
     }
     return check_operation_request(operation);
 }
 
-/** Retains one entry; only a failed allocation refuses it, and nothing is then retained. */
+/** @return False only when allocation fails, in which case nothing is retained. */
 [[nodiscard]] bool retain_operation(const RetainedOperation& entry) noexcept {
     try {
         g_operations.push_back(entry);
@@ -294,12 +325,12 @@ check_operation_request(const InvestmentOperation& operation) noexcept {
 
 } // namespace
 
-/** The request alternatives follow the kinds, so the alternative's position is the kind. */
+/** The request's variant index is its kind; the static_asserts above tie the two orders. */
 InvestmentOperationKind investment_operation_kind(const InvestmentOperation& operation) noexcept {
     return static_cast<InvestmentOperationKind>(operation.request.index());
 }
 
-/** State names `not_ready` only while a catalog it needs is still unpublished. */
+/** State refuses with `not_ready` only while a catalog it needs is unpublished, so that waits. */
 InvestmentTransition state_refusal_transition(const char* reason) noexcept {
     if (reason == nullptr) {
         return refused_transition("transaction");
@@ -308,7 +339,7 @@ InvestmentTransition state_refusal_transition(const char* reason) noexcept {
                                                    : refused_transition(reason);
 }
 
-/** The target is checked before the request, so an editor bound to stale context learns that. */
+/** Checks the target first, so an editor bound to a stale context is told that before anything. */
 InvestmentTransition check_investment_operation(const InvestmentOperation& operation) noexcept {
     const InvestmentTransition verdict = check_target(operation.target);
     if (verdict.state != InvestmentReceiptState::queued) {
@@ -317,56 +348,58 @@ InvestmentTransition check_investment_operation(const InvestmentOperation& opera
     return check_operation_request(operation);
 }
 
-/** Operations run in submission order per account, so a dependent edit reads its predecessor. */
+/** Operations run in submission order per account, so each edit sees the ones before it. */
 bool next_investment_operation_locked(std::uint64_t accountSoid,
                                       InvestmentOperation& operation) noexcept {
     for (const RetainedOperation& entry : g_operations) {
         if (!finished(entry.receipt.state) && entry.operation.target.accountSoid == accountSoid) {
             operation = entry.operation;
+            if (auto* grant = std::get_if<GrantItemOperation>(&operation.request)) {
+                grant->quantity -= entry.grantedQuantity;
+            }
             return true;
         }
     }
     return false;
 }
 
-/** Logs only a change, so an operation waiting across polls logs once. */
+/** Logs only state or wait changes, so waiting or granting in steps does not log every poll. */
 void record_investment_transition_locked(std::uint64_t operationId,
                                          const InvestmentTransition& transition) noexcept {
     RetainedOperation* retained = find_operation(operationId);
     if (retained == nullptr || finished(retained->receipt.state)) {
         return;
     }
+    InvestmentTransition merged = transition;
+    if (retained->grantedQuantity != 0) {
+        merged = continue_grant(retained->receipt, transition);
+    }
+    retained->grantedQuantity += transition.grantedQuantity;
     const bool changed =
-        retained->receipt.state != transition.state || retained->receipt.wait != transition.wait;
-    apply_transition(retained->receipt, transition);
+        retained->receipt.state != merged.state || retained->receipt.wait != merged.wait;
+    apply_transition(retained->receipt, merged);
     if (changed) {
         report_receipt("execute", retained->receipt);
     }
 }
 
-/** Receipts are process-local; nothing survives a game exit. */
+/** Receipts live only in this process, so none survive a game exit. */
 void release_investment_operations_locked() noexcept {
     std::vector<RetainedOperation>{}.swap(g_operations);
 }
 
-/** Reads the account and its revision together, then the peers bound to it. */
+/** Reads the account keys and their revision together, then the peers bound to them. */
 bool investment_context(InvestmentContext& output) noexcept {
     output = {};
     const std::shared_lock lock(session_lock());
-    std::uint64_t revision = 0;
-    const state::AccountState account = state::account_snapshot(revision);
-    if (!state::account::valid(account)) {
+    if (!state::account_identity(output.account, output.revision)) {
+        output = {};
         return false;
     }
+    const state::AccountIdentity& account = output.account;
     output.live = {account.primarySoid,
                    state::account::selected_character_soid(account),
                    state::build_data::content_hash()};
-    output.characterCount = (std::min)(account.characterCount, output.characters.size());
-    for (std::size_t index = 0; index < output.characterCount; ++index) {
-        const state::CharacterState& character = account.characters[index];
-        output.characters[index] = {character.soid, character.characterClass, character.selected};
-    }
-    output.revision = revision;
     output.peerPresent = has_active_family4_peer();
     const Session* peer = publication_peer(account.primarySoid);
     output.peerOwnsAccount = peer != nullptr;
@@ -374,14 +407,14 @@ bool investment_context(InvestmentContext& output) noexcept {
     return true;
 }
 
-/** A duplicate identity never runs again: it answers with the receipt already retained. */
+/** A repeated id never runs again; it returns the receipt already retained. */
 InvestmentSubmission submit_investment_operation(const InvestmentOperation& operation,
                                                  std::uint32_t editorPid,
                                                  InvestmentReceipt& receipt) noexcept {
     const std::lock_guard lock(session_lock());
     if (const RetainedOperation* retained = find_operation(operation.id)) {
         receipt = present(*retained);
-        return retained->operation == operation ? InvestmentSubmission::existing
+        return retained->operation == operation ? InvestmentSubmission::accepted
                                                 : InvestmentSubmission::reused;
     }
     RetainedOperation entry{};
@@ -429,7 +462,7 @@ bool acknowledge_investment_receipt(std::uint64_t operationId,
     return true;
 }
 
-/** The lane runs under the same lock, so a withdrawal never races a commit. */
+/** The operation lane runs under the same session lock, so a withdrawal never races a commit. */
 bool withdraw_investment_operation(std::uint64_t operationId, InvestmentReceipt& receipt) noexcept {
     const std::lock_guard lock(session_lock());
     RetainedOperation* retained = find_operation(operationId);
@@ -438,25 +471,23 @@ bool withdraw_investment_operation(std::uint64_t operationId, InvestmentReceipt&
         return false;
     }
     if (!finished(retained->receipt.state)) {
-        apply_transition(retained->receipt, refused_transition("withdrawn"));
-        report_receipt("withdraw", retained->receipt);
+        stop_pending(*retained, "withdrawn", "withdraw");
     }
     receipt = present(*retained);
     return true;
 }
 
-/** Runs under the lane's lock, so no pending operation is executing while it is refused. */
+/** Holds the session lock the operation lane runs under, so nothing refused is mid-execution. */
 void refuse_pending_investment_operations(const char* reason) noexcept {
     const std::lock_guard lock(session_lock());
     for (RetainedOperation& entry : g_operations) {
         if (!finished(entry.receipt.state)) {
-            apply_transition(entry.receipt, refused_transition(reason));
-            report_receipt("disconnect", entry.receipt);
+            stop_pending(entry, reason, "disconnect");
         }
     }
 }
 
-/** A live editor keeps its receipts, so an operation it reads as unknown never reached here. */
+/** A running editor keeps its receipts, so an id it reads as unknown never reached the game. */
 void forget_exited_editor_receipts(
     bool (*editorExited)(std::uint32_t editorPid) noexcept) noexcept {
     const std::lock_guard lock(session_lock());

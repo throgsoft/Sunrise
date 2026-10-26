@@ -13,7 +13,7 @@ namespace {
 namespace objectives = build_data::objectives;
 namespace pursuits = build_data::pursuits;
 
-/** The saved completion gate; an absent reference reads as zero. */
+/** The saved completion gate value. An absent reference reads as zero. */
 struct CompletionValue {
     std::int32_t value{};
     bool known{true};
@@ -71,8 +71,8 @@ inspect_pursuit_objective(const objectives::Definition& objective,
 }
 
 /**
- * Evaluates every declared objective, then the aggregate the contract's mode decides.
- * An unknown objective leaves the aggregate determinate when a known one already settles it.
+ * Evaluates every declared objective, then the aggregate under the contract's all-or-any mode.
+ * An unknown objective still leaves the aggregate determinate when a known one settles it.
  */
 void inspect_pursuit_objectives(const pursuits::Definition& definition,
                                 const reward_resolution::Context& context,
@@ -130,14 +130,14 @@ read_completion_value(const pursuits::ValueReference& reference,
     return result;
 }
 
-/** Only authored absence removes the dependency on an operation body. */
+/** Only an authored absent reference needs no operation body. */
 [[nodiscard]] bool
 absent_pursuit_operation(const pursuits::OperationReference& operation) noexcept {
     return operation.index == pursuits::kAbsent
            && operation.availability == pursuits::OperationAvailability::absent;
 }
 
-/** The existing saved-value writer supports account and selected-character value banks. */
+/** True for an absent destination, or a value row in the account or character bank. */
 [[nodiscard]] bool saved_pursuit_destination(const pursuits::ValueReference& reference) noexcept {
     if (reference.index == pursuits::kAbsent) {
         return !reference.bound;
@@ -163,7 +163,7 @@ objective_source_reason(const PursuitCompletionStatus& status) noexcept {
                     : PursuitCompletionReason::objectiveSourceUnavailable;
 }
 
-/** Effect refusal stays visible even when every objective is independently complete. */
+/** Effect problems come first, so they stay visible even when every objective is complete. */
 [[nodiscard]] PursuitCompletionReason
 pursuit_completion_reason(const PursuitCompletionStatus& status,
                           const pursuits::Definition& definition,
@@ -207,7 +207,7 @@ inspect_pursuit_completion(const pursuits::Definition& definition,
     }
     inspect_pursuit_objectives(definition, context, status);
     const CompletionValue completion = read_completion_value(definition.completionValue, context);
-    // A known false conjunct settles eligibility without inventing the other source's value.
+    // Either condition known to fail decides the result, even when the other cannot be read.
     status.conditionsKnown = (status.objectivesKnown && completion.known)
                              || (status.objectivesKnown && !status.objectivesComplete)
                              || (completion.known && completion.value != 0);

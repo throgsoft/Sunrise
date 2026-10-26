@@ -56,10 +56,10 @@ selected_character(const state::AccountState& account) noexcept {
     return nullptr;
 }
 
-/** Log stage every refused world-reward publication reports under. */
+/** Log stage of every refused world-reward publication. */
 constexpr const char* kWorldRewardStage = "world_publish";
 
-/** Grants and publishes the oldest world reward, retiring one State can never grant. */
+/** Grants and publishes the oldest world reward. One State can never grant is retired. */
 [[nodiscard]] bool consume_world_reward(const WorldRewardRequest& request,
                                         Session& session,
                                         Scratch& scratch,
@@ -600,11 +600,11 @@ bool consume_deferred(Session& session,
             session, scratch, response, written, touchesScratch)) {
         return true;
     }
-    // Editor operations run after any XP toast, so a replaced total never follows a stale gain.
+    // Editor operations run after any queued XP toast, so no stale gain follows a replaced total.
     if (consume_investment_operation(session, scratch, response, written, touchesScratch)) {
         return true;
     }
-    // A grant committed without a frame holds later incrementals until the resync lands.
+    // A grant committed without a frame armed a resync, which must be sent before any increment.
     if (session.accountResyncArmed) {
         return false;
     }

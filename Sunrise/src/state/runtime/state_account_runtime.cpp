@@ -587,6 +587,13 @@ AccountState account_snapshot(std::uint64_t& revision) noexcept {
     return investment::store::account();
 }
 
+/** Reads the account and character keys and their change generation under one lock. */
+bool account_identity(AccountIdentity& output, std::uint64_t& revision) noexcept {
+    const std::lock_guard lock(investment::store::g_mutex);
+    revision = investment::store::g_session.revision;
+    return investment::store::read_account_identity(output);
+}
+
 /** Grants each character the other 2 subclasses of its equipped subclass's class. */
 bool ensure_character_subclasses() noexcept {
     // Index of the subclass slot in the authored equipment array.

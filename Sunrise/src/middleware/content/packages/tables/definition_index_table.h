@@ -372,6 +372,19 @@ inline constexpr std::uint32_t kObjectiveTableClass = 0x8080775BU;
 inline constexpr std::uint32_t kObjectiveRowClass = 0x8080775FU;
 inline constexpr std::size_t kObjectiveRowStride = 0xA0;
 inline constexpr std::size_t kObjectiveCompletionValueOffset = 0x30;
+/** Completion control bytes of one objective row: optional, then counts down. */
+inline constexpr std::size_t kObjectiveOptionalOffset = 0x28;
+inline constexpr std::size_t kObjectiveCountsDownOffset = 0x2C;
+/** Expression whose value the native evaluator subtracts from an objective's completion value. */
+inline constexpr std::size_t kObjectiveTargetAdjustmentField = 0x38;
+/**
+ * The investment root holds the operation table at this slot. Pursuit completion references index
+ * its rows, and reward entries name rows of the same table as supplemental rows.
+ */
+inline constexpr std::size_t kOperationTableSlot = 84;
+/** Installed operation table class and row size. */
+inline constexpr std::uint32_t kOperationTableClass = 0x808078BBU;
+inline constexpr std::size_t kOperationRowStride = 0x120;
 /** The investment root holds the socket entry list table at this slot. */
 inline constexpr std::size_t kSocketEntryListTableSlot = 97;
 /** The globals container names the investment root as its first child. */

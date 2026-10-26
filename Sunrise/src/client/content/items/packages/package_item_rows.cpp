@@ -122,15 +122,18 @@ bool build_item_rows(const reader::Source& source,
         std::uint32_t itemClass = 0;
         if (!reader::read_tag(
                 source, storage.scratch, row.targetTag, storage.definition, itemClass)) {
-            if (pursuitStorageReady) {
-                storage.pursuitBuild.unread(item.definitionIndex);
-            }
-            // The published catalog read this row before, so its reward waits for a retry; a row
-            // the catalog lacks stays pruned from both.
+            // The published catalog read this row before, so its reward and contract wait for a
+            // retry; a row the catalog lacks stays pruned from all three.
             state::build_data::items::Definition cataloged{};
-            if (rewardStorageReady
-                && state::build_data::find_item_definition_index(item.definitionIndex, cataloged)) {
+            const bool retryable =
+                state::build_data::find_item_definition_index(item.definitionIndex, cataloged);
+            if (rewardStorageReady && retryable) {
                 storage.rewardBuild.item_unread(item.definitionIndex);
+            }
+            if (pursuitStorageReady && retryable) {
+                storage.pursuitBuild.read_failed(item.definitionIndex);
+            } else if (pursuitStorageReady) {
+                storage.pursuitBuild.unread(item.definitionIndex);
             }
             continue;
         }
@@ -140,9 +143,10 @@ bool build_item_rows(const reader::Source& source,
             }
             continue;
         }
-        if (pursuitStorageReady
-            && (itemClass != tables::kItemDefinitionClass || !storage.pursuitBuild.item(item))) {
+        if (pursuitStorageReady && itemClass != tables::kItemDefinitionClass) {
             storage.pursuitBuild.unread(item.definitionIndex);
+        } else if (pursuitStorageReady && !storage.pursuitBuild.item(item)) {
+            storage.pursuitBuild.read_failed(item.definitionIndex);
         }
         if (rewardStorageReady && itemClass == tables::kItemDefinitionClass) {
             storage.rewardBuild.item(item.definitionIndex, item.definitionHash, storage.definition);
@@ -223,7 +227,7 @@ bool build_item_rows(const reader::Source& source,
         !needRewards
         || (rewardStorageReady && state::build_data::item_definitions_ready()
             && storage.rewardBuild.publish(state::build_data::item_definition_count()));
-    // Pursuit contracts settle on their own and never block the other item domains either.
+    // Pursuit contracts settle on their own and never block the other item domains.
     if (pursuitStorageReady) {
         storage.pursuitBuild.publish();
     }

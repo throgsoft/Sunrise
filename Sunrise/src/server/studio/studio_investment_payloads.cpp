@@ -9,6 +9,7 @@
 #include <span>
 
 #include "../../state/account/account_state.h"
+#include "../../state/account/inventory/occupied_bucket.h"
 #include "../../state/build_data/runtime.h"
 #include "../../state/runtime/pursuit_snapshot_runtime.h"
 #include "../../state/runtime/runtime.h"
@@ -21,7 +22,8 @@ namespace {
 
 namespace wire = middleware::studio::investment_wire;
 
-// The wire keeps its own capacities; each one equals the State capacity that owns it.
+// The wire header declares its own capacities, and each one must equal the State capacity that
+// owns it.
 static_assert(wire::kProfileRowCapacity == state::account::inventory::kProfileItemCapacity);
 static_assert(wire::kCharacterItemRecordCapacity
               == state::account::inventory::kCharacterItemCapacity
@@ -72,7 +74,7 @@ deliver(const Record& record, const wire::Context& context, InvestmentPayload pa
     return {target.accountSoid, target.characterSoid, target.contentHash};
 }
 
-/** @return The catalogs the editor's views and the operation checks resolve through. */
+/** @return A readiness bit for each catalog the editor's views and operation checks read. */
 [[nodiscard]] std::uint32_t catalog_readiness() noexcept {
     std::uint32_t readiness = 0;
     readiness |= state::build_data::item_definitions_ready() ? wire::readyItems : 0U;
@@ -95,11 +97,12 @@ deliver(const Record& record, const wire::Context& context, InvestmentPayload pa
     return publication;
 }
 
-/** @return The installed bucket the definition names, or kNoBucket. */
-[[nodiscard]] std::uint8_t bucket_of(std::uint32_t definitionHash) noexcept {
+/** @return The bucket a saved row occupies under its placement, or kNoBucket if unknown. */
+[[nodiscard]] std::uint8_t bucket_of(std::uint32_t definitionHash,
+                                     state::account::inventory::ItemPlacement placement) noexcept {
     state::build_data::items::Definition definition{};
     return state::build_data::find_item_definition_hash(definitionHash, definition)
-               ? definition.bucketId
+               ? state::account::inventory::occupied_bucket_id(definition, placement)
                : wire::kNoBucket;
 }
 
@@ -108,20 +111,7 @@ deliver(const Record& record, const wire::Context& context, InvestmentPayload pa
     return static_cast<std::uint8_t>(seen ? wire::itemSeen : 0U);
 }
 
-/** @return The selected character of the copy, or null when none is selected. */
-[[nodiscard]] const state::CharacterState*
-selected_character(const state::AccountState& account) noexcept {
-    const auto characters =
-        std::span(account.characters)
-            .first((std::min)(account.characterCount, account.characters.size()));
-    const auto selected =
-        std::find_if(characters.begin(), characters.end(), [](const state::CharacterState& entry) {
-            return entry.selected;
-        });
-    return selected == characters.end() ? nullptr : &*selected;
-}
-
-/** Copies every bucket the installed build routes; the unavailable id is never one of them. */
+/** Copies every bucket the installed build defines. The unavailable id never has a descriptor. */
 void append_buckets(wire::InventorySnapshot& snapshot) noexcept {
     std::size_t count = 0;
     for (std::size_t id = 0; id < wire::kBucketRecordCapacity; ++id) {
@@ -151,7 +141,8 @@ void append_profile(const state::AccountState& account,
         row.definitionHash = item.definitionHash;
         row.quantity = item.quantity;
         row.mutationSerial = item.mutationSerial;
-        row.bucketId = bucket_of(item.definitionHash);
+        row.bucketId =
+            bucket_of(item.definitionHash, state::account::inventory::ItemPlacement::authored);
         row.flags = seen_flag(item.seen);
     }
     snapshot.profileCount = static_cast<std::uint16_t>(count);
@@ -167,10 +158,7 @@ void append_profile(const state::AccountState& account,
     record.mutationSerial = item.mutationSerial;
     record.level = item.level;
     record.itemFlags = item.flags;
-    // A Lost Items resident is reported in the bucket it occupies, not its authored one.
-    record.bucketId = item.placement == state::account::inventory::ItemPlacement::lostItems
-                          ? state::build_data::inventory::buckets::kLostItemsBucketId
-                          : bucket_of(item.definitionHash);
+    record.bucketId = bucket_of(item.definitionHash, item.placement);
     record.equipmentSlot = equipmentSlot;
     record.socketPolicy = static_cast<std::uint8_t>(item.sockets.policy);
     const std::size_t plugCount = (std::min)(item.sockets.plugCount, record.plugs.size());
@@ -216,9 +204,7 @@ void append_stacks(const state::CharacterState& character,
         record.definitionHash = stack.definitionHash;
         record.quantity = stack.quantity;
         record.mutationSerial = stack.mutationSerial;
-        record.bucketId = stack.placement == state::account::inventory::ItemPlacement::lostItems
-                              ? state::build_data::inventory::buckets::kLostItemsBucketId
-                              : bucket_of(stack.definitionHash);
+        record.bucketId = bucket_of(stack.definitionHash, stack.placement);
     }
     snapshot.stackCount = static_cast<std::uint16_t>(count);
 }
@@ -241,7 +227,7 @@ void append_stacks(const state::CharacterState& character,
     return record;
 }
 
-/** @return The label a pursuit snapshot refusal travels as; State's own labels where they exist. */
+/** @return The wire label for a pursuit snapshot refusal, reusing State's labels where it can. */
 [[nodiscard]] const char* pursuit_refusal_label(state::PursuitSnapshotRefusal refusal) noexcept {
     switch (refusal) {
     case state::PursuitSnapshotRefusal::catalogUnavailable:
@@ -259,7 +245,7 @@ void append_stacks(const state::CharacterState& character,
     return "transaction";
 }
 
-/** State and the wire number the completion reasons alike; each is mapped by name. */
+/** Maps each reason by name, so the State and wire enums need not share values. */
 [[nodiscard]] wire::PursuitReason pursuit_reason(state::PursuitCompletionReason reason) noexcept {
     switch (reason) {
     case state::PursuitCompletionReason::contractUnavailable:
@@ -354,7 +340,7 @@ pursuit_objective(const state::PursuitObjectiveStatus& objective) noexcept {
     return wire::Opcode::none;
 }
 
-/** @return The wire wait; in-game presentation has none of its own. */
+/** @return The wire wait. An in-game presentation has no wire wait, so it maps to none. */
 [[nodiscard]] wire::Wait receipt_wait(bap::InvestmentWait wait) noexcept {
     switch (wait) {
     case bap::InvestmentWait::publicationPeer:
@@ -370,8 +356,8 @@ pursuit_objective(const state::PursuitObjectiveStatus& objective) noexcept {
 }
 
 /**
- * The wire names no wait for an in-game presentation the bound peer is still playing, and a
- * deferral must name one; such an operation runs on that peer's next poll, so it reads as queued.
+ * A wire deferral must name its wait, and the wire has none for an in-game presentation the peer
+ * is still showing. That operation runs on one of the peer's next polls, so it reads as queued.
  */
 [[nodiscard]] wire::ReceiptState receipt_state(bap::InvestmentReceiptState state,
                                                bap::InvestmentWait wait) noexcept {
@@ -437,7 +423,8 @@ pursuit_objective(const state::PursuitObjectiveStatus& objective) noexcept {
 }
 
 /**
- * Decodes the counted sources; an index outside its bank is left for State to answer unknown.
+ * Decodes the counted sources. An index outside its bank passes through, and State reads it as
+ * unknown.
  * @return False for a count, reserved field or source the request may not carry.
  */
 [[nodiscard]] bool decode_unlock_sources(
@@ -460,7 +447,7 @@ pursuit_objective(const state::PursuitObjectiveStatus& objective) noexcept {
 
 } // namespace
 
-/** An unreadable account leaves the context empty; Hello still names the instance it serves. */
+/** An unreadable account leaves the context empty, but Hello still names the game instance. */
 InvestmentAnswer encode_hello(std::uint64_t gameStarted,
                               std::uint64_t capabilities,
                               InvestmentPayload payload) noexcept {
@@ -471,11 +458,11 @@ InvestmentAnswer encode_hello(std::uint64_t gameStarted,
     hello.readiness = catalog_readiness();
     hello.capabilities = capabilities;
     hello.gameStarted = gameStarted;
-    const std::size_t count = (std::min)(live.characterCount, hello.characters.size());
+    const std::size_t count = (std::min)(live.account.characterCount, hello.characters.size());
     hello.characterCount = static_cast<std::uint32_t>(count);
     hello.publication = publication_flags(live);
     for (std::size_t index = 0; index < count; ++index) {
-        const bap::InvestmentCharacter& character = live.characters[index];
+        const state::CharacterIdentity& character = live.account.characters[index];
         wire::CharacterEntry& entry = hello.characters[index];
         entry.soid = character.soid;
         entry.characterClass = static_cast<std::uint8_t>(character.characterClass);
@@ -498,7 +485,7 @@ InvestmentAnswer encode_inventory_snapshot(InvestmentPayload payload) noexcept {
     if (!state::account::valid(*account)) {
         return refused("account_state");
     }
-    const state::CharacterState* character = selected_character(*account);
+    const state::CharacterState* character = state::account::selected_character(*account);
     if (character == nullptr) {
         return refused("selected_character");
     }
@@ -512,7 +499,7 @@ InvestmentAnswer encode_inventory_snapshot(InvestmentPayload payload) noexcept {
                    payload);
 }
 
-/** Rows carry the catalog's item, quantity and rank beside the saved flags State read with them. */
+/** Each row carries the catalog's item, quantity and rank beside the saved flags State read. */
 InvestmentAnswer encode_season_pass_snapshot(InvestmentPayload payload) noexcept {
     state::SeasonPassSnapshot pass{};
     const char* reason = nullptr;
@@ -557,7 +544,7 @@ InvestmentAnswer encode_pursuit_snapshot(InvestmentPayload payload) noexcept {
         payload);
 }
 
-/** Reads the selected character, as pursuit snapshots do; every value after count stays zero. */
+/** Reads the selected character's saved rows, as the pursuit snapshot does. Unused values are 0. */
 InvestmentAnswer encode_unlock_values(const wire::UnlockValuesRequest& request,
                                       InvestmentPayload payload) noexcept {
     std::array<state::unlocks::Instruction, wire::kUnlockReadCapacity> sources{};

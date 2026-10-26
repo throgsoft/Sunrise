@@ -31,7 +31,7 @@ struct HeldPursuitStatus {
     std::int32_t quantity{};
     std::int32_t mutationSerial{};
     std::uint32_t flags{};
-    /** Positive marks a bounty; its saved deadline is not available on this server. */
+    /** Positive marks a bounty. This server does not save the bounty's deadline. */
     std::int32_t lifetimeSeconds{};
     bool contractFound{};
     PursuitCompletionStatus completion{};

@@ -15,7 +15,7 @@ core::threading::SrwLock g_lock;
 Table<Row, kDefinitionCapacity> g_rows;
 Table<unlocks::Instruction, kInstructionCapacity> g_instructions;
 
-/** A per-item source is one external value read; no other row names an item value. */
+/** A per-item source must be one external value read, and only such a row names an item value. */
 [[nodiscard]] bool
 valid_row(const Row& row, std::size_t index, std::span<const unlocks::Instruction> bank) noexcept {
     if (row.definitionIndex != index || !rewards::fits(row.expression, bank)

@@ -16,14 +16,14 @@ inline constexpr std::size_t kDefinitionCapacity = 4096;
 /** The installed pursuit objective block supports seven displayed objectives. */
 inline constexpr std::size_t kObjectiveCapacity = 7;
 
-/** A native value reference and its independently resolved saved or computed source. */
+/** A native value reference and the saved or computed source it binds to, when bound. */
 struct ValueReference {
     std::uint16_t index{kAbsent};
     bool bound{};
     unlocks::Instruction source{};
 };
 
-/** Missing data is distinct from an authored empty operation reference. */
+/** Why an operation body is or is not available; missing data is not an authored absence. */
 enum class OperationAvailability : std::uint8_t {
     absent,
     missingTable,
@@ -36,7 +36,7 @@ struct OperationReference {
     OperationAvailability availability{OperationAvailability::absent};
 };
 
-/** Installed completion contract for one item, including explicitly unresolved effect edges. */
+/** The installed completion contract for one item. Unresolved effect edges are kept and marked. */
 struct Definition {
     std::uint16_t definitionIndex{kAbsent};
     std::uint32_t definitionHash{};
@@ -50,7 +50,7 @@ struct Definition {
     /** Objective-table indices; slots past objectiveCount stay zero. */
     std::array<std::uint16_t, kObjectiveCapacity> objectives{};
     std::uint8_t objectiveCount{};
-    /** Unless suppressed, absence removes the step; a present value is incremented by one. */
+    /** Unless suppressed, an absent value removes the step and a present one is incremented. */
     ValueReference completionValue;
     ValueReference completionContextValue;
     /** Native completion invokes the secondary reference before the primary reference. */

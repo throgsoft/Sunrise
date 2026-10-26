@@ -28,6 +28,8 @@ inline constexpr std::size_t kArtClassCapacity = 4;
 inline constexpr std::uint16_t kUnavailableSocketType = 0xFFFF;
 /** A signed material override key is empty at minus one. */
 inline constexpr std::int8_t kEmptyOverrideKey = -1;
+/** Native inventory bucket of pursuits, the quest items and bounties. */
+inline constexpr std::uint8_t kPursuitBucketId = 40;
 /** The installed pursuit objective block supports seven displayed objectives. */
 inline constexpr std::size_t kObjectiveCapacity = 7;
 /** All bits set marks an absent 16-bit item, objective, value or operation reference. */

@@ -35,7 +35,7 @@ struct InvestmentAnswer {
 /** Encodes the profile and the selected character's items from one saved account copy. */
 [[nodiscard]] InvestmentAnswer encode_inventory_snapshot(InvestmentPayload payload) noexcept;
 
-/** Encodes one coherent Season pass view, every catalog row evaluated without a draw. */
+/** Encodes one coherent Season pass view, with every catalog row evaluated without a draw. */
 [[nodiscard]] InvestmentAnswer encode_season_pass_snapshot(InvestmentPayload payload) noexcept;
 
 /** Encodes the selected character's held pursuits and their saved completion status. */
@@ -50,7 +50,7 @@ encode_unlock_values(const middleware::studio::investment_wire::UnlockValuesRequ
                      InvestmentPayload payload) noexcept;
 
 /**
- * Encodes a receipt bound to its operation's target; an empty receipt answers unknown.
+ * Encodes a receipt bound to its operation's target. An empty receipt encodes as unknown.
  * @param operationId The id the editor asked about, echoed even when no receipt is retained.
  */
 [[nodiscard]] InvestmentAnswer encode_receipt(std::uint64_t operationId,

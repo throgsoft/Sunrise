@@ -13,6 +13,13 @@
 
 namespace sunrise::state::runtime::detail {
 
+/** One index space over a character's held instances, stacks and equipped rows, in that order. */
+inline constexpr std::size_t kStackRowBase = account::inventory::kCharacterItemCapacity;
+inline constexpr std::size_t kEquippedRowBase =
+    kStackRowBase + account::inventory::kCharacterStackCapacity;
+inline constexpr std::size_t kCharacterRowCount =
+    kEquippedRowBase + account::inventory::kEquipmentSlotCount;
+
 /** Counts occupied rows and remembers the oldest replaceable row in their owning array. */
 struct BucketAdmission {
     std::size_t count{};
@@ -43,6 +50,15 @@ struct Arrival {
     /** Level and sockets of a new instance; placement assigns its identity and serial. */
     account::inventory::Item instance{};
 };
+
+/**
+ * Finds the recovery bucket an item names when a saved row can occupy it. An arrival's overflow
+ * lands there.
+ * @return False when the item names none, or one outside the character array.
+ */
+[[nodiscard]] bool
+find_recovery_bucket(const build_data::items::Definition& item,
+                     build_data::inventory::buckets::Descriptor& recovery) noexcept;
 
 /** How much of one arrival found a row; the client drops the rest without a record. */
 struct ArrivalOutcome {
@@ -108,5 +124,32 @@ void record_grant_images(const AccountState& before,
                          std::size_t characterIndex,
                          const PlacedRows& placed,
                          PendingRecordRewardGrant& mutation) noexcept;
+
+/**
+ * Takes the character's next inventory serial, which a changed character row receives.
+ * @return False when the character's serials are exhausted.
+ */
+[[nodiscard]] bool next_character_serial(CharacterState& character,
+                                         std::int32_t& mutationSerial) noexcept;
+
+/**
+ * Picks the serial a changed profile row receives.
+ * @return False when the profile's serials are exhausted.
+ */
+[[nodiscard]] bool next_profile_serial(const AccountState& account,
+                                       std::int32_t& mutationSerial) noexcept;
+
+/**
+ * Removes one character row and closes the gap in its array.
+ * @param row Index in the character row space that kStackRowBase and kEquippedRowBase divide.
+ * @return False when no row is held there.
+ */
+[[nodiscard]] bool erase_character_row(CharacterState& character, std::size_t row) noexcept;
+
+/**
+ * Removes one profile row and closes the gap.
+ * @return False when no row is held there.
+ */
+[[nodiscard]] bool erase_profile_row(AccountState& account, std::size_t index) noexcept;
 
 } // namespace sunrise::state::runtime::detail

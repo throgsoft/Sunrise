@@ -88,7 +88,7 @@ struct Storage {
     SlotMaps slotMaps{};
     /** Reward pools, wrappers and condition tables read alongside the item walk. */
     RewardBuild rewardBuild{};
-    /** Pursuit completion contracts collected by the same item walk, including cache hits. */
+    /** Pursuit completion contracts, collected during the same item walk. */
     PursuitBuild pursuitBuild{};
     /** Node rows held until the value slot and owned records are resolved. */
     std::array<state::build_data::nodes::Definition, state::build_data::nodes::kDefinitionCapacity>

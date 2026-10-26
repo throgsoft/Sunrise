@@ -1,6 +1,5 @@
 #include <algorithm>
 
-#include "../../../../state/build_data/items/quest_initialization.h"
 #include "definition_index_table.h"
 #include "internal.h"
 #include "items.h"
@@ -351,25 +350,34 @@ void read_stats(std::span<const std::byte> definition, Row& row) noexcept {
     return true;
 }
 
-/** A bounty's lifetime expression holds one row whose operand is the lifetime in seconds. */
+/**
+ * A bounty's lifetime expression is one literal row whose operand is the lifetime in seconds. Only
+ * a literal states the lifetime, so any other expression leaves the block unreadable.
+ */
 [[nodiscard]] bool read_lifetime(std::span<const std::byte> definition, Row& row) noexcept {
     Array lifetime{};
     if (!find_optional_array_at(definition, kLifetimeExpressionField, lifetime)) {
         return false;
     }
-    return lifetime.count == 0
-           || (lifetime.count == 1 && lifetime.elementClass == kInvestmentExpressionRowClass
-               && read(definition,
-                       lifetime.dataOffset + kUnlockInstructionOperandOffset,
-                       row.lifetimeSeconds)
-               && row.lifetimeSeconds >= 0);
+    if (lifetime.count == 0) {
+        return true;
+    }
+    std::uint32_t opcode = 0;
+    std::int32_t seconds = 0;
+    if (lifetime.count != 1 || lifetime.elementClass != kInvestmentExpressionRowClass
+        || !read(definition, lifetime.dataOffset, opcode) || opcode != kUnlockLiteralOpcode
+        || !read(definition, lifetime.dataOffset + kUnlockInstructionOperandOffset, seconds)
+        || seconds < 0) {
+        return false;
+    }
+    row.lifetimeSeconds = seconds;
+    return true;
 }
 
 /** Reads a pursuit's objective block, completion controls and lifetime. */
 [[nodiscard]] bool read_pursuit_metadata(std::span<const std::byte> definition, Row& row) noexcept {
     // Other definitions reuse this field for other block types, equipment among them.
-    if (row.bucketId != state::build_data::items::kPursuitBucketId || row.equipmentSlot.has_value()
-        || row.maxStackSize > 1) {
+    if (row.bucketId != kPursuitBucketId || row.equipmentSlot.has_value() || row.maxStackSize > 1) {
         return true;
     }
     std::size_t block = 0;
@@ -388,11 +396,10 @@ void read_stats(std::span<const std::byte> definition, Row& row) noexcept {
         || !find_optional_array_at(definition, block, objectives)) {
         return false;
     }
-    if (objectives.count == 0) {
-        return true;
-    }
-    if (objectives.elementClass != kObjectiveReferenceArrayClass
-        || objectives.count > kObjectiveCapacity) {
+    // An empty objective list may carry no array header. Its lifetime is read all the same.
+    if (objectives.count != 0
+        && (objectives.elementClass != kObjectiveReferenceArrayClass
+            || objectives.count > kObjectiveCapacity)) {
         return false;
     }
     for (std::size_t i = 0; i < objectives.count; ++i) {

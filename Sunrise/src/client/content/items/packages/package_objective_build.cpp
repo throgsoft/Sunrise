@@ -19,13 +19,7 @@ namespace reader = middleware::content::packages::reader;
 namespace tables = middleware::content::packages::tables;
 namespace objectives = state::build_data::objectives;
 
-/** Completion control bytes of one objective row. */
-constexpr std::size_t kOptionalOffset = 0x28;
-constexpr std::size_t kCountsDownOffset = 0x2C;
-/** Expression whose value the native evaluator subtracts from the completion value. */
-constexpr std::size_t kTargetAdjustmentField = 0x38;
-
-/** Counts the objective log line reports once the table is published. */
+/** Counts reported in the objective log line once the table is published. */
 struct ObjectiveReport {
     std::size_t unreadable{};
     std::size_t unreadableAdjustments{};
@@ -34,7 +28,10 @@ struct ObjectiveReport {
     std::size_t externalInputs{};
 };
 
-/** A refusal the installed data decides is final; a failed allocation is retried. */
+/**
+ * How a row read ended. A refusal decided by the installed data is final; a failed allocation is
+ * retried.
+ */
 enum class RowRead : std::uint8_t { read, unsupported, retry };
 
 /** The table being read: dense rows and the one bank all their programs share. */
@@ -49,16 +46,16 @@ struct ObjectiveTable {
 [[nodiscard]] bool read_completion_controls(std::span<const std::byte> blob,
                                             std::size_t at,
                                             objectives::Row& row) noexcept {
-    return tables::read_boolean(blob, at + kOptionalOffset, row.optional)
-           && tables::read_boolean(blob, at + kCountsDownOffset, row.countsDown);
+    return tables::read_boolean(blob, at + tables::kObjectiveOptionalOffset, row.optional)
+           && tables::read_boolean(blob, at + tables::kObjectiveCountsDownOffset, row.countsDown);
 }
 
-/** A full instruction bank is decided by the data; failed storage is not. */
+/** A full instruction bank is decided by the installed data; failed storage is retried. */
 [[nodiscard]] RowRead bank_refusal(BankFailure failure) noexcept {
     return failure == BankFailure::full ? RowRead::unsupported : RowRead::retry;
 }
 
-/** Moves the bound program into the shared bank; programs that overflow it are the data. */
+/** Moves the bound program into the shared bank. Overflowing the bank is final. */
 [[nodiscard]] RowRead append_program(ObjectiveTable& table,
                                      state::build_data::rewards::Range& range) noexcept {
     if (table.program.size() > objectives::kInstructionCapacity - table.bank.size()) {
@@ -93,8 +90,8 @@ struct ObjectiveTable {
     state::build_data::rewards::Range bound{};
     BankFailure failure{};
     table.program.clear();
-    row.adjustmentReadable =
-        conditions.read(blob, at + kTargetAdjustmentField, table.program, bound, failure);
+    row.adjustmentReadable = conditions.read(
+        blob, at + tables::kObjectiveTargetAdjustmentField, table.program, bound, failure);
     if (failure != BankFailure::none) {
         return bank_refusal(failure);
     }
@@ -193,7 +190,7 @@ bool build_objectives(const reader::Source& source,
             settle_pursuits_unsupported("objective_table");
             return false;
         }
-        // A cache write can still fail, so this stays retryable.
+        // Publishing can still fail on the cache write, which a later pass retries.
         if (!state::build_data::publish_objective_definitions(view)) {
             return false;
         }

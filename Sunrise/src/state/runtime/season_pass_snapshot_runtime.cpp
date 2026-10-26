@@ -1,7 +1,9 @@
 #include "season_pass_snapshot_runtime.h"
 
 #include <algorithm>
+#include <memory>
 #include <mutex>
+#include <new>
 #include <span>
 
 #include "../account/account_state.h"
@@ -11,23 +13,22 @@
 #include "../rewards/reward_resolver.h"
 #include "../unlocks/definition.h"
 #include "runtime.h"
+#include "saved_selection_runtime.h"
 
 namespace sunrise::state {
 namespace {
 
-namespace pass = build_data::season_pass;
+namespace pass = progression::season_pass;
 
 // An absent claim or acquisition flag lies past the account bank, so the bounds check skips it.
-static_assert(unlocks::kAccountFlagCapacity <= pass::kUnavailableFlagIndex);
+static_assert(unlocks::kAccountFlagCapacity <= build_data::season_pass::kUnavailableFlagIndex);
 static_assert(unlocks::kAccountFlagCapacity <= build_data::rewards::kAbsent);
 
 /** Saved values one pass evaluation reads, copied under one store lock. */
 struct SavedPass {
-    unlocks::Table banks{};
-    std::uint64_t accountSoid{};
-    std::uint64_t characterSoid{};
-    CharacterClass characterClass{};
-    std::uint64_t revision{};
+    SavedSelection<AccountIdentity> view{};
+    /** False while no character is selected; the banks then carry only the shared account rows. */
+    bool selected{};
     std::int32_t experience{};
     std::uint16_t rank{};
 };
@@ -42,25 +43,24 @@ struct SavedPass {
 [[nodiscard]] bool read_saved_pass(SavedPass& saved, const char*& reason) noexcept {
     const std::lock_guard lock(investment::store::g_mutex);
     reason = "account_state";
-    const AccountState account = investment::store::account();
-    if (!account::valid(account) || account.primarySoid == 0) {
+    switch (read_saved_selection(saved.view)) {
+    case SavedSelectionRead::read:
+        saved.selected = true;
+        break;
+    case SavedSelectionRead::unselected:
+        // The account banks are shared, so any slot reads them while no character is selected.
+        if (!investment::store::read_unlocks(saved.view.banks, 0)) {
+            return false;
+        }
+        break;
+    case SavedSelectionRead::accountStorage:
+    case SavedSelectionRead::accountInvalid:
+    case SavedSelectionRead::bankStorage:
         return false;
     }
-    saved.revision = investment::store::g_session.revision;
-    saved.accountSoid = account.primarySoid;
     saved.experience = seasonal_experience();
     saved.rank = seasonal_rank();
-    // The account banks are shared, so any slot reads them while no character is selected.
-    int slot = 0;
-    for (std::size_t index = 0; index < account.characterCount; ++index) {
-        if (account.characters[index].selected) {
-            slot = static_cast<int>(index);
-            saved.characterSoid = account.characters[index].soid;
-            saved.characterClass = account.characters[index].characterClass;
-            break;
-        }
-    }
-    return investment::store::read_unlocks(saved.banks, slot);
+    return true;
 }
 
 /** @return True when the saved account flag is set; an absent index never is. */
@@ -72,28 +72,27 @@ struct SavedPass {
 [[nodiscard]] SeasonPassRowStatus row_status(std::uint16_t rewardIndex,
                                              const SavedPass& saved) noexcept {
     SeasonPassRowStatus row{};
-    pass::Reward reward{};
+    build_data::season_pass::Reward reward{};
     if (!build_data::find_season_pass_reward(rewardIndex, reward)) {
         return row;
     }
+    const unlocks::Table& banks = saved.view.banks;
     row.itemHash = reward.itemHash;
     row.quantity = reward.quantity;
     row.requiredRank = reward.requiredRank;
     row.available = true;
-    row.claimed = flag_set(saved.banks, reward.claimFlagIndex);
-    row.automatic = progression::season_pass::progress_flag(reward) != build_data::rewards::kAbsent;
+    row.claimed = flag_set(banks, reward.claimFlagIndex);
+    row.automatic = pass::automatic_row(reward);
     build_data::rewards::Item source{};
     row.acquired = build_data::find_reward_item(reward.itemIndex, source)
                    && source.definitionHash == reward.itemHash
-                   && flag_set(saved.banks, source.acquiredFlag);
+                   && flag_set(banks, source.acquiredFlag);
     row.rankMet = reward.requiredRank <= saved.rank;
     // Conditions read a character's class and banks, so they wait for a selected character.
-    if (saved.characterSoid != 0 && reward.conditionCount <= reward.condition.size()) {
+    if (saved.selected && reward.conditionCount <= reward.condition.size()) {
         bool met = false;
-        row.conditionKnown =
-            reward_resolution::eligible(std::span(reward.condition).first(reward.conditionCount),
-                                        {saved.banks, saved.characterClass, 0, nullptr},
-                                        met);
+        row.conditionKnown = reward_resolution::eligible(
+            std::span(reward.condition).first(reward.conditionCount), saved.view.context(), met);
         row.conditionMet = row.conditionKnown && met;
     }
     return row;
@@ -110,18 +109,20 @@ bool read_season_pass_snapshot(SeasonPassSnapshot& output, const char** refusal)
     if (!catalogs_ready()) {
         return false;
     }
-    SavedPass saved{};
-    if (!read_saved_pass(saved, reason)) {
+    reason = "allocation";
+    const std::unique_ptr<SavedPass> saved(new (std::nothrow) SavedPass{});
+    if (!saved || !read_saved_pass(*saved, reason)) {
         return false;
     }
-    output.accountSoid = saved.accountSoid;
-    output.characterSoid = saved.characterSoid;
-    output.investmentRevision = saved.revision;
-    output.experience = saved.experience;
-    output.rank = saved.rank;
+    const SavedSelection<AccountIdentity>& view = saved->view;
+    output.accountSoid = view.account.primarySoid;
+    output.characterSoid = saved->selected ? view.account.characters[view.slot].soid : 0;
+    output.investmentRevision = view.revision;
+    output.experience = saved->experience;
+    output.rank = saved->rank;
     output.rowCount = (std::min)(build_data::season_pass_reward_count(), output.rows.size());
     for (std::size_t index = 0; index < output.rowCount; ++index) {
-        output.rows[index] = row_status(static_cast<std::uint16_t>(index), saved);
+        output.rows[index] = row_status(static_cast<std::uint16_t>(index), *saved);
     }
     reason = nullptr;
     return true;

@@ -8,7 +8,6 @@
 
 #include "../../../../state/account/inventory/occupied_bucket.h"
 #include "../../../../state/build_data/runtime.h"
-#include "../../../../state/unlocks/unlocks_records.h"
 #include "../../../../state/unlocks/unlocks_runtime.h"
 #include "../../character_record/layout.h"
 #include "../../definitions.h"
@@ -30,19 +29,6 @@ constexpr std::int16_t kEmptyItemStackSelector = -1;
 constexpr std::uint8_t kNativeTrue = 1;
 /** Native 1-byte booleans encode false as 0. */
 constexpr std::uint8_t kNativeFalse = 0;
-/** Stackable quest items needed by the collectible interactions currently supported. */
-struct CollectibleQuest {
-    std::uint32_t definitionHash{};
-    /** Lore completion flag which consumes this quest; zero keeps the prerequisite authored. */
-    std::uint16_t completionFlag{};
-};
-/** One row per supported collectible quest; a claimed completion flag drops the row. */
-constexpr std::array<CollectibleQuest, 4> kCollectibleQuests{{
-    {0x57C4540AU, 0U},
-    {0x85CC476EU, 10762U},
-    {0xB099029AU, 10766U},
-    {0xC3535D63U, 10769U},
-}};
 /** One character has one customisation header, so both records carry the same 36 bytes. */
 static_assert(character_record::layout::kHeaderBlockBytes.size()
               == layout::kCustomisationHeaderSize);
@@ -108,63 +94,6 @@ constexpr std::int32_t kOccupiedRowWatermark = 1;
         object.newItemFlags[rowIndex / kBitsPerFlagByte] |= std::byte{1U}
                                                             << (rowIndex % kBitsPerFlagByte);
         object.instanceProgressWatermarks[rowIndex] = kOccupiedRowWatermark;
-    }
-    return true;
-}
-
-/**
- * Places collectible prerequisites in the character quest bucket. These stackable rows need no
- * item-instance resident.
- */
-[[nodiscard]] bool place_collectible_quest_items(layout::Object& object) noexcept {
-    std::optional<std::uint8_t> questBucketId;
-    std::size_t nextRow = 0;
-    std::size_t rowLimit = 0;
-    for (const CollectibleQuest& quest : kCollectibleQuests) {
-        if (quest.completionFlag != 0
-            && (state::unlocks::records::claimed(quest.completionFlag)
-                || state::unlocks::records::claimable(quest.completionFlag))) {
-            continue;
-        }
-        state::build_data::items::Definition item{};
-        state::build_data::items::details::Definition detail{};
-        state::build_data::inventory::buckets::Descriptor bucket{};
-        if (!state::build_data::find_item_definition_hash(quest.definitionHash, item)
-            || !state::build_data::find_configured_item_detail(item.definitionIndex, detail)
-            || detail.definitionIndex != item.definitionIndex
-            || detail.definitionHash != item.definitionHash || detail.bucketId != item.bucketId
-            || detail.instancedDefinitionState
-                   != state::build_data::items::details::InstancedDefinitionState::stackable
-            || detail.maxStackSize < 1 || detail.equipmentSlot.has_value()
-            || !state::build_data::find_inventory_bucket_descriptor(item.bucketId, bucket)
-            || bucket.arraySelector
-                   != state::build_data::inventory::buckets::ArraySelector::character
-            || bucket.slotCount == 0 || bucket.firstSlot >= object.inventoryItems.size()
-            || bucket.slotCount > object.inventoryItems.size() - bucket.firstSlot) {
-            return false;
-        }
-        if (!questBucketId.has_value()) {
-            questBucketId = item.bucketId;
-            nextRow = bucket.firstSlot;
-            rowLimit = bucket.firstSlot + bucket.slotCount;
-        } else if (*questBucketId != item.bucketId || nextRow >= rowLimit) {
-            return false;
-        }
-        while (nextRow < rowLimit
-               && object.inventoryItems[nextRow].definitionIndex != kEmptyDefinitionIndex) {
-            ++nextRow;
-        }
-        if (nextRow >= rowLimit) {
-            return false;
-        }
-
-        inventory::layout::Entry& row = object.inventoryItems[nextRow];
-        row.definitionIndex = item.definitionIndex;
-        row.quantity = 1;
-        object.newItemFlags[nextRow / kBitsPerFlagByte] |= std::byte{1U}
-                                                           << (nextRow % kBitsPerFlagByte);
-        object.instanceProgressWatermarks[nextRow] = kOccupiedRowWatermark;
-        ++nextRow;
     }
     return true;
 }
@@ -339,7 +268,7 @@ bool encode(const state::CharacterState& state,
             object.equippedInstanceSoids[item.equipmentSlot] = item.instance.instanceSoid;
         }
     }
-    if (!place_character_stacks(state, object) || !place_collectible_quest_items(object)) {
+    if (!place_character_stacks(state, object)) {
         return false;
     }
 

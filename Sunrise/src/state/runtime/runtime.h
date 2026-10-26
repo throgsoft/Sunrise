@@ -26,6 +26,24 @@ struct SettingsDelta;
 
 namespace sunrise::state {
 
+/** Whether the reward grant path can place one installed item. */
+enum class ItemGrantRoute : std::uint8_t { unavailable, reward };
+/** Routes wrappers, account perks, stackable profile items and any item in a character bucket. */
+[[nodiscard]] ItemGrantRoute item_grant_route(std::uint16_t itemIndex) noexcept;
+/**
+ * How much of a larger grant one placement carries: one instance, draw or perk, or up to one full
+ * stack. A large quantity therefore arrives as a run of ordinary grants.
+ */
+[[nodiscard]] std::int32_t item_grant_step(std::uint16_t itemIndex,
+                                           std::int32_t remaining) noexcept;
+/**
+ * The most of one item a grant can leave held at once: one step in every row of the item's own
+ * bucket and of the recovery bucket that takes its overflow. Past that, a step only evicts or
+ * drops an earlier one. An account perk holds one, and a wrapper, whose draws land wherever its
+ * pool sends them, is bounded only by the largest quantity a grant carries.
+ * @return Zero when the item has no installed bucket.
+ */
+[[nodiscard]] std::int32_t item_grant_capacity(std::uint16_t itemIndex) noexcept;
 /**
  * Assigns runtime SOIDs only to installed profile mod/shader rows which are socket action sources.
  * Currency, material, and consumable profile rows remain canonically non-instanced.
@@ -375,6 +393,40 @@ struct PendingItemDismantle {
     /** False for an editor removal, which credits no dismantle materials. */
     bool paysRewards{true};
     bool prepared{};
+};
+
+/**
+ * Which saved list a quantity edit names. It must be the list of the bucket the row occupies,
+ * which for a recovered row is its item's recovery bucket.
+ */
+enum class EditScope : std::uint8_t { profile, characterItem, characterStack };
+
+/** One row the caller read and the quantity that replaces it. */
+struct QuantityEdit {
+    EditScope scope{};
+    /** Character expected to be selected. A profile edit is published with this character too. */
+    std::uint64_t characterSoid{};
+    /** Zero for plain profile rows and character stacks. */
+    std::uint64_t instanceSoid{};
+    std::uint32_t definitionHash{};
+    std::int32_t mutationSerial{};
+    std::int32_t expectedQuantity{};
+    /** Zero removes the row without dismantle materials. */
+    std::int32_t quantity{};
+
+    bool operator==(const QuantityEdit&) const = default;
+};
+
+/** The saved objects one committed edit changed, for the caller's refresh. */
+struct AccountEditChange {
+    std::uint64_t accountSoid{};
+    std::uint64_t characterSoid{};
+    /** The selected character's slot. */
+    std::size_t characterIndex{};
+    /** A row the account object publishes changed, so that object is refreshed too. */
+    bool accountRows{};
+    /** Saved inventory or unlock rows written. */
+    std::uint32_t changedRows{};
 };
 
 /** Prepared ordinary-socket selection for one selected-character item instance. */
@@ -752,11 +804,13 @@ commit_profile_item_acquisition(PendingProfileItemAcquisition& mutation) noexcep
                                           PendingItemDismantle& mutation) noexcept;
 
 /**
- * Prepares the same removal for an exact expected instance, crediting no dismantle materials.
+ * Prepares the removal prepare_item_dismantle stages, for an exact expected instance and without
+ * crediting dismantle materials.
  * @param characterSoid Character expected to be selected.
  * @param instanceSoid Unequipped item instance to remove.
  * @param definitionHash Definition the instance is expected to carry.
  * @param mutationSerial Serial the instance is expected to carry.
+ * @param quantity Quantity the instance is expected to carry.
  * @param mutation Gets checked before/after images without changing account State.
  * @param refusal Receives a static reason on failure.
  */
@@ -764,8 +818,30 @@ commit_profile_item_acquisition(PendingProfileItemAcquisition& mutation) noexcep
                                         std::uint64_t instanceSoid,
                                         std::uint32_t definitionHash,
                                         std::int32_t mutationSerial,
+                                        std::int32_t quantity,
                                         PendingItemDismantle& mutation,
                                         const char** refusal = nullptr) noexcept;
+
+/**
+ * Checks a quantity edit without reading saved state: the quantity is not negative and the item
+ * is installed. set_quantity applies the same check first.
+ * @param refusal Receives a static reason on failure.
+ */
+[[nodiscard]] bool check_quantity_edit(const QuantityEdit& edit,
+                                       const char** refusal = nullptr) noexcept;
+
+/**
+ * Replaces the quantity of one unequipped row that still matches what the caller read. It runs
+ * in its own savepoint, so an enclosing store transaction can still roll it back. Instanced rows
+ * are never removed here: an unequipped item is removed through prepare_item_removal, and
+ * removing a profile action source is refused.
+ * @param edit Expected row identity, quantity and replacement.
+ * @param change Receives the changed objects on success.
+ * @param refusal Receives a static reason on failure.
+ */
+[[nodiscard]] bool set_quantity(const QuantityEdit& edit,
+                                AccountEditChange& change,
+                                const char** refusal = nullptr) noexcept;
 
 /** Builds the exact account after-image while a prepared dismantle remains current. */
 [[nodiscard]] bool preview_item_dismantle(const PendingItemDismantle& mutation,
@@ -871,10 +947,17 @@ struct ProfileExchangePayout {
 
 /**
  * @param revision Receives the account change generation, never zero, read under the same lock
- * as the copy. Equal values mean no save committed and the selection held.
+ * as the copy. Two equal reads mean no save committed and the selection did not change between.
  * @return A copy of the active account state.
  */
 [[nodiscard]] AccountState account_snapshot(std::uint64_t& revision) noexcept;
+
+/**
+ * Reads the account and character keys without copying inventory or settings.
+ * @param revision Receives the account change generation, read under the same lock.
+ * @return False when the save does not read.
+ */
+[[nodiscard]] bool account_identity(AccountIdentity& output, std::uint64_t& revision) noexcept;
 
 /**
  * Copies the evaluated content state and adds build-derived catalyst completion overrides.
@@ -915,15 +998,25 @@ inline constexpr std::uint16_t kArtifactUnlockProgressionIndex = 39;
 [[nodiscard]] bool grant_seasonal_experience(std::int32_t amount) noexcept;
 
 /**
- * Replaces the exact published XP total and republishes every value derived from it.
- * An increase walks newly earned perks; a decrease leaves earned and claimed flags set.
+ * Replaces the published XP total, provided it still equals expected, and republishes every
+ * value derived from it. An increase walks newly earned perks; a decrease leaves earned and
+ * claimed flags set.
  * @param expected XP total the caller read.
- * @param replacement New total; it must still earn the artifact points already spent.
+ * @param replacement New total. A decrease must still earn the artifact points already spent, which
+ * the artifact sale rows count.
  * @param refusal Receives a static reason on failure.
  */
 [[nodiscard]] bool replace_seasonal_experience(std::int32_t expected,
                                                std::int32_t replacement,
                                                const char** refusal = nullptr) noexcept;
+
+/**
+ * Checks a replacement XP total without reading saved state. replace_seasonal_experience runs
+ * this check first.
+ * @param refusal Receives a static reason on failure.
+ */
+[[nodiscard]] bool check_seasonal_experience(std::int32_t replacement,
+                                             const char** refusal = nullptr) noexcept;
 
 /** @param rewardIndex Native reward-array index. @return True when the row is claimed. */
 [[nodiscard]] bool season_pass_reward_claimed(std::uint16_t rewardIndex) noexcept;
@@ -939,13 +1032,26 @@ inline constexpr std::uint16_t kArtifactUnlockProgressionIndex = 39;
 void revoke_season_pass_reward(std::uint16_t rewardIndex) noexcept;
 
 /**
- * Clears one claimed row's claim flag; granted items and acquisition flags stay.
- * Rows the earned-perk walk grants are refused; that walk owns their claim flag.
+ * Clears one claimed row's claim flag. Granted items and acquisition flags stay.
+ * Rows the earned-perk walk grants are refused, because that walk owns their claim flag.
  * @param rewardIndex Native reward-array index.
  * @param itemHash Item the row is expected to grant.
  * @param refusal Receives a static reason on failure.
  */
 [[nodiscard]] bool reset_season_pass_reward(std::uint16_t rewardIndex,
+                                            std::uint32_t itemHash,
+                                            const char** refusal = nullptr) noexcept;
+
+/**
+ * Checks that a native pass row exists, still grants the expected item and is not one the
+ * earned-perk walk grants, without reading saved state. reset_season_pass_reward applies the same
+ * check, and an editor claim is checked the same way. Refuses with `not_ready` while the pass,
+ * reward or item catalog is unpublished.
+ * @param rewardIndex Native reward-array index.
+ * @param itemHash Item the row is expected to grant.
+ * @param refusal Receives a static reason on failure.
+ */
+[[nodiscard]] bool check_season_pass_reward(std::uint16_t rewardIndex,
                                             std::uint32_t itemHash,
                                             const char** refusal = nullptr) noexcept;
 

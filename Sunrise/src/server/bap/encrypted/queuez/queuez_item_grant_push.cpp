@@ -13,7 +13,7 @@
 namespace sunrise::server::bap::encrypted {
 namespace {
 
-/** Records why a committed grant has no frame, or moves the nonce past the frame it has. */
+/** Records why a committed grant has no frame, or steps the staged nonce past its frame. */
 void close_staged_grant(StagedItemGrant& staged,
                         bool stagedUpdate,
                         bool encoded,
@@ -26,15 +26,19 @@ void close_staged_grant(StagedItemGrant& staged,
     staged.frame.after = after;
 }
 
-/** Draws, stages and commits one item resolved through its installed reward definition. */
-[[nodiscard]] ItemGrantStage stage_reward_definition_grant(const ItemGrant& grant,
-                                                           Session& session,
-                                                           Scratch& scratch,
-                                                           std::span<std::byte> response,
-                                                           bool& touchesScratch,
-                                                           StagedItemGrant& staged,
-                                                           const char*& reason) noexcept {
-    // A draw is not retained, so it waits for a buffer its whole frame is sure to fit.
+} // namespace
+
+/** Draws and places the item through its installed reward definition. */
+ItemGrantStage stage_item_grant(const ItemGrant& grant,
+                                Session& session,
+                                Scratch& scratch,
+                                std::span<std::byte> response,
+                                bool& touchesScratch,
+                                StagedItemGrant& staged,
+                                const char*& reason) noexcept {
+    staged = {};
+    reason = nullptr;
+    // A draw is not kept between polls, so wait for a response that can hold a whole frame.
     if (response.size() < scratch.framed.size()) {
         return ItemGrantStage::waiting;
     }
@@ -77,6 +81,10 @@ void close_staged_grant(StagedItemGrant& staged,
                                                    staged.frame.size)
         && staged.frame.size != 0;
     staged.grantedRows = static_cast<std::uint32_t>(pending->rowCount);
+    const auto rewards = std::span(pending->rewards).first(pending->rewardCount);
+    staged.placed = std::any_of(rewards.begin(), rewards.end(), [](const auto& reward) noexcept {
+        return reward.placedQuantity != 0;
+    });
     if (!state::commit_record_reward(*pending)) {
         reason = "inventory_commit";
         return ItemGrantStage::failed;
@@ -85,23 +93,7 @@ void close_staged_grant(StagedItemGrant& staged,
     return ItemGrantStage::committed;
 }
 
-} // namespace
-
-/** Every grant goes through State's one placement path, which overflows the way the client does. */
-ItemGrantStage stage_item_grant(const ItemGrant& grant,
-                                Session& session,
-                                Scratch& scratch,
-                                std::span<std::byte> response,
-                                bool& touchesScratch,
-                                StagedItemGrant& staged,
-                                const char*& reason) noexcept {
-    staged = {};
-    reason = nullptr;
-    return stage_reward_definition_grant(
-        grant, session, scratch, response, touchesScratch, staged, reason);
-}
-
-/** Copies the frame out, then publishes its nonce and after-image and arms every other peer. */
+/** Sends the frame, moves the session past it and arms an account resync on every other peer. */
 void publish_staged_frame(const StagedFrame& frame,
                           Session& session,
                           Scratch& scratch,
@@ -114,7 +106,7 @@ void publish_staged_frame(const StagedFrame& frame,
     bap::arm_account_resync_elsewhere(session);
 }
 
-/** No buffer fixes a failed stage or encode, so a committed grant without a frame resyncs. */
+/** A committed grant without a frame cannot be retried, so every Family-4 peer resyncs. */
 bool publish_item_grant(const StagedItemGrant& staged,
                         Session& session,
                         Scratch& scratch,

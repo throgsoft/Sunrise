@@ -11,10 +11,11 @@
 #include <string_view>
 
 #include "../../core/logging/log.h"
+#include "../../core/runtime/host_environment.h"
 #include "../../core/settings/settings.h"
 #include "../../middleware/studio/studio_investment_wire.h"
 #include "../../middleware/studio/studio_mapping.h"
-#include "../../state/account/inventory/inventory_edit.h"
+#include "../../state/runtime/runtime.h"
 #include "../bap/investment_operations.h"
 #include "studio_investment_payloads.h"
 
@@ -23,7 +24,7 @@ namespace {
 
 namespace wire = middleware::studio::investment_wire;
 
-/** Each opcode's State owner, operation lane and incremental publication exist in this build. */
+/** The opcodes this link serves, advertised to Studio in the control block. */
 constexpr std::uint64_t kAdvertisedCapabilities =
     wire::capability(wire::Opcode::hello) | wire::capability(wire::Opcode::inventorySnapshot)
     | wire::capability(wire::Opcode::seasonPassSnapshot)
@@ -58,7 +59,7 @@ std::uint64_t g_gameStarted{};
 std::uint32_t g_editorPid{};
 std::array<ReadAnswer, static_cast<std::size_t>(wire::Opcode::count)> g_lastReads{};
 
-/** Finished receipts outlive the link, so the editor can still read them when it returns. */
+/** Refuses pending operations. Finished receipts outlive the link for the editor to read later. */
 void disconnect() noexcept {
     if (g_view != nullptr) {
         core::log::write(core::log::Channel::server,
@@ -70,8 +71,7 @@ void disconnect() noexcept {
     middleware::studio::close_editor_view(g_mapping, g_view);
 }
 
-/** @return The process creation FILETIME, which tells a recycled process id apart; zero on failure.
- */
+/** @return This process's creation FILETIME, which tells a reused process id apart, or 0. */
 [[nodiscard]] std::uint64_t process_started() noexcept {
     FILETIME creation{};
     FILETIME exit{};
@@ -86,20 +86,9 @@ void disconnect() noexcept {
     return started.QuadPart;
 }
 
-/** @return True once no process runs under the id; one the game may not open still runs. */
-[[nodiscard]] bool editor_exited(std::uint32_t pid) noexcept {
-    HANDLE process = OpenProcess(SYNCHRONIZE, FALSE, pid);
-    if (process == nullptr) {
-        return GetLastError() == ERROR_INVALID_PARAMETER;
-    }
-    const bool exited = WaitForSingleObject(process, 0) == WAIT_OBJECT_0;
-    CloseHandle(process);
-    return exited;
-}
-
 /** @return True only when an editor created a mapping of this exact protocol. */
 [[nodiscard]] bool connect() noexcept {
-    // Every version keeps this control block, so it is mapped alone before the size is known.
+    // Every protocol version starts with this control block, so map it alone to read the version.
     wire::Control* control =
         middleware::studio::open_editor_view<wire::Control>(wire::kMappingFormat, g_mapping);
     if (control == nullptr) {
@@ -122,7 +111,7 @@ void disconnect() noexcept {
         disconnect();
         return false;
     }
-    bap::forget_exited_editor_receipts(editor_exited);
+    bap::forget_exited_editor_receipts(core::runtime::process_stopped);
     g_editorPid = editorPid;
     g_gameStarted = started;
     g_view->control.gameStarted = started;
@@ -133,7 +122,7 @@ void disconnect() noexcept {
     return true;
 }
 
-/** @return One of the two ids, read with a full barrier. */
+/** @return The request or response id, read with a full barrier. */
 [[nodiscard]] std::uint32_t read_id(volatile std::int32_t& id) noexcept {
     return static_cast<std::uint32_t>(
         InterlockedCompareExchange(reinterpret_cast<volatile LONG*>(&id), 0, 0));
@@ -144,12 +133,12 @@ void disconnect() noexcept {
     return {.status = wire::Status::invalid, .reason = reason};
 }
 
-/** A mutation names every part of the context it was read against. */
+/** A mutation must name every part of the context it was read against. */
 [[nodiscard]] bool context_complete(const wire::Context& context) noexcept {
     return context.accountSoid != 0 && context.characterSoid != 0 && context.contentHash != 0;
 }
 
-/** Requests other than mutations bind to no context. */
+/** Requests other than mutations must leave the context empty. */
 [[nodiscard]] bool context_empty(const wire::Context& context) noexcept {
     return context.accountSoid == 0 && context.characterSoid == 0 && context.contentHash == 0;
 }
@@ -179,7 +168,7 @@ void disconnect() noexcept {
     return nullptr;
 }
 
-/** Copies one typed request out of the copied payload bytes. */
+/** Copies a typed payload out of the request copy. */
 template <typename Payload>
 [[nodiscard]] Payload payload_of(const wire::Request& request) noexcept {
     static_assert(sizeof(Payload) <= wire::kRequestPayloadBytes);
@@ -189,17 +178,16 @@ template <typename Payload>
 }
 
 /** @return False for a scope value the wire does not define. */
-[[nodiscard]] bool edit_scope(wire::InventoryScope scope,
-                              state::account::inventory::EditScope& output) noexcept {
+[[nodiscard]] bool edit_scope(wire::InventoryScope scope, state::EditScope& output) noexcept {
     switch (scope) {
     case wire::InventoryScope::profile:
-        output = state::account::inventory::EditScope::profile;
+        output = state::EditScope::profile;
         return true;
     case wire::InventoryScope::characterItem:
-        output = state::account::inventory::EditScope::characterItem;
+        output = state::EditScope::characterItem;
         return true;
     case wire::InventoryScope::characterStack:
-        output = state::account::inventory::EditScope::characterStack;
+        output = state::EditScope::characterStack;
         return true;
     }
     return false;
@@ -219,17 +207,17 @@ template <typename Payload>
     }
     case wire::Opcode::setQuantity: {
         const auto edit = payload_of<wire::SetQuantityRequest>(request);
-        state::account::inventory::EditScope scope{};
+        state::EditScope scope{};
         if (!edit_scope(edit.scope, scope) || edit.reserved != decltype(edit.reserved){}) {
             return false;
         }
-        operation.request = state::account::inventory::QuantityEdit{scope,
-                                                                    request.expected.characterSoid,
-                                                                    edit.instanceSoid,
-                                                                    edit.definitionHash,
-                                                                    edit.expectedSerial,
-                                                                    edit.expectedQuantity,
-                                                                    edit.quantity};
+        operation.request = state::QuantityEdit{scope,
+                                                request.expected.characterSoid,
+                                                edit.instanceSoid,
+                                                edit.definitionHash,
+                                                edit.expectedSerial,
+                                                edit.expectedQuantity,
+                                                edit.quantity};
         return true;
     }
     case wire::Opcode::setSeasonalExperience: {
@@ -280,7 +268,7 @@ template <typename Payload>
     }
 }
 
-/** A receipt answers every retained submission, also one State refused before it was queued. */
+/** Answers with the receipt, including for a submission refused before it was queued. */
 [[nodiscard]] InvestmentAnswer submit(const bap::InvestmentOperation& operation,
                                       InvestmentPayload payload) noexcept {
     bap::InvestmentReceipt receipt{};
@@ -289,21 +277,20 @@ template <typename Payload>
     InvestmentAnswer answer = encode_receipt(operation.id, receipt, payload);
     switch (submission) {
     case bap::InvestmentSubmission::accepted:
-    case bap::InvestmentSubmission::existing:
         break;
     case bap::InvestmentSubmission::reused:
         answer.status = wire::Status::refused;
         answer.reason = "operation_reused";
         break;
     case bap::InvestmentSubmission::refused:
-        // Nothing was retained, so the status says so; the receipt names why.
+        // Nothing was retained. The status reports that, and the receipt's reason says why.
         answer.status = wire::Status::refused;
         break;
     }
     return answer;
 }
 
-/** An unknown id leaves the receipt empty, which answers unknown. */
+/** An unknown id leaves the receipt empty, which encodes as unknown. */
 [[nodiscard]] InvestmentAnswer read_receipt(std::uint64_t operationId,
                                             InvestmentPayload payload) noexcept {
     bap::InvestmentReceipt receipt{};
@@ -311,7 +298,7 @@ template <typename Payload>
     return encode_receipt(operationId, receipt, payload);
 }
 
-/** A pending receipt stays retained and is refused with the receipt it still holds. */
+/** A pending receipt stays retained; the refusal carries the receipt as it stands. */
 [[nodiscard]] InvestmentAnswer acknowledge_receipt(std::uint64_t operationId,
                                                    InvestmentPayload payload) noexcept {
     bap::InvestmentReceipt receipt{};
@@ -379,12 +366,14 @@ template <typename Payload>
 }
 
 /**
- * Open views repeat hello, snapshot, unlock and receipt requests every second, so a read is info
- * only when it is refused for a new reason; mutations and withdrawals always stay at info.
+ * Open Studio views repeat hello, snapshot, unlock and receipt requests every second, so a read
+ * logs at info only when it is refused for a new reason. Mutations, withdrawals and opcodes outside
+ * the wire's range, which have no read slot, always log at info.
  */
 [[nodiscard]] core::log::Level
 answer_level(wire::Opcode opcode, wire::Status status, std::string_view reason) noexcept {
-    if (wire::is_mutation(opcode) || opcode == wire::Opcode::withdrawOperation) {
+    if (opcode >= wire::Opcode::count || wire::is_mutation(opcode)
+        || opcode == wire::Opcode::withdrawOperation) {
         return core::log::Level::info;
     }
     ReadAnswer& last = g_lastReads[static_cast<std::size_t>(opcode)];
@@ -426,7 +415,7 @@ void answer(std::uint32_t request,
 
 /** Each request id gets exactly one answer, in the slice that copies it. */
 void service_investment(std::uint64_t now) noexcept {
-    // Off by default: no mapping is ever opened.
+    // Studio attach is off by default, and then no mapping is opened.
     if (!core::settings::get().studioAttach) {
         if (g_view != nullptr) {
             disconnect();
@@ -440,8 +429,9 @@ void service_investment(std::uint64_t now) noexcept {
     if (g_view == nullptr) {
         return;
     }
+    // Read the clock again: `now` can trail a slow transport stage while the editor keeps beating.
     if (!middleware::studio::editor_alive(
-            g_view->control.heartbeat, now, wire::kHeartbeatTimeoutMs)) {
+            g_view->control.heartbeat, GetTickCount64(), wire::kHeartbeatTimeoutMs)) {
         disconnect();
         return;
     }

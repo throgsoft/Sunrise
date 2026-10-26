@@ -9,15 +9,18 @@
 
 namespace sunrise::server::bap::encrypted {
 
-/** One encoded Family-4 frame and the peer state it promises, held until State commits. */
+/**
+ * One encoded Family-4 frame in scratch and the peer state that applies once it is sent. It is
+ * sent only after the store savepoint commits.
+ */
 struct StagedFrame {
     queuez::SessionState after{};
-    /** Send nonce after the frame, published only with it. */
+    /** The send nonce that follows this frame; the session takes it only when the frame is sent. */
     std::array<std::byte, state::kBapNonceSize> sendNonce{};
     std::size_t size{};
 };
 
-/** One installed item to grant; State places it like every other grant. */
+/** One installed item and the quantity to grant through its reward definition. */
 struct ItemGrant {
     std::uint16_t itemDefinitionIndex{};
     std::int32_t quantity{};
@@ -25,15 +28,15 @@ struct ItemGrant {
 
 /** How far one grant attempt got inside the caller's savepoint. */
 enum class ItemGrantStage : std::uint8_t {
-    /** State committed into the savepoint; the frame may still have failed. */
+    /** State committed the grant into the savepoint. The frame may still have failed. */
     committed,
-    /** Nothing was written; a whole poll buffer can hold the frame. */
+    /** Nothing was written. The response is smaller than a whole frame, so a later poll retries. */
     waiting,
-    /** Nothing was written; State may grant it later. */
+    /** Nothing was written. State cannot prepare the grant yet but may later. */
     deferred,
-    /** Nothing was written; State can never grant it. */
+    /** Nothing was written. State can never grant this item. */
     unresolvable,
-    /** Nothing was written; storage, entropy or the State commit failed. */
+    /** Nothing was written. Allocation, the random source or the State commit failed. */
     failed,
 };
 
@@ -42,14 +45,17 @@ struct StagedItemGrant {
     StagedFrame frame{};
     /** Inventory rows the grant changed. */
     std::uint32_t grantedRows{};
+    /** True when any reward was placed. A reward with no room anywhere is dropped. */
+    bool placed{};
     /** Why the grant has no frame, or null when the frame is complete. */
     const char* unpublished{};
 };
 
 /**
  * Prepares, stages, encodes and commits one item grant inside the caller's open store savepoint,
- * drawing any seed here. A stage or encode failure still commits, as no buffer can fix it.
- * @param grant Item, quantity and inventory.
+ * drawing its seed here. A stage or encode failure still commits the grant, because another poll
+ * would fail the same way; the caller then resyncs the account.
+ * @param grant Item and quantity.
  * @param response Poll output the frame must fit; nothing is copied into it.
  * @param staged Receives the committed grant and its frame.
  * @param reason Receives a static label when nothing was committed.
@@ -62,7 +68,7 @@ struct StagedItemGrant {
                                               StagedItemGrant& staged,
                                               const char*& reason) noexcept;
 
-/** Copies a staged frame into the response and moves the peer onto its after-image. */
+/** Copies a staged frame into the response and moves the session to the frame's after-image. */
 void publish_staged_frame(const StagedFrame& frame,
                           Session& session,
                           Scratch& scratch,

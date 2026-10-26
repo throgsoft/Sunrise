@@ -292,7 +292,7 @@ bool valid_domains(const BuildIdentity& build, Domains domains) noexcept {
                                   domains.vendorInstalledRows,
                                   domains.vendorTransferRules))
         || !hash_names::valid(domains.hashNames)
-        // An empty objective table records an unsupported pursuit catalog, so nothing is with it.
+        // An empty objective table marks an unsupported catalog, with no bank and no contracts.
         || (domains.objectives.empty()
                 ? !(domains.objectiveInstructions.empty() && domains.pursuits.empty())
                 : !objectives::valid({domains.objectives, domains.objectiveInstructions}))

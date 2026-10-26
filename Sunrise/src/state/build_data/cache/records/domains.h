@@ -179,7 +179,7 @@ struct Domains {
     std::span<const rewards::Instruction> rewardInstructions;
     std::span<const rewards::Modifier> rewardModifiers;
     std::span<const rewards::SocketOverride> rewardSockets;
-    /** Empty records a build whose pursuit catalog is unsupported. */
+    /** An empty table records a build whose pursuit catalog is unsupported. */
     std::span<const objectives::Row> objectives;
     std::span<const unlocks::Instruction> objectiveInstructions;
     std::span<const pursuits::Definition> pursuits;

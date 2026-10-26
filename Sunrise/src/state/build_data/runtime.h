@@ -488,7 +488,7 @@ void settle_reward_definitions_unsupported() noexcept;
 
 /**
  * @return True once the installed data has settled that neither the objective table nor any
- *         contract can be read; a cache keeps that settlement as an empty objective table.
+ *         contract can be read. A cache records that settlement as an empty objective table.
  */
 [[nodiscard]] bool pursuit_catalog_unsupported() noexcept;
 
@@ -497,7 +497,7 @@ void settle_reward_definitions_unsupported() noexcept;
 
 /**
  * Checks contracts against the published item and objective tables, as
- * publish_pursuit_definitions does; false while either table is unpublished.
+ * publish_pursuit_definitions does. Returns false while either table is unpublished.
  */
 [[nodiscard]] bool valid_pursuit_definitions(std::span<const pursuits::Definition> rows) noexcept;
 
@@ -509,7 +509,9 @@ void settle_reward_definitions_unsupported() noexcept;
  */
 [[nodiscard]] bool publish_pursuit_definitions(std::span<const pursuits::Definition> rows) noexcept;
 
-/** Records that the installed data supports no pursuit catalog and withdraws the objective table.
+/**
+ * Records that the installed data supports no pursuit catalog, and withdraws the objective table
+ * that only pursuit contracts read.
  */
 void settle_pursuit_catalog_unsupported() noexcept;
 

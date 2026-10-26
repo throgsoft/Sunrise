@@ -178,7 +178,7 @@ bool build() noexcept {
                     continue;
                 }
             }
-            // A failure settles or retries on its own and never holds up the other domains.
+            // The objective table settles or retries on its own, so it never holds up the others.
             if (!pursuit_catalog_settled()) {
                 (void)build_objectives(source,
                                        storage.scratch,

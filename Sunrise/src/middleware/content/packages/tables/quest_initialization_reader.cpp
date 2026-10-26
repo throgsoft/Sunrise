@@ -2,6 +2,7 @@
 
 #include "definition_index_table.h"
 #include "internal.h"
+#include "items.h"
 
 namespace sunrise::middleware::content::packages::tables::items {
 namespace {
@@ -105,8 +106,7 @@ std::uint16_t quest_parent(std::span<const std::byte> definition) noexcept {
     std::uint16_t parent = kUnavailableQuestParent;
     Array objectives{};
     if (definition.size() < kMinimumQuestDefinitionSize
-        || !read(definition, kBucketIdOffset, bucket)
-        || bucket != state::build_data::items::kPursuitBucketId
+        || !read(definition, kBucketIdOffset, bucket) || bucket != kPursuitBucketId
         || !block(definition, kItemObjectiveBlockOffset, kItemObjectiveBlockClass, objective)
         || !array(definition,
                   objective,

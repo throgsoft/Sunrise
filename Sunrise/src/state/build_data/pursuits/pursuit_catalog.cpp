@@ -16,7 +16,7 @@ bool g_ready{};
 bool g_unsupported{};
 std::uint64_t g_revision{};
 
-/** An unbound native reference remains inspectable without pretending it is a saved value. */
+/** An unbound reference stays valid for inspection; a bound one must be a valid value load. */
 [[nodiscard]] bool valid_value(const ValueReference& value) noexcept {
     if (value.index == kAbsent) {
         return !value.bound;
@@ -25,7 +25,7 @@ std::uint64_t g_revision{};
            || (value.source.opcode == unlocks::Opcode::loadValue && unlocks::valid(value.source));
 }
 
-/** Only an authored absent index can carry the absent status. */
+/** Only an absent index carries the absent status, and every other status needs an index. */
 [[nodiscard]] bool valid_operation(const OperationReference& operation) noexcept {
     switch (operation.availability) {
     case OperationAvailability::absent:
